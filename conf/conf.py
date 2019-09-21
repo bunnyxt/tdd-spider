@@ -1,6 +1,8 @@
 import configparser
 import os
 
+__all__ = ['CONFIG_PATH', 'CONFIG', 'get_db_args', 'get_library_cookie']
+
 # use config parser to load config
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'conf.ini')
 CONFIG = configparser.ConfigParser()
@@ -13,7 +15,3 @@ def get_db_args():
 
 def get_library_cookie():
     return CONFIG.get('library', 'cookie')
-
-
-if __name__ == '__main__':
-    print(get_library_cookie())
