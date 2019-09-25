@@ -37,6 +37,9 @@ class BiliApi:
     def get_video_tags(self, aid):
         return self.url_request('GET', 'https://api.bilibili.com/x/tag/archive/tags?aid={0}'.format(aid))
 
+    def get_video_pagelist(self, aid):
+        return self.url_request('GET', 'https://api.bilibili.com/x/player/pagelist?aid={0}'.format(aid))
+
     def get_video_stat(self, aid):
         return self.url_request('GET', 'https://api.bilibili.com/x/web-interface/archive/stat?aid={0}'.format(aid))
 
