@@ -87,38 +87,6 @@ class TddVideoRecord(Base):
         return "<TddVideoRecord(aid=%d,view=%d)>" % (self.aid, self.view)
 
 
-class TddVideoLog(Base):
-    """tdd_video_log table"""
-
-    __tablename__ = 'tdd_video_log'
-
-    id = Column(Integer, primary_key=True, nullable=False, unique=True, autoincrement=True)
-    added = Column(Integer, nullable=False)
-    aid = Column(Integer, nullable=False)
-    attr = Column(String(30), nullable=False)
-    old = Column(LONGTEXT)
-    new = Column(LONGTEXT)
-
-    def __repr__(self):
-        return "<TddVideoLog(aid=%d,attr=%s)>" % (self.aid, self.attr)
-
-
-class TddMemberLog(Base):
-    """tdd_member_log table"""
-
-    __tablename__ = 'tdd_member_log'
-
-    id = Column(Integer, primary_key=True, nullable=False, unique=True, autoincrement=True)
-    added = Column(Integer, nullable=False)
-    mid = Column(Integer, nullable=False)
-    attr = Column(String(30), nullable=False)
-    old = Column(LONGTEXT)
-    new = Column(LONGTEXT)
-
-    def __repr__(self):
-        return "<TddMemberLog(mid=%d,attr=%s)>" % (self.mid, self.attr)
-
-
 class TddMemberFollowerRecord(Base):
     """tdd_member_follower_record table"""
 
