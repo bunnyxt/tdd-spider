@@ -29,6 +29,8 @@ class TddVideo(Base):
     solo = Column(TINYINT, nullable=False, default=-1)  #
     original = Column(TINYINT, nullable=False, default=-1)  #
     employed = Column(Integer, nullable=False, default=-1)  #
+    isvc = Column(TINYINT, nullable=False, default=-1)  #
+    engine = Column(TINYINT, nullable=False, default=-1)  #
     freq = Column(TINYINT, nullable=False, default=0)  #
 
     def __repr__(self):
@@ -75,7 +77,7 @@ class TddVideoRecord(Base):
     id = Column(Integer, primary_key=True, nullable=False, unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     aid = Column(Integer, nullable=False)
-    view = Column(Integer, nullable=False)
+    view = Column(Integer, nullable=False)  # maybe '--' from api, set -1 instead
     danmaku = Column(Integer, nullable=False)
     reply = Column(Integer, nullable=False)
     favorite = Column(Integer, nullable=False)
