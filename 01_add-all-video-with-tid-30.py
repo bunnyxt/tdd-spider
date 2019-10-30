@@ -22,16 +22,26 @@ def main():
     while page_num <= page_total:
         # get obj via awesome api
         obj = bapi.get_archive_rank_by_partion(30, page_num, 50)
+        is_valid = False
         while True:
             # ensure obj is valid
+            re_count = 1
             try:
                 for _ in obj['data']['archives']:
                     pass
+                is_valid = True
                 break
             except TypeError:
-                logger_01.warning('TypeError caught, re-call page_num = %d' % page_num)
+                logger_01.warning('TypeError caught, re-call page_num = %d, re_count = %d' % (page_num, re_count))
+                re_count += 1
+                if re_count == 5:
+                    logger_01.warning('Fail to get valid obj with page_num %d, continue to next page' % page_num)
+                    break
                 time.sleep(1)
                 obj = bapi.get_archive_rank_by_partion(30, page_num, 50)
+        if not is_valid:
+            page_num += 1
+            continue
 
         # process each video
         try:
@@ -53,16 +63,28 @@ def main():
 
                     # get pubdate ts
                     view_obj = bapi.get_video_view(aid)
+                    is_valid = False
                     while True:
                         # ensure view_obj is valid
+                        re_count = 1
                         try:
                             _ = view_obj['data']['pubdate']
                             _ = view_obj['code']
+                            is_valid = True
                             break
                         except Exception as e:
-                            logger_01.warning('Exception %s, re-call view api aid = %d' % (e, aid), exc_info=True)
+                            logger_01.warning(
+                                'Exception %s, re-call view api aid = %d, re_count = %d' % (e, aid, re_count),
+                                exc_info=True)
+                            re_count += 1
+                            if re_count == 5:
+                                logger_01.warning(
+                                    'Fail to get valid view with aid %d, continue to next aid' % aid)
+                                break
                             time.sleep(1)
                             view_obj = bapi.get_video_view(aid)
+                    if not is_valid:
+                        continue
                     pubdate = view_obj['data']['pubdate']
                     code = view_obj['code']
 
@@ -70,16 +92,26 @@ def main():
                     tags = ''
                     isvc = -1
                     tags_obj = bapi.get_video_tags(aid)
+                    is_valid = False
                     while True:
                         # ensure tags_obj is valid
                         try:
                             for _ in tags_obj['data']:
                                 pass
+                            is_valid = True
                             break
                         except Exception as e:
-                            logger_01.warning('Exception %s, re-call view api aid = %d' % (e, aid), exc_info=True)
+                            logger_01.warning(
+                                'Exception %s, re-call view api aid = %d, re_count = %d' % (e, aid, re_count),
+                                exc_info=True)
+                            re_count += 1
+                            if re_count == 5:
+                                logger_01.warning('Fail to get valid tags with aid %d, continue to next aid' % aid)
+                                break
                             time.sleep(1)
                             tags_obj = bapi.get_video_tags(aid)
+                    if not is_valid:
+                        continue
                     try:
                         tags_str = ''
                         for tag in tags_obj['data']:
@@ -120,6 +152,7 @@ def main():
                     time.sleep(0.2)  # since used view api and tag api, need sleep to avoid ip being banned
                 else:
                     logger_01.info('Aid %d has already added!' % aid)
+                    time.sleep(0.05)
         except Exception as e:
             logger_01.error('Exception caught. Detail: %s' % e)
 
