@@ -23,9 +23,9 @@ def main():
         # get obj via awesome api
         obj = bapi.get_archive_rank_by_partion(30, page_num, 50)
         is_valid = False
+        re_count = 1
         while True:
             # ensure obj is valid
-            re_count = 1
             try:
                 for _ in obj['data']['archives']:
                     pass
@@ -64,9 +64,9 @@ def main():
                     # get pubdate ts
                     view_obj = bapi.get_video_view(aid)
                     is_valid = False
+                    re_count = 1
                     while True:
                         # ensure view_obj is valid
-                        re_count = 1
                         try:
                             _ = view_obj['data']['pubdate']
                             _ = view_obj['code']
@@ -93,6 +93,7 @@ def main():
                     isvc = -1
                     tags_obj = bapi.get_video_tags(aid)
                     is_valid = False
+                    re_count = 1
                     while True:
                         # ensure tags_obj is valid
                         try:
