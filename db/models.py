@@ -24,7 +24,7 @@ class TddVideo(Base):
     tags = Column(String(500), default=None)
     mid = Column(Integer, default=None)
     code = Column(Integer, nullable=False, default=0)  # TODO how to enable nullable=False and have default value
-    hasstaff = Column(TINYINT, nullable=False, default=0)  #
+    hasstaff = Column(TINYINT, nullable=False, default=-1)  #
     singer = Column(String(200), nullable=False, default='未定义')  #
     solo = Column(TINYINT, nullable=False, default=-1)  #
     original = Column(TINYINT, nullable=False, default=-1)  #
