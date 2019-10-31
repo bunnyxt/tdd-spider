@@ -25,6 +25,26 @@ class DBOperation:
             return None
 
     @classmethod
+    def query_update_c30_aids(cls, freq, session):
+        try:
+            result = session.query(TddVideo.aid).filter(TddVideo.tid == 30, TddVideo.code == 0,
+                                                        TddVideo.freq == freq).all()
+            return list(r[0] for r in result)
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'freq': freq}), exc_info=True)
+            return None
+
+    @classmethod
+    def query_update_c0_aids(cls, freq, session):
+        try:
+            result = session.query(TddVideo.aid).filter(TddVideo.tid != 30, TddVideo.code == 0,
+                                                        TddVideo.freq == freq).all()
+            return list(r[0] for r in result)
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'freq': freq}), exc_info=True)
+            return None
+
+    @classmethod
     def add(cls, obj, session):
         try:
             session.add(obj)
