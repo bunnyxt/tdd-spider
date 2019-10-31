@@ -2,7 +2,7 @@ from .basic import Base
 from sqlalchemy import Column, Integer, String, Boolean
 from sqlalchemy.dialects.mysql import LONGTEXT, TINYINT
 
-__all__ = ['TddVideo', 'TddMember', 'TddVideoStaff']
+__all__ = ['TddVideo', 'TddMember', 'TddVideoStaff', 'TddVideoRecord', 'TddMemberFollowerRecord']
 
 
 class TddVideo(Base):
