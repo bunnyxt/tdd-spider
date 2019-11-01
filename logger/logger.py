@@ -2,7 +2,7 @@ import logging
 import logging.config
 import os
 
-__all__ = ['BASE_DIR', 'LOG_DIR', 'logger_01', 'logger_11', 'logger_db']
+__all__ = ['BASE_DIR', 'LOG_DIR', 'logger_01', 'logger_11', 'logger_11_c0', 'logger_11_c30', 'logger_db']
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 LOG_DIR = os.path.join(BASE_DIR, 'log')
@@ -93,6 +93,50 @@ LOG_CONFIG_DICT = {
             'backupCount': 30,
             'filters': ['warning_plus_filter']
         },
+        'file_info_11_c0': {
+            'level': 'INFO',
+            'formatter': 'simple',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, '11_info_c0.log'),
+            'when': "d",
+            'interval': 1,
+            'encoding': 'utf8',
+            'backupCount': 30,
+            'filters': ['info_plus_filter']
+        },
+        'file_warning_11_c0': {
+            'level': 'WARNING',
+            'formatter': 'simple',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, '11_warning_c0.log'),
+            'when': "d",
+            'interval': 1,
+            'encoding': 'utf8',
+            'backupCount': 30,
+            'filters': ['warning_plus_filter']
+        },
+        'file_info_11_c30': {
+            'level': 'INFO',
+            'formatter': 'simple',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, '11_info_c30.log'),
+            'when': "d",
+            'interval': 1,
+            'encoding': 'utf8',
+            'backupCount': 30,
+            'filters': ['info_plus_filter']
+        },
+        'file_warning_11_c30': {
+            'level': 'WARNING',
+            'formatter': 'simple',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, '11_warning_c30.log'),
+            'when': "d",
+            'interval': 1,
+            'encoding': 'utf8',
+            'backupCount': 30,
+            'filters': ['warning_plus_filter']
+        },
         'file_info_db': {
             'level': 'INFO',
             'formatter': 'simple',
@@ -125,6 +169,14 @@ LOG_CONFIG_DICT = {
             'handlers': ['console_info', 'file_info_11', 'file_warning_11'],
             'level': 'INFO'
         },
+        'logger_11_c0': {
+            'handlers': ['console_info', 'file_info_11_c0', 'file_warning_11_c0'],
+            'level': 'INFO'
+        },
+        'logger_11_c30': {
+            'handlers': ['console_info', 'file_info_11_c30', 'file_warning_11_c30'],
+            'level': 'INFO'
+        },
         'logger_db': {
             'handlers': ['console_info', 'file_info_db', 'file_warning_db'],
             'level': 'INFO'
@@ -136,4 +188,6 @@ logging.config.dictConfig(LOG_CONFIG_DICT)
 
 logger_01 = logging.getLogger('logger_01')
 logger_11 = logging.getLogger('logger_11')
+logger_11_c0 = logging.getLogger('logger_11_c0')
+logger_11_c30 = logging.getLogger('logger_11_c30')
 logger_db = logging.getLogger('logger_db')
