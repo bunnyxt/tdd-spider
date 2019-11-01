@@ -7,6 +7,45 @@ __all__ = ['DBOperation']
 class DBOperation:
 
     @classmethod
+    def add(cls, obj, session):
+        try:
+            session.add(obj)
+            session.commit()
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'obj': obj}), exc_info=True)
+            session.rollback()
+
+    @classmethod
+    def update_video_code(cls, aid, code, session):
+        try:
+            video = session.query(TddVideo).filter(TddVideo.aid == aid).first()
+            video.code = code
+            session.commit()
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'aid': aid, 'code': code}), exc_info=True)
+            return None
+
+    @classmethod
+    def update_video_tid(cls, aid, tid, session):
+        try:
+            video = session.query(TddVideo).filter(TddVideo.aid == aid).first()
+            video.tid = tid
+            session.commit()
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'aid': aid, 'tid': tid}), exc_info=True)
+            return None
+
+    @classmethod
+    def update_video_isvc(cls, aid, isvc, session):
+        try:
+            video = session.query(TddVideo).filter(TddVideo.aid == aid).first()
+            video.isvc = isvc
+            session.commit()
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'aid': aid, 'isvc': isvc}), exc_info=True)
+            return None
+
+    @classmethod
     def query(cls, table, session):
         try:
             result = session.query(table).all()
@@ -43,12 +82,3 @@ class DBOperation:
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'freq': freq}), exc_info=True)
             return None
-
-    @classmethod
-    def add(cls, obj, session):
-        try:
-            session.add(obj)
-            session.commit()
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' % (e, {'obj': obj}), exc_info=True)
-            session.rollback()
