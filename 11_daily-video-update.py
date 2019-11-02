@@ -162,18 +162,41 @@ def update_aids_c30(aids):
     for aid in aids:
         try:
             # get view
-            obj = bapi.get_video_view(aid)
-            code = obj['code']
+            view_obj = bapi.get_video_view(aid)
+            is_valid = False
+            re_count = 1
+            while True:
+                # ensure view obj is valid
+                try:
+                    _ = view_obj['code']
+                    _ = view_obj['data']['tid']
+                    is_valid = True
+                    break
+                except Exception as e:
+                    logger_11_c30.warning(
+                        'Exception %s, re-call view api aid = %d, re_count = %d' % (e, aid, re_count),
+                        exc_info=True)
+                    re_count += 1
+                    if re_count == 5:
+                        logger_11_c30.warning(
+                            'Fail to get valid view with aid %d, continue to next aid' % aid)
+                        break
+                    time.sleep(1)
+                    view_obj = bapi.get_video_view(aid)
+            if not is_valid:
+                continue
+
+            code = view_obj['code']
             if code == 0:
                 # check tid
-                tid = obj['data']['tid']
+                tid = view_obj['data']['tid']
                 if tid != 30:
                     DBOperation.update_video_tid(aid, tid, session)
                     DBOperation.update_video_isvc(aid, 5, session)
                     logger_11_c30.warning('Update video aid = %d tid from 30 to %d and set isvc = %d' % (aid, tid, 5))
                 else:
                     logger_11_c30.warning(
-                        'Found aid = %d not been updated but code == 0 and tid == 30! Need further check!')
+                        'Found aid = %d not been updated but code == 0 and tid == 30! Need further check!' % aid)
             else:
                 # change code
                 DBOperation.update_video_code(aid, code, session)
