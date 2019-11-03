@@ -31,6 +31,9 @@ class BiliApi:
             print('Error! Method %s not support.' % method)
             return None
 
+    def set_headers(self, headers):
+        self.http.headers = headers
+
     def get_video_view(self, aid):
         return self.url_request('GET', 'http://api.bilibili.com/x/web-interface/view?aid={0}'.format(aid))
 
@@ -50,4 +53,6 @@ class BiliApi:
         return self.url_request('GET', 'http://api.bilibili.com/x/relation/stat?vmid={0}'.format(mid))
 
     def get_archive_rank_by_partion(self, tid, pn, ps):
-        return self.url_request('GET', 'http://api.bilibili.com/archive_rank/getarchiverankbypartion?jsonp=jsonp&tid={0}&pn={1}&ps={2}'.format(tid, pn, ps))
+        return self.url_request('GET',
+                                'http://api.bilibili.com/archive_rank/getarchiverankbypartion?jsonp=jsonp&tid={0}&pn={1}&ps={2}'.format(
+                                    tid, pn, ps))
