@@ -13,7 +13,7 @@ class BiliApi:
     def __init__(self):
         self.http = urllib3.PoolManager()
 
-    def url_request(self, method, url):
+    def _url_request(self, method, url):
         if method in ['GET']:
             response = self.http.request(method, url)
             if response.status == 200:
@@ -35,24 +35,22 @@ class BiliApi:
         self.http.headers = headers
 
     def get_video_view(self, aid):
-        return self.url_request('GET', 'http://api.bilibili.com/x/web-interface/view?aid={0}'.format(aid))
+        return self._url_request('GET', 'http://api.bilibili.com/x/web-interface/view?aid={0}'.format(aid))
 
     def get_video_tags(self, aid):
-        return self.url_request('GET', 'http://api.bilibili.com/x/tag/archive/tags?aid={0}'.format(aid))
+        return self._url_request('GET', 'http://api.bilibili.com/x/tag/archive/tags?aid={0}'.format(aid))
 
     def get_video_pagelist(self, aid):
-        return self.url_request('GET', 'http://api.bilibili.com/x/player/pagelist?aid={0}'.format(aid))
+        return self._url_request('GET', 'http://api.bilibili.com/x/player/pagelist?aid={0}'.format(aid))
 
     def get_video_stat(self, aid):
-        return self.url_request('GET', 'http://api.bilibili.com/x/web-interface/archive/stat?aid={0}'.format(aid))
+        return self._url_request('GET', 'http://api.bilibili.com/x/web-interface/archive/stat?aid={0}'.format(aid))
 
     def get_member(self, mid):
-        return self.url_request('GET', 'http://api.bilibili.com/x/space/acc/info?mid={0}'.format(mid))
+        return self._url_request('GET', 'http://api.bilibili.com/x/space/acc/info?mid={0}'.format(mid))
 
     def get_member_relation(self, mid):
-        return self.url_request('GET', 'http://api.bilibili.com/x/relation/stat?vmid={0}'.format(mid))
+        return self._url_request('GET', 'http://api.bilibili.com/x/relation/stat?vmid={0}'.format(mid))
 
     def get_archive_rank_by_partion(self, tid, pn, ps):
-        return self.url_request('GET',
-                                'http://api.bilibili.com/archive_rank/getarchiverankbypartion?jsonp=jsonp&tid={0}&pn={1}&ps={2}'.format(
-                                    tid, pn, ps))
+        return self._url_request('GET', 'http://api.bilibili.com/archive_rank/getarchiverankbypartion?jsonp=jsonp&tid={0}&pn={1}&ps={2}'.format(tid, pn, ps))
