@@ -84,6 +84,15 @@ class DBOperation:
             return None
 
     @classmethod
+    def query_last_x_video(cls, x, session):
+        try:
+            result = session.query(TddVideo).filter(TddVideo.tid == 30).order_by(TddVideo.pubdate.desc()).limit(x).all()
+            return result
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'x': x}), exc_info=True)
+            return None
+
+    @classmethod
     def query_member_via_mid(cls, mid, session):
         try:
             result = session.query(TddMember).filter(TddMember.mid == mid).first()
