@@ -1,6 +1,6 @@
 from pybiliapi import BiliApi
 from logger import logger_01
-from db import Session, DBOperation, TddVideo
+from db import Session, DBOperation, TddVideo, TddMember, TddVideoStaff
 from util import get_ts_s
 import math
 import time
@@ -48,7 +48,7 @@ def main():
             for arch in obj['data']['archives']:
                 aid = arch['aid']
                 # check aid added or not
-                video = DBOperation.query_tdd_video_via_aid(aid, session)
+                video = DBOperation.query_video_via_aid(aid, session)
                 if video is None:
                     # get other param
                     added = get_ts_s()
@@ -127,8 +127,131 @@ def main():
                         logger_01.warning(
                             'Exception %s, fail to get tags of aid %d, got tags obj %s.' % (e, aid, tags_obj))
 
-                    # do not add staff now, even with isvc = 2
-                    hasstaff = -1
+                    # add member and staff if isvc = 2
+                    if isvc == 2:
+                        # add member
+                        member = DBOperation.query_member_via_mid(mid, session)
+                        if member is None:
+                            member_obj = bapi.get_member(mid)
+                            is_valid = False
+                            re_count = 1
+                            while True:
+                                # ensure member_obj is valid
+                                try:
+                                    _ = member_obj['data']
+                                    is_valid = True
+                                    break
+                                except Exception as e:
+                                    logger_01.warning(
+                                        'Exception %s, re-call view api mid = %d, re_count = %d' % (e, mid, re_count),
+                                        exc_info=True)
+                                    re_count += 1
+                                    if re_count == 5:
+                                        logger_01.warning(
+                                            'Fail to get valid member obj with mid %d!' % mid)
+                                        break
+                                    time.sleep(1)
+                                    member_obj = bapi.get_member(mid)
+                            if is_valid:
+                                if member_obj['code'] == 0:
+                                    member_data = member_obj['data']
+                                    member_added = get_ts_s()
+                                    member_mid = member_data['mid']
+                                    member_sex = member_data['sex']
+                                    member_name = member_data['name']
+                                    member_face = member_data['face']
+                                    member_sign = member_data['sign']
+
+                                    new_member = TddMember()
+                                    new_member.added = member_added
+                                    new_member.mid = member_mid
+                                    new_member.sex = member_sex
+                                    new_member.name = member_name
+                                    new_member.face = member_face
+                                    new_member.sign = member_sign
+
+                                    DBOperation.add(new_member, session)
+                                    logger_01.info('Add new member %s.' % new_member)
+                                else:
+                                    logger_01.warning('Member mid = %d has code %d, do not add to db.' % (mid, member_obj['code']))
+                            else:
+                                pass
+                        else:
+                            logger_01.info('UP mid %d already exist!' % mid)
+                        time.sleep(0.2)
+
+                        # add staff
+                        if 'staff' in view_obj['data'].keys():
+                            hasstaff = 1
+                            for staff in view_obj['data']['staff']:
+                                staff_mid = staff['mid']
+                                staff_title = staff['title']
+
+                                new_staff = TddVideoStaff()
+                                new_staff.added = added
+                                new_staff.aid = aid
+                                new_staff.mid = staff_mid
+                                new_staff.title = staff_title
+
+                                DBOperation.add(new_staff, session)
+                                logger_01.info('Add new video staff %s.' % new_staff)
+
+                                # add staff member
+                                member = DBOperation.query_member_via_mid(staff_mid, session)
+                                if member is None:
+                                    member_obj = bapi.get_member(staff_mid)
+                                    is_valid = False
+                                    re_count = 1
+                                    while True:
+                                        # ensure member_obj is valid
+                                        try:
+                                            _ = member_obj['data']
+                                            is_valid = True
+                                            break
+                                        except Exception as e:
+                                            logger_01.warning(
+                                                'Exception %s, re-call view api mid = %d, re_count = %d' % (
+                                                 e, staff_mid, re_count),
+                                                exc_info=True)
+                                            re_count += 1
+                                            if re_count == 5:
+                                                logger_01.warning(
+                                                    'Fail to get valid member obj with mid %d!' % staff_mid)
+                                                break
+                                            time.sleep(1)
+                                            member_obj = bapi.get_member(staff_mid)
+                                    if is_valid:
+                                        if member_obj['code'] == 0:
+                                            member_data = member_obj['data']
+                                            member_added = get_ts_s()
+                                            member_mid = member_data['mid']
+                                            member_sex = member_data['sex']
+                                            member_name = member_data['name']
+                                            member_face = member_data['face']
+                                            member_sign = member_data['sign']
+
+                                            new_member = TddMember()
+                                            new_member.added = member_added
+                                            new_member.mid = member_mid
+                                            new_member.sex = member_sex
+                                            new_member.name = member_name
+                                            new_member.face = member_face
+                                            new_member.sign = member_sign
+
+                                            DBOperation.add(new_member, session)
+                                            logger_01.info('Add new member %s.' % new_member)
+                                        else:
+                                            logger_01.warning('Member mid = %d has code %d, do not add to db.' % (
+                                                staff_mid, member_obj['code']))
+                                    else:
+                                        pass
+                                else:
+                                    logger_01.info('Staff mid %d already exist!' % mid)
+                                time.sleep(0.2)
+                        else:
+                            hasstaff = 0
+                    else:
+                        hasstaff = -1
 
                     new_video = TddVideo()
                     new_video.added = added
