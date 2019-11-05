@@ -1,5 +1,5 @@
 from logger import logger_db
-from .models import TddVideo
+from .models import TddVideo, TddMember
 
 __all__ = ['DBOperation']
 
@@ -55,7 +55,7 @@ class DBOperation:
             return None
 
     @classmethod
-    def query_tdd_video_via_aid(cls, aid, session):
+    def query_video_via_aid(cls, aid, session):
         try:
             result = session.query(TddVideo).filter(TddVideo.aid == aid).first()
             return result
@@ -81,4 +81,13 @@ class DBOperation:
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'freq': freq}), exc_info=True)
+            return None
+
+    @classmethod
+    def query_member_via_mid(cls, mid, session):
+        try:
+            result = session.query(TddMember).filter(TddMember.mid == mid).first()
+            return result
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'mid': mid}), exc_info=True)
             return None
