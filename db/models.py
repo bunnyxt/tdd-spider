@@ -65,6 +65,8 @@ class TddVideoStaff(Base):
     mid = Column(Integer, nullable=False)
     title = Column(String(30), nullable=False)
 
+    # UNIQUE KEY `aid_mid_UNIQUE` (`aid`,`mid`)
+
     def __repr__(self):
         return "<TddVideoStaff(aid=%d,mid=%d)>" % (self.aid, self.mid)
 
@@ -85,6 +87,8 @@ class TddVideoRecord(Base):
     share = Column(Integer, nullable=False)
     like = Column(Integer, nullable=False)
 
+    # UNIQUE KEY `added_aid_UNIQUE` (`added`,`aid`)
+
     def __repr__(self):
         return "<TddVideoRecord(aid=%d,view=%d)>" % (self.aid, self.view)
 
@@ -98,6 +102,8 @@ class TddMemberFollowerRecord(Base):
     added = Column(Integer, nullable=False)
     mid = Column(Integer, nullable=False)
     follower = Column(Integer, nullable=False)
+
+    # UNIQUE KEY `added_mid_UNIQUE` (`added`,`mid`)
 
     def __repr__(self):
         return '<TddMemberFollowerRecord(mid=%d,follower=%d)>' % (self.mid, self.follower)
