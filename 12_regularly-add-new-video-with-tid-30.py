@@ -309,6 +309,7 @@ def regularly_add_new_video():
         page_total = math.ceil(obj['data']['page']['count'] / 50)
         page_num += 1
 
+    session.close()
     logger_12.info('%d new video(s) added.' % added_aid_count)
     logger_12.info('Finish add new video with tid 30!')
 
