@@ -14,6 +14,7 @@ def update_aids_c0(aids):
     bapi = BiliApi()
     session = Session()
 
+    fail_aids = []
     for aid in aids:
         obj = bapi.get_video_stat(aid)
         is_valid = False
@@ -25,20 +26,21 @@ def update_aids_c0(aids):
                 is_valid = True
                 break
             except Exception as e:
-                logger_11_c0.warning('Exception %s, re-call aid = %d, re_count  = %d' % (e, aid, re_count))
+                # logger_11_c0.warning('Exception %s, re-call aid = %d, re_count  = %d' % (e, aid, re_count))
                 re_count += 1
                 if re_count == 5:
-                    logger_11_c0.warning('Fail to get valid stat obj with aid %d, continue to next aid' % aid)
+                    # logger_11_c0.warning('Fail to get valid stat obj with aid %d, continue to next aid' % aid)
                     break
                 time.sleep(1)
                 obj = bapi.get_video_stat(aid)
         if not is_valid:
+            logger_11_c0.warning('Aid %d fail! Cannot get valid view_obj.' % aid)
+            fail_aids.append(aid)
             continue
 
         added = get_ts_s()
 
         # check code
-        # TODO
         code = obj['code']
         if code == 0:
             # add record
@@ -72,9 +74,10 @@ def update_aids_c0(aids):
             logger_11_c0.warning('Update video aid = %d code from 0 to %d.' % (aid, code))
             pass
 
+    session.close()
+    logger_11_c0.warning('Fail aids: %s' % fail_aids)
     logger_11.info('Finish updating c0 aids!')
     logger_11_c0.info('Finish updating c0 aids!')
-    session.close()
 
 
 def update_aids_c30(aids):
@@ -102,14 +105,15 @@ def update_aids_c30(aids):
                 is_valid = True
                 break
             except TypeError:
-                logger_11_c30.warning('TypeError caught, re-call page_num = %d, re_count = %d' % (page_num, re_count))
+                # logger_11_c30.warning('TypeError caught, re-call page_num = %d, re_count = %d' % (page_num, re_count))
                 re_count += 1
                 if re_count == 5:
-                    logger_11_c30.warning('Fail to get valid obj with page_num %d, continue to next page' % page_num)
+                    # logger_11_c30.warning('Fail to get valid obj with page_num %d, continue to next page' % page_num)
                     break
                 time.sleep(1)
                 obj = bapi.get_archive_rank_by_partion(30, page_num, 50)
         if not is_valid:
+            logger_11_c30.warning('Page num %d fail! Cannot get valid obj.' % page_num)
             page_num += 1
             continue
 
@@ -146,7 +150,7 @@ def update_aids_c30(aids):
                     aids.remove(aid)
                 else:
                     # record, video not added, or just updated
-                    logger_11_c30.warning('Aid %d not in update aids.' % aid)
+                    # logger_11_c30.warning('Aid %d not in update aids.' % aid)
                     not_added_aids.append(aid)
         except Exception as e:
             logger_11_c30.error('Exception caught. Detail: %s' % e)
@@ -169,34 +173,34 @@ def update_aids_c30(aids):
                 # ensure view obj is valid
                 try:
                     _ = view_obj['code']
-                    _ = view_obj['data']['tid']
                     is_valid = True
                     break
                 except Exception as e:
-                    logger_11_c30.warning(
-                        'Exception %s, re-call view api aid = %d, re_count = %d' % (e, aid, re_count),
-                        exc_info=True)
+                    # logger_11_c30.warning('Exception %s, re-call view api aid = %d, re_count = %d' % (e, aid, re_count))
                     re_count += 1
                     if re_count == 5:
-                        logger_11_c30.warning(
-                            'Fail to get valid view with aid %d, continue to next aid' % aid)
+                        # logger_11_c30.warning('Fail to get valid view with aid %d, continue to next aid' % aid)
                         break
                     time.sleep(1)
                     view_obj = bapi.get_video_view(aid)
             if not is_valid:
+                logger_11_c30.warning('Aid %d fail! Cannot get valid view_obj.' % aid)
                 continue
 
             code = view_obj['code']
             if code == 0:
                 # check tid
-                tid = view_obj['data']['tid']
-                if tid != 30:
-                    DBOperation.update_video_tid(aid, tid, session)
-                    DBOperation.update_video_isvc(aid, 5, session)
-                    logger_11_c30.warning('Update video aid = %d tid from 30 to %d and set isvc = %d' % (aid, tid, 5))
+                if 'tid' in view_obj['data'].keys():
+                    tid = view_obj['data']['tid']
+                    if tid != 30:
+                        DBOperation.update_video_tid(aid, tid, session)
+                        DBOperation.update_video_isvc(aid, 5, session)
+                        logger_11_c30.warning('Update video aid = %d tid from 30 to %d and set isvc = %d' % (aid, tid, 5))
+                    else:
+                        logger_11_c30.warning(
+                            'Found aid = %d not been updated but code == 0 and tid == 30! Need further check!' % aid)
                 else:
-                    logger_11_c30.warning(
-                        'Found aid = %d not been updated but code == 0 and tid == 30! Need further check!' % aid)
+                    logger_11_c30.error('View obj %s got code == 0 but no tid field! Need further check!' % view_obj)
             else:
                 # change code
                 DBOperation.update_video_code(aid, code, session)
@@ -241,8 +245,8 @@ def daily_video_update_task():
 
 def main():
     logger_11.info('Daily video update registered.')
-    # schedule.every().day.at("04:00").do(daily_video_update_task)
     daily_video_update_task()
+    schedule.every().day.at("04:00").do(daily_video_update_task)
 
     while True:
         schedule.run_pending()
