@@ -3,7 +3,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from conf import get_db_args
 
-__all__ = ['engine', 'Base', 'Session', 'create_all', 'drop_all']
+__all__ = ['engine', 'Base', 'Session', 'create_all', 'drop_all', 'update_engine']
 
 
 def get_engine():
@@ -12,6 +12,13 @@ def get_engine():
         db_args['user'], db_args['password'], db_args['host'], db_args['port'], db_args['dbname'])  # mysql
     eng = create_engine(conn_str, encoding='utf-8')
     return eng
+
+
+def update_engine():
+    global engine, Base, Session
+    engine = get_engine()
+    Base = declarative_base()
+    Session = sessionmaker(bind=engine)
 
 
 def create_all():

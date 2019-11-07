@@ -4,7 +4,7 @@ import time
 from logger import logger_11, logger_11_c0, logger_11_c30
 from pybiliapi import BiliApi
 import math
-from db import Session, DBOperation, TddVideoRecord
+from db import update_engine, Session, DBOperation, TddVideoRecord
 from util import get_ts_s
 
 
@@ -221,6 +221,9 @@ def update_aids_c30(aids):
 
 def daily_video_update():
     logger_11.info('Now start daily video update...')
+
+    # update engine
+    update_engine()
 
     # get videos aids
     session = Session()
