@@ -67,12 +67,10 @@ def update_aids_c0(aids):
 
             DBOperation.add(record, session)
             logger_11_c0.info('Add record %s.' % record)
-            pass
         else:
             # change code
             DBOperation.update_video_code(aid, code, session)
             logger_11_c0.warning('Update video aid = %d code from 0 to %d.' % (aid, code))
-            pass
 
     session.close()
     logger_11_c0.warning('Fail aids: %s' % fail_aids)
@@ -90,6 +88,8 @@ def update_aids_c30(aids):
     page_total = math.ceil(obj['data']['page']['count'] / 50)
 
     not_added_aids = []
+    last_page_aids = []
+    this_page_aids = []
 
     page_num = 1
     while page_num <= page_total:
@@ -123,6 +123,10 @@ def update_aids_c30(aids):
         try:
             for arch in obj['data']['archives']:
                 aid = arch['aid']
+                if aid in last_page_aids:
+                    logger_11_c30.warning('Aid %d already added in last page (page_num = %d).' % (aid, page_num - 1))
+                    continue
+
                 if aid in aids:
                     stat = arch['stat']
 
@@ -147,6 +151,7 @@ def update_aids_c30(aids):
 
                     DBOperation.add(record, session)
                     logger_11_c30.info('Add record %s.' % record)
+                    this_page_aids.append(aid)
                     aids.remove(aid)
                 else:
                     # record, video not added, or just updated
@@ -154,6 +159,10 @@ def update_aids_c30(aids):
                     not_added_aids.append(aid)
         except Exception as e:
             logger_11_c30.error('Exception caught. Detail: %s' % e)
+
+        # reset aids records
+        last_page_aids = this_page_aids
+        this_page_aids = []
 
         # update page num
         logger_11_c30.info('Page %d / %d done.' % (page_num, page_total))
@@ -198,7 +207,31 @@ def update_aids_c30(aids):
                         logger_11_c30.warning('Update video aid = %d tid from 30 to %d and set isvc = %d' % (aid, tid, 5))
                     else:
                         logger_11_c30.warning(
-                            'Found aid = %d not been updated but code == 0 and tid == 30! Need further check!' % aid)
+                            'Found aid = %d not been updated but code == 0 and tid == 30! Now try add...' % aid)
+                        # add record
+                        stat = view_obj['data']
+
+                        view = -1 if stat['view'] == '--' else stat['view']
+                        danmaku = stat['danmaku']
+                        reply = stat['reply']
+                        favorite = stat['favorite']
+                        coin = stat['coin']
+                        share = stat['share']
+                        like = stat['like']
+
+                        record = TddVideoRecord()
+                        record.aid = aid
+                        record.added = added
+                        record.view = view
+                        record.danmaku = danmaku
+                        record.reply = reply
+                        record.favorite = favorite
+                        record.coin = coin
+                        record.share = share
+                        record.like = like
+
+                        DBOperation.add(record, session)
+                        logger_11_c30.info('Add record %s.' % record)
                 else:
                     logger_11_c30.error('View obj %s got code == 0 but no tid field! Need further check!' % view_obj)
             else:
@@ -208,12 +241,42 @@ def update_aids_c30(aids):
         except Exception as e:
             logger_11_c30.error('Exception caught. Detail: %s' % e)
 
-    # check recorded aids, maybe some video not added
+    # TODO check not added aids, maybe some video not added
     logger_11_c30.warning('%d aid left in c30 not added aids, now check them' % len(not_added_aids))
     logger_11_c30.warning(not_added_aids)
-    for aid in not_added_aids:
-        # TODO check them
-        pass
+    # for aid in not_added_aids:
+    #     # get view obj
+    #     try:
+    #         # get view
+    #         view_obj = bapi.get_video_view(aid)
+    #         is_valid = False
+    #         re_count = 1
+    #         while True:
+    #             # ensure view obj is valid
+    #             try:
+    #                 _ = view_obj['code']
+    #                 is_valid = True
+    #                 break
+    #             except Exception as e:
+    #                 # logger_11_c30.warning('Exception %s, re-call view api aid = %d, re_count = %d' % (e, aid, re_count))
+    #                 re_count += 1
+    #                 if re_count == 5:
+    #                     # logger_11_c30.warning('Fail to get valid view with aid %d, continue to next aid' % aid)
+    #                     break
+    #                 time.sleep(1)
+    #                 view_obj = bapi.get_video_view(aid)
+    #         if not is_valid:
+    #             logger_11_c30.warning('Aid %d fail! Cannot get valid view_obj.' % aid)
+    #             continue
+    #
+    #         video = DBOperation.query_video_via_aid(aid, session)
+    #         if video is None:
+    #             # add video
+    #             pass
+    #
+    #         # add record
+    #     except Exception as e:
+    #         logger_11_c30.error('Exception caught. Detail: %s' % e)
 
     logger_11.info('Finish updating c30 aids!')
     session.close()
