@@ -195,6 +195,7 @@ def update_aids_c30(aids):
             if not is_valid:
                 logger_11_c30.warning('Aid %d fail! Cannot get valid view_obj.' % aid)
                 continue
+            view_obj_added = get_ts_s()
 
             code = view_obj['code']
             if code == 0:
@@ -221,7 +222,7 @@ def update_aids_c30(aids):
 
                         record = TddVideoRecord()
                         record.aid = aid
-                        record.added = added
+                        record.added = view_obj_added
                         record.view = view
                         record.danmaku = danmaku
                         record.reply = reply
