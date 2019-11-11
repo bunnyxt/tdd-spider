@@ -12,16 +12,15 @@ def get_valid(get_obj_func, get_obj_func_args, test_obj_func, repeat_count=5, co
             err = test_obj_func(obj)
             if err is None:
                 result = obj
-                break
+                return result
             else:
                 # print(err, request_count)
-                pass
+                time.sleep(colddown)
         except Exception as e:
             # print(e, request_count)
-            pass
+            time.sleep(colddown)
         finally:
             request_count += 1
-            time.sleep(colddown)
     return result
 
 
@@ -31,10 +30,15 @@ def test_video_view(obj):
         if type(obj) is not dict:
             return 'Obj should be a dictionary.'
 
-        # contains key code, message, ttl, data
-        for key in ['code', 'message', 'ttl', 'data']:
+        # contains key code, message, ttl
+        for key in ['code', 'message', 'ttl']:
             if key not in obj.keys():
                 return 'Obj should contain key %s.' % key
+
+        # contains key data if code == 0
+        if obj['code'] == 0:
+            if 'data' not in obj.keys():
+                return 'Obj should contain key data when obj[\'code\'] == 0.'
 
         return None
     except Exception as e:
@@ -47,10 +51,15 @@ def test_video_stat(obj):
         if type(obj) is not dict:
             return 'Obj should be a dictionary.'
 
-        # contains key code, message, ttl, data
-        for key in ['code', 'message', 'ttl', 'data']:
+        # contains key code, message, ttl
+        for key in ['code', 'message', 'ttl']:
             if key not in obj.keys():
                 return 'Obj should contain key %s.' % key
+
+        # contains key data if code == 0
+        if obj['code'] == 0:
+            if 'data' not in obj.keys():
+                return 'Obj should contain key data when obj[\'code\'] == 0.'
 
         return None
     except Exception as e:
