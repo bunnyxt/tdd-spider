@@ -24,6 +24,7 @@ def update_aids_c0(aids):
     main_loop_add_count = 0  # aids added count
 
     for aid in aids:
+        # get obj via stat api
         obj = get_valid(bapi.get_video_stat, (aid,), test_video_stat)
         if obj is None:
             logger_11_c0.warning('Aid %d fail! Cannot get valid stat obj.' % aid)
@@ -60,6 +61,7 @@ def update_aids_c0(aids):
             logger_11_c0.warning('Update video aid = %d code from 0 to %d.' % (aid, code))
 
         main_loop_add_count += 1  # add main loop add count
+        time.sleep(0.2)  # api duration banned
 
     # fail aids, need further check
     logger_11_c0.warning('Fail aids: %s' % fail_aids)
@@ -82,14 +84,14 @@ def update_aids_c0(aids):
     logger_11_c0.info('Finish updating c0 aids!')
 
     logger_11.warning(summary)
-    logger_11_c30.warning(summary)
+    logger_11_c0.warning(summary)
 
     # send sc
     sc_result = sc_send('Finish updating c0 aids!', summary)
     if sc_result['errno'] == 0:
-        logger_11_c30.info('Sc summary sent successfully.')
+        logger_11_c0.info('Sc summary sent successfully.')
     else:
-        logger_11_c30.warning('Sc summary sent wrong. sc_result = %s.' % sc_result)
+        logger_11_c0.warning('Sc summary sent wrong. sc_result = %s.' % sc_result)
 
     session.close()
 
@@ -222,7 +224,7 @@ def update_aids_c30(aids):
                             'Found aid = %d code == 0 and tid == 30! Now try add video record...' % aid)
 
                         # get stat first
-                        stat = view_obj['data']
+                        stat = view_obj['data']['stat']
 
                         # make new tdd video record obj and assign stat info from api
                         new_video_record = TddVideoRecord()
@@ -283,7 +285,7 @@ def update_aids_c30(aids):
                     'Aid %d not added in db, TODO add video, including members, staff, category test' % aid)
 
             # add video record, get stat first
-            stat = view_obj['data']
+            stat = view_obj['data']['stat']
 
             # make new tdd video record obj and assign stat info from api
             new_video_record = TddVideoRecord()
