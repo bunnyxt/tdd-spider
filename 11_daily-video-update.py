@@ -266,6 +266,7 @@ def update_aids_c30(aids):
     not_added_aids_solve_count = 0  # aids solved count
 
     for aid in not_added_aids:
+        # TODO change logic here, need to use stat api, some video doesn't have quanxian to add
         # get view obj
         view_obj = get_valid(bapi.get_video_view, (aid,), test_video_view)
         if view_obj is None:
@@ -349,7 +350,7 @@ def daily_video_update():
     logger_11.info('Now start daily video update...')
 
     # update engine
-    update_engine()
+    # update_engine()  # since update per 6 hours, no need to update engine
 
     # get videos aids
     session = Session()
@@ -376,6 +377,9 @@ def main():
     logger_11.info('Daily video update registered.')
     daily_video_update_task()
     schedule.every().day.at("04:00").do(daily_video_update_task)
+    schedule.every().day.at("10:00").do(daily_video_update_task)
+    schedule.every().day.at("16:00").do(daily_video_update_task)
+    schedule.every().day.at("22:00").do(daily_video_update_task)
 
     while True:
         schedule.run_pending()
