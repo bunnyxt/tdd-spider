@@ -1,6 +1,6 @@
-from .validation import get_valid, test_video_view
+from .validation import get_valid, test_video_view, test_member
 from util import get_ts_s
-from db import TddVideo, DBOperation
+from db import TddVideo, TddMember, DBOperation
 
 __all__ = ['add_video']
 
@@ -82,8 +82,39 @@ def add_video(aid, bapi, session, test_exist=True, params=None,
 
 
 def add_member(mid, bapi, session, test_exist=True):
-    # TODO
-    pass
+    # test exist
+    if test_exist:
+        member = DBOperation.query_member_via_mid(mid, session)
+        if member is not None:
+            # member already exist
+            return 1  # TODO replace error code with exception
+
+    # get member_obj
+    member_obj = get_valid(bapi.get_member, (mid,), test_member)
+    if member_obj is None:
+        # fail to get valid member_obj
+        return 2
+
+    new_member = TddMember()
+
+    # set basic attr
+    new_member.mid = mid
+    new_member.added = get_ts_s()
+
+    # set attr from member_obj
+    if member_obj['code'] == 0:
+        new_member.sex = member_obj['data']['sex']
+        new_member.name = member_obj['data']['name']
+        new_member.face = member_obj['data']['face']
+        new_member.sign = member_obj['data']['sign']
+    else:
+        # member_obj code != 0
+        return 3
+
+    # add to db
+    DBOperation.add(new_member, session)
+
+    return 0
 
 
 def add_staff(added, aid, mid, title, session):
