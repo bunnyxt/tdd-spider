@@ -1,6 +1,7 @@
 import time
 
-__all__ = ['get_valid', 'test_video_view', 'test_video_stat', 'test_member', 'test_archive_rank_by_partion']
+__all__ = ['get_valid', 'test_video_view', 'test_video_stat', 'test_video_tags', 'test_member',
+           'test_archive_rank_by_partion']
 
 
 def get_valid(get_obj_func, get_obj_func_args, test_obj_func, repeat_count=5, colddown=1):
@@ -24,7 +25,7 @@ def get_valid(get_obj_func, get_obj_func_args, test_obj_func, repeat_count=5, co
     return result
 
 
-def test_video_view(obj):
+def basic_test(obj):
     try:
         # obj should be a dictionary
         if type(obj) is not dict:
@@ -39,6 +40,28 @@ def test_video_view(obj):
         if obj['code'] == 0:
             if 'data' not in obj.keys():
                 return 'Obj should contain key data when obj[\'code\'] == 0.'
+
+        return None
+    except Exception as e:
+        return str(e)
+
+
+def test_video_view(obj):
+    try:
+        basic_test_result = basic_test(obj)
+        if basic_test_result is not None:
+            return basic_test_result
+
+        return None
+    except Exception as e:
+        return str(e)
+
+
+def test_video_tags(obj):
+    try:
+        basic_test_result = basic_test(obj)
+        if basic_test_result is not None:
+            return basic_test_result
 
         return None
     except Exception as e:
@@ -47,19 +70,9 @@ def test_video_view(obj):
 
 def test_video_stat(obj):
     try:
-        # obj should be a dictionary
-        if type(obj) is not dict:
-            return 'Obj should be a dictionary.'
-
-        # contains key code, message, ttl
-        for key in ['code', 'message', 'ttl']:
-            if key not in obj.keys():
-                return 'Obj should contain key %s.' % key
-
-        # contains key data if code == 0
-        if obj['code'] == 0:
-            if 'data' not in obj.keys():
-                return 'Obj should contain key data when obj[\'code\'] == 0.'
+        basic_test_result = basic_test(obj)
+        if basic_test_result is not None:
+            return basic_test_result
 
         return None
     except Exception as e:
@@ -68,19 +81,9 @@ def test_video_stat(obj):
 
 def test_member(obj):
     try:
-        # obj should be a dictionary
-        if type(obj) is not dict:
-            return 'Obj should be a dictionary.'
-
-        # contains key code, message, ttl
-        for key in ['code', 'message', 'ttl']:
-            if key not in obj.keys():
-                return 'Obj should contain key %s.' % key
-
-        # contains key data if code == 0
-        if obj['code'] == 0:
-            if 'data' not in obj.keys():
-                return 'Obj should contain key data when obj[\'code\'] == 0.'
+        basic_test_result = basic_test(obj)
+        if basic_test_result is not None:
+            return basic_test_result
 
         return None
     except Exception as e:
