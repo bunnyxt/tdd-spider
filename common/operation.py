@@ -1,6 +1,6 @@
-from .validation import get_valid, test_video_view, test_member
+from .validation import get_valid, test_video_view, test_video_tags, test_member
 from util import get_ts_s
-from db import TddVideo, TddMember, DBOperation
+from db import TddVideo, TddVideoStaff, TddMember, DBOperation
 
 __all__ = ['add_video']
 
@@ -118,10 +118,35 @@ def add_member(mid, bapi, session, test_exist=True):
 
 
 def add_staff(added, aid, mid, title, session):
-    # TODO
-    pass
+    new_staff = TddVideoStaff()
+
+    # set attr
+    new_staff.added = added
+    new_staff.aid = aid
+    new_staff.mid = mid
+    new_staff.title = title
+
+    # add to db
+    DBOperation.add(new_staff, session)
+
+    return 0
 
 
 def get_tags_str(aid, bapi):
-    # TODO
-    return ''
+    # get tags_obj
+    tags_obj = get_valid(bapi.get_video_tags, (aid,), test_video_tags)
+    if tags_obj is None:
+        # fail to get valid test_video_tags
+        # return 2
+        return ''
+
+    tags_str = ''
+    try:
+        for tag in tags_obj['data']:
+            tags_str += tag['tag_name']
+            tags_str += ';'
+    except Exception as e:
+        # return e.message
+        pass
+
+    return tags_str
