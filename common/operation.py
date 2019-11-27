@@ -1,6 +1,7 @@
 from .validation import get_valid, test_video_view, test_video_tags, test_member
 from util import get_ts_s
 from db import TddVideo, TddVideoStaff, TddMember, DBOperation
+import time
 
 __all__ = ['add_video']
 
@@ -40,7 +41,7 @@ def add_video(aid, bapi, session, test_exist=True, params=None,
         new_video.videos = view_obj['data']['videos']
         new_video.tid = view_obj['data']['tid']
         new_video.tname = view_obj['data']['tname']
-        new_video.copyright = view_obj['data']['tname']
+        new_video.copyright = view_obj['data']['copyright']
         new_video.pic = view_obj['data']['pic']
         new_video.title = view_obj['data']['title']
         new_video.pubdate = view_obj['data']['pubdate']
@@ -72,6 +73,7 @@ def add_video(aid, bapi, session, test_exist=True, params=None,
             for staff in view_obj['data']['staff']:
                 add_member(staff['mid'], bapi, session)
                 add_staff(new_video.added, aid, staff['mid'], staff['title'], session)
+                time.sleep(0.2)
         else:
             new_video.hasstaff = 0
 
