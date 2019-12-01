@@ -1,5 +1,5 @@
 from .basic import Base
-from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
 from sqlalchemy.dialects.mysql import LONGTEXT, TINYINT
 
 __all__ = ['TddVideo', 'TddMember', 'TddVideoStaff', 'TddVideoRecord', 'TddMemberFollowerRecord']
@@ -32,6 +32,7 @@ class TddVideo(Base):
     isvc = Column(TINYINT, nullable=False, default=-1)  #
     engine = Column(TINYINT, nullable=False, default=-1)  #
     freq = Column(TINYINT, nullable=False, default=0)  #
+    laststat = Column(Integer, ForeignKey('tdd_video_record.id'), default=None)
 
     def __repr__(self):
         return "<TddVideo(aid=%d,title=%s)>" % (self.aid, self.title)
@@ -88,6 +89,8 @@ class TddVideoRecord(Base):
     like = Column(Integer, nullable=False)
 
     # UNIQUE KEY `added_aid_UNIQUE` (`added`,`aid`)
+
+    # Foreign key here?
 
     def __repr__(self):
         return "<TddVideoRecord(aid=%d,view=%d)>" % (self.aid, self.view)

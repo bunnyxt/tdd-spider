@@ -3,7 +3,7 @@ from util import get_ts_s
 from db import TddVideo, TddVideoStaff, TddMember, DBOperation
 import time
 
-__all__ = ['add_video']
+__all__ = ['add_video', 'add_member']
 
 
 def add_video(aid, bapi, session, test_exist=True, params=None,

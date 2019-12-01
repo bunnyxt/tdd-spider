@@ -1,5 +1,6 @@
 from logger import logger_db
 from .models import TddVideo, TddMember
+from sqlalchemy import text
 
 __all__ = ['DBOperation']
 
@@ -99,4 +100,24 @@ class DBOperation:
             return result
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'mid': mid}), exc_info=True)
+            return None
+
+    @classmethod
+    def query_not_added_video_member_mids(cls, session):
+        try:
+            result = session.execute(
+                'select distinct(mid) from tdd_video where mid not in (select mid from tdd_member);')
+            return list(r[0] for r in result)
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
+            return None
+
+    @classmethod
+    def query_not_added_video_staff_mids(cls, session):
+        try:
+            result = session.execute(
+                'select distinct(mid) from tdd_video_staff where mid not in (select mid from tdd_member);')
+            return list(r[0] for r in result)
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
             return None
