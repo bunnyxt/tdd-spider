@@ -377,9 +377,9 @@ def main():
     logger_11.info('Daily video update registered.')
     daily_video_update_task()
     schedule.every().day.at("04:00").do(daily_video_update_task)
-    schedule.every().day.at("10:00").do(daily_video_update_task)
-    schedule.every().day.at("16:00").do(daily_video_update_task)
-    schedule.every().day.at("22:00").do(daily_video_update_task)
+    # schedule.every().day.at("10:00").do(daily_video_update_task)
+    # schedule.every().day.at("16:00").do(daily_video_update_task)
+    # schedule.every().day.at("22:00").do(daily_video_update_task)
 
     while True:
         schedule.run_pending()
