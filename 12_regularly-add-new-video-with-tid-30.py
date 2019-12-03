@@ -1,11 +1,13 @@
 from pybiliapi import BiliApi
 from logger import logger_12
-from db import Session, DBOperation
+from db import Session, DBOperation, TddVideoRecord
 import math
 import time
 import schedule
 import threading
 from common import get_valid, test_archive_rank_by_partion, add_video
+from util import get_ts_s
+from common.error import *
 
 
 def regularly_add_new_video():
@@ -17,12 +19,12 @@ def regularly_add_new_video():
     # get last added aids
     last_15_videos = DBOperation.query_last_x_video(15, session)
     last_15_aids = list(map(lambda x: x.aid, last_15_videos))
-    logger_12.info('Last 15 aids: %s' % last_15_aids)
+    logger_12.debug('Last 15 aids: %s' % last_15_aids)
 
     # get page total
     obj = bapi.get_archive_rank_by_partion(30, 1, 50)
     page_total = math.ceil(obj['data']['page']['count'] / 50)
-    logger_12.info('%d page(s) found.' % page_total)
+    logger_12.debug('%d page(s) found.' % page_total)
 
     # add add video
     page_num = 1
@@ -43,35 +45,45 @@ def regularly_add_new_video():
 
                 # check in last aids or not
                 if last_aid_count >= 5:
-                    logger_12.info('5 last aids meet, now break')
+                    logger_12.debug('5 last aids meet, now break')
                     goon = False
                     break
 
                 if aid in last_15_aids:
                     last_aid_count += 1
-                    logger_12.info('Aid %d in last aids, count %d / 5, now continue' % (aid, last_aid_count))
+                    logger_12.debug('Aid %d in last aids, count %d / 5, now continue' % (aid, last_aid_count))
                     continue
 
                 # add video
-                add_video_result = add_video(aid, bapi, session)
-
-                if add_video_result == 0:
-                    logger_12.info('Add new video with aid %d!' % aid)
-                elif add_video_result == 1:
-                    logger_12.warning('Aid %d video already exist!' % aid)
-                elif add_video_result == 2:
-                    logger_12.warning('Fail to get valid view_obj with aid %d!' % aid)
-                elif add_video_result == 3:
-                    logger_12.warning('Video with aid %d code != 0!' % aid)
+                try:
+                    new_video = add_video(aid, bapi, session)
+                except TddCommonError as e:
+                    logger_12.warning(e)
                 else:
-                    logger_12.warning('Unexpected result code %d got while add video with aid %d!'
-                                      % (add_video_result, aid))
+                    logger_12.info('Add new video %s' % new_video)
+                    # add stat record, which comes from awesome api
+                    if 'stat' in arch.keys():
+                        stat = arch['stat']
+                        new_video_record = TddVideoRecord()
+                        new_video_record.aid = aid
+                        new_video_record.added = get_ts_s()
+                        new_video_record.view = -1 if stat['view'] == '--' else stat['view']
+                        new_video_record.danmaku = stat['danmaku']
+                        new_video_record.reply = stat['reply']
+                        new_video_record.favorite = stat['favorite']
+                        new_video_record.coin = stat['coin']
+                        new_video_record.share = stat['share']
+                        new_video_record.like = stat['like']
+                        DBOperation.add(new_video_record, session)
+                        logger_12.info('Add new video record %s' % new_video_record)
+                    else:
+                        logger_12.warning('Fail to get stat info of video with aid %d from awesome api!' % aid)
 
         except Exception as e:
             logger_12.error('Exception caught. Detail: %s' % e)
 
         # update page num
-        logger_12.info('Page %d / %d done.' % (page_num, page_total))
+        logger_12.debug('Page %d / %d done.' % (page_num, page_total))
         page_total = math.ceil(obj['data']['page']['count'] / 50)
         page_num += 1
 
