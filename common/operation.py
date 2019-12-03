@@ -1,9 +1,10 @@
 from .validation import get_valid, test_video_view, test_video_tags, test_member
+from .error import *
 from util import get_ts_s
 from db import TddVideo, TddVideoStaff, TddMember, DBOperation
 import time
 
-__all__ = ['add_video', 'add_member']
+__all__ = ['add_video', 'add_member', 'add_staff', 'get_tags_str']
 
 
 def add_video(aid, bapi, session, test_exist=True, params=None,
@@ -13,13 +14,13 @@ def add_video(aid, bapi, session, test_exist=True, params=None,
         video = DBOperation.query_video_via_aid(aid, session)
         if video is not None:
             # video already exist
-            return 1  # TODO replace error code with exception
+            raise AlreadyExistError(table_name='tdd_video', params={'aid': aid})
 
     # get view_obj
     view_obj = get_valid(bapi.get_video_view, (aid,), test_video_view)
     if view_obj is None:
         # fail to get valid view_obj
-        return 2
+        raise InvalidObjError(obj_name='view', params={'aid': aid})
 
     new_video = TddVideo()
 
@@ -50,7 +51,7 @@ def add_video(aid, bapi, session, test_exist=True, params=None,
         new_video.code = view_obj['code']
     else:
         # video code != 0
-        return 3
+        raise InvalidObjCodeError(obj_name='view', code=view_obj['code'])
 
     # set tags
     new_video.tags = get_tags_str(aid, bapi)
@@ -64,15 +65,21 @@ def add_video(aid, bapi, session, test_exist=True, params=None,
 
     # add member
     if add_video_owner:
-        add_member(new_video.mid, bapi, session)
+        try:
+            add_member(new_video.mid, bapi, session)
+        except TddCommonError as e:
+            print(e)
 
     # add staff
     if add_video_staff:
         if 'staff' in view_obj['data'].keys():
             new_video.hasstaff = 1
             for staff in view_obj['data']['staff']:
-                add_member(staff['mid'], bapi, session)
-                add_staff(new_video.added, aid, staff['mid'], staff['title'], session)
+                try:
+                    add_member(staff['mid'], bapi, session)
+                    add_staff(new_video.added, aid, staff['mid'], staff['title'], session)
+                except TddCommonError as e:
+                    print(e)
                 time.sleep(0.2)
         else:
             new_video.hasstaff = 0
@@ -80,7 +87,7 @@ def add_video(aid, bapi, session, test_exist=True, params=None,
     # add to db
     DBOperation.add(new_video, session)
 
-    return 0
+    return new_video
 
 
 def add_member(mid, bapi, session, test_exist=True):
@@ -89,13 +96,13 @@ def add_member(mid, bapi, session, test_exist=True):
         member = DBOperation.query_member_via_mid(mid, session)
         if member is not None:
             # member already exist
-            return 1  # TODO replace error code with exception
+            raise AlreadyExistError(table_name='tdd_member', params={'mid': mid})
 
     # get member_obj
     member_obj = get_valid(bapi.get_member, (mid,), test_member)
     if member_obj is None:
         # fail to get valid member_obj
-        return 2
+        raise InvalidObjError(obj_name='member', params={'mid': mid})
 
     new_member = TddMember()
 
@@ -111,12 +118,12 @@ def add_member(mid, bapi, session, test_exist=True):
         new_member.sign = member_obj['data']['sign']
     else:
         # member_obj code != 0
-        return 3
+        raise InvalidObjCodeError(obj_name='member', code=member_obj['code'])
 
     # add to db
     DBOperation.add(new_member, session)
 
-    return 0
+    return new_member
 
 
 def add_staff(added, aid, mid, title, session):
@@ -131,7 +138,7 @@ def add_staff(added, aid, mid, title, session):
     # add to db
     DBOperation.add(new_staff, session)
 
-    return 0
+    return new_staff
 
 
 def get_tags_str(aid, bapi):
@@ -139,8 +146,7 @@ def get_tags_str(aid, bapi):
     tags_obj = get_valid(bapi.get_video_tags, (aid,), test_video_tags)
     if tags_obj is None:
         # fail to get valid test_video_tags
-        # return 2
-        return ''
+        raise InvalidObjError(obj_name='tags', params={'aid': aid})
 
     tags_str = ''
     try:
@@ -148,7 +154,6 @@ def get_tags_str(aid, bapi):
             tags_str += tag['tag_name']
             tags_str += ';'
     except Exception as e:
-        # return e.message
-        pass
+        print(e)
 
     return tags_str
