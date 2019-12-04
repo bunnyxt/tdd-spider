@@ -1,4 +1,4 @@
-__all__ = ['TddCommonError', 'AlreadyExistError', 'InvalidObjError', 'InvalidObjCodeError']
+__all__ = ['TddCommonError', 'AlreadyExistError', 'InvalidObjError', 'InvalidObjCodeError', 'InvalidParamError']
 
 
 class TddCommonError(Exception):
@@ -41,3 +41,13 @@ class InvalidObjCodeError(TddCommonError):
 
     def __str__(self):
         return 'Invalid code {0} get for {1} obj!'.format(self.code, self.obj_name)
+
+
+class InvalidParamError(TddCommonError):
+
+    def __init__(self, params):
+        super().__init__()
+        self.params = params
+
+    def __str__(self):
+        return 'Invalid given params {0}!'.format(self.params)

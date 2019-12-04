@@ -5,7 +5,7 @@ import math
 import time
 import schedule
 import threading
-from common import get_valid, test_archive_rank_by_partion, add_video
+from common import get_valid, test_archive_rank_by_partion, add_video, add_video_record_via_awesome_stat
 from util import get_ts_s
 from common.error import *
 
@@ -60,22 +60,17 @@ def regularly_add_new_video():
                 except TddCommonError as e:
                     logger_12.warning(e)
                 else:
+                    added_aid_count += 1
                     logger_12.info('Add new video %s' % new_video)
                     # add stat record, which comes from awesome api
                     if 'stat' in arch.keys():
                         stat = arch['stat']
-                        new_video_record = TddVideoRecord()
-                        new_video_record.aid = aid
-                        new_video_record.added = get_ts_s()
-                        new_video_record.view = -1 if stat['view'] == '--' else stat['view']
-                        new_video_record.danmaku = stat['danmaku']
-                        new_video_record.reply = stat['reply']
-                        new_video_record.favorite = stat['favorite']
-                        new_video_record.coin = stat['coin']
-                        new_video_record.share = stat['share']
-                        new_video_record.like = stat['like']
-                        DBOperation.add(new_video_record, session)
-                        logger_12.info('Add new video record %s' % new_video_record)
+                        try:
+                            new_video_record = add_video_record_via_awesome_stat(get_ts_s(), stat, session)
+                        except TddCommonError as e:
+                            logger_12.warning(e)
+                        else:
+                            logger_12.info('Add new video record %s' % new_video_record)
                     else:
                         logger_12.warning('Fail to get stat info of video with aid %d from awesome api!' % aid)
 

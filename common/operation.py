@@ -1,10 +1,10 @@
 from .validation import get_valid, test_video_view, test_video_tags, test_member
 from .error import *
 from util import get_ts_s
-from db import TddVideo, TddVideoStaff, TddMember, DBOperation
+from db import TddVideo, TddVideoStaff, TddMember, DBOperation, TddVideoRecord
 import time
 
-__all__ = ['add_video', 'add_member', 'add_staff', 'get_tags_str']
+__all__ = ['add_video', 'add_member', 'add_staff', 'add_video_record_via_awesome_stat', 'get_tags_str']
 
 
 def add_video(aid, bapi, session, test_exist=True, params=None,
@@ -139,6 +139,29 @@ def add_staff(added, aid, mid, title, session):
     DBOperation.add(new_staff, session)
 
     return new_staff
+
+
+def add_video_record_via_awesome_stat(added, stat, session):
+    new_video_record = TddVideoRecord()
+
+    # add info from awesome stat
+    try:
+        new_video_record.aid = stat['aid']
+        new_video_record.added = added
+        new_video_record.view = -1 if stat['view'] == '--' else stat['view']
+        new_video_record.danmaku = stat['danmaku']
+        new_video_record.reply = stat['reply']
+        new_video_record.favorite = stat['favorite']
+        new_video_record.coin = stat['coin']
+        new_video_record.share = stat['share']
+        new_video_record.like = stat['like']
+    except Exception:
+        raise InvalidParamError({'stat', stat})
+
+    # add to db
+    DBOperation.add(new_video_record, session)
+
+    return new_video_record
 
 
 def get_tags_str(aid, bapi):
