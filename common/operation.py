@@ -1,10 +1,11 @@
-from .validation import get_valid, test_video_view, test_video_tags, test_member
+from .validation import get_valid, test_video_view, test_video_tags, test_member, test_video_stat
 from .error import *
 from util import get_ts_s
 from db import TddVideo, TddVideoStaff, TddMember, DBOperation, TddVideoRecord
 import time
 
-__all__ = ['add_video', 'add_member', 'add_staff', 'add_video_record_via_awesome_stat', 'get_tags_str']
+__all__ = ['add_video', 'add_member', 'add_staff', 'add_video_record_via_awesome_stat',
+           'add_video_record_via_stat_api', 'get_tags_str']
 
 
 def add_video(aid, bapi, session, test_exist=True, params=None,
@@ -144,7 +145,7 @@ def add_staff(added, aid, mid, title, session):
 def add_video_record_via_awesome_stat(added, stat, session):
     new_video_record = TddVideoRecord()
 
-    # add info from awesome stat
+    # set attr from awesome stat
     try:
         new_video_record.aid = stat['aid']
         new_video_record.added = added
@@ -157,6 +158,38 @@ def add_video_record_via_awesome_stat(added, stat, session):
         new_video_record.like = stat['like']
     except Exception:
         raise InvalidParamError({'stat', stat})
+
+    # add to db
+    DBOperation.add(new_video_record, session)
+
+    return new_video_record
+
+
+def add_video_record_via_stat_api(aid, bapi, session):
+    # get stat_obj
+    stat_obj = get_valid(bapi.get_video_stat, (aid,), test_video_stat)
+    if stat_obj is None:
+        # fail to get valid view_obj
+        raise InvalidObjError(obj_name='stat', params={'aid': aid})
+
+    new_video_record = TddVideoRecord()
+
+    # set basic attr
+    new_video_record.aid = aid
+    new_video_record.added = get_ts_s()
+
+    # set attr from stat_obj
+    if stat_obj['code'] == 0:
+        new_video_record.view = -1 if stat_obj['stat']['view'] == '--' else stat_obj['stat']['view']
+        new_video_record.danmaku = stat_obj['stat']['danmaku']
+        new_video_record.reply = stat_obj['stat']['reply']
+        new_video_record.favorite = stat_obj['stat']['favorite']
+        new_video_record.coin = stat_obj['stat']['coin']
+        new_video_record.share = stat_obj['stat']['share']
+        new_video_record.like = stat_obj['stat']['like']
+    else:
+        # stat code != 0
+        raise InvalidObjCodeError(obj_name='stat', code=stat_obj['code'])
 
     # add to db
     DBOperation.add(new_video_record, session)

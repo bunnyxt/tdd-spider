@@ -4,9 +4,11 @@ import time
 from logger import logger_11, logger_11_c0, logger_11_c30
 from pybiliapi import BiliApi
 import math
-from db import update_engine, Session, DBOperation, TddVideoRecord
+from db import Session, DBOperation, TddVideoRecord
 from util import get_ts_s, ts_s_to_str
-from common import get_valid, test_video_view, test_video_stat, test_archive_rank_by_partion
+from common import get_valid, test_video_view, test_video_stat, test_archive_rank_by_partion, \
+    add_video_record_via_stat_api, add_video_record_via_awesome_stat, add_video, \
+    TddCommonError, InvalidObjCodeError, AlreadyExistError
 from serverchan import sc_send
 
 
@@ -24,41 +26,18 @@ def update_aids_c0(aids):
     main_loop_add_count = 0  # aids added count
 
     for aid in aids:
-        # get obj via stat api
-        obj = get_valid(bapi.get_video_stat, (aid,), test_video_stat)
-        if obj is None:
-            logger_11_c0.warning('Aid %d fail! Cannot get valid stat obj.' % aid)
-            fail_aids.append(aid)
-            continue
 
-        # record obj request ts
-        added = get_ts_s()
-
-        # check code
-        code = obj['code']
-        if code == 0:
-            # code==0, go add video record, get stat first
-            stat = obj['data']
-
-            # make new tdd video record obj and assign stat info from api
-            record = TddVideoRecord()
-            record.aid = aid
-            record.added = added
-            record.view = -1 if stat['view'] == '--' else stat['view']
-            record.danmaku = stat['danmaku']
-            record.reply = stat['reply']
-            record.favorite = stat['favorite']
-            record.coin = stat['coin']
-            record.share = stat['share']
-            record.like = stat['like']
-
-            # add to db
-            DBOperation.add(record, session)
-            logger_11_c0.info('Add record %s.' % record)
+        # add video record
+        try:
+            new_video_record = add_video_record_via_stat_api(aid, bapi, session)
+        except InvalidObjCodeError as e:
+            DBOperation.update_video_code(aid, e.code, session)
+            logger_11_c0.warning('Update video aid = %d code from 0 to %d.' % (aid, e.code))
+        except TddCommonError as e:
+            logger_11_c0.warning(e)
+            fail_aids += 1
         else:
-            # code!=0, change code
-            DBOperation.update_video_code(aid, code, session)
-            logger_11_c0.warning('Update video aid = %d code from 0 to %d.' % (aid, code))
+            logger_11_c0.info('Add new record %s' % new_video_record)
 
         main_loop_add_count += 1  # add main loop add count
         time.sleep(0.2)  # api duration banned
@@ -143,21 +122,13 @@ def update_aids_c30(aids):
                     # aid in db c30 aids, go add video record, get stat first
                     stat = arch['stat']
 
-                    # make new tdd video record obj and assign stat info from api
-                    new_video_record = TddVideoRecord()
-                    new_video_record.aid = aid
-                    new_video_record.added = added
-                    new_video_record.view = -1 if stat['view'] == '--' else stat['view']
-                    new_video_record.danmaku = stat['danmaku']
-                    new_video_record.reply = stat['reply']
-                    new_video_record.favorite = stat['favorite']
-                    new_video_record.coin = stat['coin']
-                    new_video_record.share = stat['share']
-                    new_video_record.like = stat['like']
-
-                    # add to db
-                    DBOperation.add(new_video_record, session)
-                    logger_11_c30.info('Add record %s.' % new_video_record)
+                    # add stat record, which comes from awesome api
+                    try:
+                        new_video_record = add_video_record_via_awesome_stat(added, stat, session)
+                    except TddCommonError as e:
+                        logger_11_c30.warning(e)
+                    else:
+                        logger_11_c30.info('Add new video record %s' % new_video_record)
 
                     this_page_aids.append(aid)  # add aid to this page aids
                     aids.remove(aid)  # remove aid from aids
@@ -266,46 +237,28 @@ def update_aids_c30(aids):
     not_added_aids_solve_count = 0  # aids solved count
 
     for aid in not_added_aids:
-        # TODO change logic here, need to use stat api, some video doesn't have quanxian to add
-        # get view obj
-        view_obj = get_valid(bapi.get_video_view, (aid,), test_video_view)
-        if view_obj is None:
-            logger_11_c30.warning('Aid %d fail! Cannot get valid view obj.' % aid)
-            continue
 
-        # record view obj request ts
-        view_obj_added = get_ts_s()
-
+        # add video
         try:
-            # query video in db
-            video = DBOperation.query_video_via_aid(aid, session)
-            if video is None:
-                # video not added in db, add video
-                # TODO add video, including members, staff, category test
-                logger_11_c30.warning(
-                    'Aid %d not added in db, TODO add video, including members, staff, category test' % aid)
+            new_video = add_video(aid, bapi, session)
+        except AlreadyExistError:
+            # video already exist, which is absolutely common
+            pass
+        except TddCommonError as e:
+            logger_11_c30.warning(e)
+        else:
+            logger_11_c30.info('Add new video %s' % new_video)
 
-            # add video record, get stat first
-            stat = view_obj['data']['stat']
-
-            # make new tdd video record obj and assign stat info from api
-            new_video_record = TddVideoRecord()
-            new_video_record.aid = aid
-            new_video_record.added = view_obj_added
-            new_video_record.view = -1 if stat['view'] == '--' else stat['view']
-            new_video_record.danmaku = stat['danmaku']
-            new_video_record.reply = stat['reply']
-            new_video_record.favorite = stat['favorite']
-            new_video_record.coin = stat['coin']
-            new_video_record.share = stat['share']
-            new_video_record.like = stat['like']
-
-            # add to db
-            DBOperation.add(new_video_record, session)
-            logger_11_c30.info('Add record %s.' % new_video_record)
-            not_added_aids_solve_count += 1  # add not added aids solve count
-        except Exception as e:
-            logger_11_c30.error('Exception caught when process view obj of not added aid %d. Detail: %s' % (aid, e))
+        # add video record
+        try:
+            new_video_record = add_video_record_via_stat_api(aid, bapi, session)
+        except InvalidObjCodeError as e:
+            DBOperation.update_video_code(aid, e.code, session)
+            logger_11_c30.warning('Update video aid = %d code from 0 to %d.' % (aid, e.code))
+        except TddCommonError as e:
+            logger_11_c30.warning(e)
+        else:
+            logger_11_c30.info('Add new record %s' % new_video_record)
 
     # finish check not added aids
     logger_11_c30.warning(
@@ -349,9 +302,6 @@ def update_aids_c30(aids):
 def daily_video_update():
     logger_11.info('Now start daily video update...')
 
-    # update engine
-    # update_engine()  # since update per 6 hours, no need to update engine
-
     # get videos aids
     session = Session()
     aids_c30 = DBOperation.query_update_c30_aids(0, session)
@@ -377,9 +327,6 @@ def main():
     logger_11.info('Daily video update registered.')
     daily_video_update_task()
     schedule.every().day.at("04:00").do(daily_video_update_task)
-    # schedule.every().day.at("10:00").do(daily_video_update_task)
-    # schedule.every().day.at("16:00").do(daily_video_update_task)
-    # schedule.every().day.at("22:00").do(daily_video_update_task)
 
     while True:
         schedule.run_pending()
