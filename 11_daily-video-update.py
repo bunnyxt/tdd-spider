@@ -260,6 +260,8 @@ def update_aids_c30(aids):
         else:
             logger_11_c30.info('Add new record %s' % new_video_record)
 
+        time.sleep(0.2)  # api duration banned
+
     # finish check not added aids
     logger_11_c30.warning(
         'Finish check not added aids, %d aid(s) visited, %d aids(s) solved.' % (
@@ -310,10 +312,10 @@ def daily_video_update():
     logger_11.info('Get %d c0 aids.' % (len(aids_c0)))
     session.close()
 
-    # start a thread to update aids_c0
+    # start a thread to update aids_c30
     threading.Thread(target=update_aids_c30, args=(aids_c30,)).start()
 
-    # start a thread to update aids_c30
+    # start a thread to update aids_c0
     threading.Thread(target=update_aids_c0, args=(aids_c0,)).start()
 
     logger_11.info('Two thread started!')
