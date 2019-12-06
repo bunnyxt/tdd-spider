@@ -180,13 +180,13 @@ def add_video_record_via_stat_api(aid, bapi, session):
 
     # set attr from stat_obj
     if stat_obj['code'] == 0:
-        new_video_record.view = -1 if stat_obj['stat']['view'] == '--' else stat_obj['stat']['view']
-        new_video_record.danmaku = stat_obj['stat']['danmaku']
-        new_video_record.reply = stat_obj['stat']['reply']
-        new_video_record.favorite = stat_obj['stat']['favorite']
-        new_video_record.coin = stat_obj['stat']['coin']
-        new_video_record.share = stat_obj['stat']['share']
-        new_video_record.like = stat_obj['stat']['like']
+        new_video_record.view = -1 if stat_obj['data']['view'] == '--' else stat_obj['data']['view']
+        new_video_record.danmaku = stat_obj['data']['danmaku']
+        new_video_record.reply = stat_obj['data']['reply']
+        new_video_record.favorite = stat_obj['data']['favorite']
+        new_video_record.coin = stat_obj['data']['coin']
+        new_video_record.share = stat_obj['data']['share']
+        new_video_record.like = stat_obj['data']['like']
     else:
         # stat code != 0
         raise InvalidObjCodeError(obj_name='stat', code=stat_obj['code'])
