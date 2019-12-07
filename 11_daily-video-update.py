@@ -255,10 +255,12 @@ def update_aids_c30(aids):
         except InvalidObjCodeError as e:
             DBOperation.update_video_code(aid, e.code, session)
             logger_11_c30.warning('Update video aid = %d code from 0 to %d.' % (aid, e.code))
+            not_added_aids_solve_count += 1  # solved, update video code
         except TddCommonError as e:
-            logger_11_c30.warning(e)
+            logger_11_c30.warning(e)  # unsolved, fail to add record
         else:
             logger_11_c30.info('Add new record %s' % new_video_record)
+            not_added_aids_solve_count += 1  # solved, add record
 
         time.sleep(0.2)  # api duration banned
 
