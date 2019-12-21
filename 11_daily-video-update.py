@@ -37,7 +37,7 @@ def update_aids_c0(aids):
             logger_11_c0.warning(e)
             fail_aids += 1
         else:
-            logger_11_c0.info('Add new record %s' % new_video_record)
+            logger_11_c0.debug('Add new record %s' % new_video_record)
 
         main_loop_add_count += 1  # add main loop add count
         time.sleep(0.2)  # api duration banned
@@ -128,7 +128,7 @@ def update_aids_c30(aids):
                     except TddCommonError as e:
                         logger_11_c30.warning(e)
                     else:
-                        logger_11_c30.info('Add new video record %s' % new_video_record)
+                        logger_11_c30.debug('Add new video record %s' % new_video_record)
 
                     this_page_aids.append(aid)  # add aid to this page aids
                     aids.remove(aid)  # remove aid from aids
@@ -329,7 +329,7 @@ def daily_video_update_task():
 
 def main():
     logger_11.info('Daily video update registered.')
-    daily_video_update_task()
+    # daily_video_update_task()
     schedule.every().day.at("04:00").do(daily_video_update_task)
 
     while True:
