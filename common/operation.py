@@ -60,7 +60,7 @@ def add_video(aid, bapi, session, test_exist=True, params=None,
     # set isvc
     if set_isvc:
         for tag in new_video.tags.split(';'):
-            if tag == 'VOCALOID中文曲':
+            if tag.upper() == 'VOCALOID中文曲':
                 new_video.isvc = 2
                 break
 
