@@ -78,6 +78,9 @@ def add_video(aid, bapi, session, test_exist=True, params=None,
             for staff in view_obj['data']['staff']:
                 try:
                     add_member(staff['mid'], bapi, session)
+                except TddCommonError as e:
+                    print(e)
+                try:
                     add_staff(new_video.added, aid, staff['mid'], staff['title'], session)
                 except TddCommonError as e:
                     print(e)
