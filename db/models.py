@@ -1,5 +1,5 @@
 from .basic import Base
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, BigInteger
 from sqlalchemy.dialects.mysql import LONGTEXT, TINYINT
 
 __all__ = ['TddVideo', 'TddMember', 'TddVideoStaff', 'TddVideoRecord', 'TddMemberFollowerRecord']
@@ -10,7 +10,7 @@ class TddVideo(Base):
 
     __tablename__ = 'tdd_video'
 
-    id = Column(Integer, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     aid = Column(Integer, nullable=False, unique=True)
     videos = Column(Integer, default=None)
@@ -32,7 +32,7 @@ class TddVideo(Base):
     isvc = Column(TINYINT, nullable=False, default=-1)  #
     engine = Column(TINYINT, nullable=False, default=-1)  #
     freq = Column(TINYINT, nullable=False, default=0)  #
-    laststat = Column(Integer, ForeignKey('tdd_video_record.id'), default=None)
+    laststat = Column(BigInteger, ForeignKey('tdd_video_record.id'), default=None)
 
     def __repr__(self):
         return "<TddVideo(aid=%d,title=%s)>" % (self.aid, self.title)
@@ -43,7 +43,7 @@ class TddMember(Base):
 
     __tablename__ = 'tdd_member'
 
-    id = Column(Integer, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     mid = Column(Integer, nullable=False, unique=True)
     sex = Column(String(20), nullable=False)
@@ -60,7 +60,7 @@ class TddVideoStaff(Base):
 
     __tablename__ = 'tdd_video_staff'
 
-    id = Column(Integer, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     aid = Column(Integer, nullable=False)
     mid = Column(Integer, nullable=False)
@@ -77,7 +77,7 @@ class TddVideoRecord(Base):
 
     __tablename__ = 'tdd_video_record'
 
-    id = Column(Integer, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     aid = Column(Integer, nullable=False)
     view = Column(Integer, nullable=False)  # maybe '--' from api, set -1 instead
@@ -101,7 +101,7 @@ class TddMemberFollowerRecord(Base):
 
     __tablename__ = 'tdd_member_follower_record'
 
-    id = Column(Integer, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     mid = Column(Integer, nullable=False)
     follower = Column(Integer, nullable=False)
