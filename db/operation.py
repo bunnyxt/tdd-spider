@@ -121,3 +121,13 @@ class DBOperation:
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
             return None
+
+    @classmethod
+    def count_table_until_ts(cls, table_name, ts, session):
+        try:
+            result = session.execute(
+                'select count(1) from %s where added <= %d;' % (table_name, ts))
+            return list(r[0] for r in result)
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
+            return None
