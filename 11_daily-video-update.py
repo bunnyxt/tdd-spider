@@ -164,6 +164,7 @@ def update_aids_c30(aids):
     left_aids_solve_count = 0  # aids solved count
 
     for aid in aids:
+        time.sleep(0.2)  # api duration banned
         # get view obj
         view_obj = get_valid(bapi.get_video_view, (aid,), test_video_view)
         if view_obj is None:
