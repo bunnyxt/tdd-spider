@@ -35,7 +35,7 @@ def update_aids_c0(aids):
             logger_11_c0.warning('Update video aid = %d code from 0 to %d.' % (aid, e.code))
         except TddCommonError as e:
             logger_11_c0.warning(e)
-            fail_aids += 1
+            fail_aids.append(aid)
         else:
             logger_11_c0.debug('Add new record %s' % new_video_record)
 
