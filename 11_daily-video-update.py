@@ -301,6 +301,26 @@ def update_aids_c30(aids):
     else:
         logger_11_c30.warning('Sc summary sent wrong. sc_result = %s.' % sc_result)
 
+    # tmp update recent field begin
+    try:
+        now_ts = get_ts_s()
+        last_1d_ts = now_ts - 1 * 24 * 60 * 60
+        last_7d_ts = now_ts - 7 * 24 * 60 * 60
+        session.execute('update tdd_video set recent = 1 where added >= %d && added < %d' % (last_7d_ts, last_1d_ts))
+        session.commit()
+        session.execute('update tdd_video set recent = 2 where added >= %d' % last_1d_ts)
+        session.commit()
+        logger_11.info('Finish update recent field')
+    except Exception as e:
+        logger_11.error(e)
+    # tmp update recent field end
+
+    # tmp update activity field begin
+    if time.strftime('%w', time.localtime(time.time())) == '6':
+        # TODO
+        pass
+    # tmp update activity field end
+
     session.close()
 
 
