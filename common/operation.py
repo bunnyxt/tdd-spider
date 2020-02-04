@@ -8,7 +8,7 @@ __all__ = ['add_video', 'add_member', 'add_staff', 'add_video_record_via_awesome
            'add_video_record_via_stat_api', 'get_tags_str']
 
 
-def add_video(aid, bapi, session, test_exist=True, params=None,
+def add_video(aid, bapi, session, test_exist=True, params=None, set_recent=True,
               set_isvc=True, add_video_owner=True, add_video_staff=True):
     # test exist
     if test_exist:
@@ -56,6 +56,10 @@ def add_video(aid, bapi, session, test_exist=True, params=None,
 
     # set tags
     new_video.tags = get_tags_str(aid, bapi)
+
+    # set recent
+    if set_recent:
+        new_video.recent = 2
 
     # set isvc
     if set_isvc:
