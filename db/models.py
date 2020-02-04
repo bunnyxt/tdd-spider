@@ -32,6 +32,8 @@ class TddVideo(Base):
     isvc = Column(TINYINT, nullable=False, default=-1)  #
     engine = Column(TINYINT, nullable=False, default=-1)  #
     freq = Column(TINYINT, nullable=False, default=0)  #
+    activity = Column(TINYINT, nullable=False, default=0)  #
+    recent = Column(TINYINT, nullable=False, default=0)  #
     laststat = Column(BigInteger, ForeignKey('tdd_video_record.id'), default=None)
 
     def __repr__(self):
