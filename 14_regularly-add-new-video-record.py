@@ -468,8 +468,6 @@ def main():
 
     logger_14.info('All task registered.')
 
-    _6h_task('07:12')
-
     while True:
         schedule.run_pending()
         time.sleep(1)
