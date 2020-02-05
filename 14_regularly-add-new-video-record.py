@@ -159,8 +159,8 @@ def add_new_video_record_via_awesome_api(aids, time_label):
         page_total = math.ceil(obj['data']['page']['count'] / 50)
         page_num += 1
 
-        if min_aid < min(aids) * 0.9 or len(aids) < 25:
-            logger_14.info('%s Find min_aid < min(aids) * 0.9 or len(aids) < 25, now break' % time_label)
+        if len(aids) < 25 or min_aid < min(aids) * 0.9:
+            logger_14.info('%s Find len(aids) < 25 or min_aid < min(aids) * 0.9, now break' % time_label)
             goon = False
             break
 
