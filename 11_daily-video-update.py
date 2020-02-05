@@ -1,6 +1,7 @@
 import schedule
 import threading
 import time
+import datetime
 from logger import logger_11, logger_11_c0, logger_11_c30
 from pybiliapi import BiliApi
 import math
@@ -52,10 +53,10 @@ def update_aids_c0(aids):
     summary = \
         '11 updating c0 aids done\n\n' + \
         'start: %s, finish: %s, timespan: %ss\n\n' \
-            % (ts_s_to_str(start_ts), ts_s_to_str(finish_ts), (finish_ts - start_ts)) + \
+        % (ts_s_to_str(start_ts), ts_s_to_str(finish_ts), (finish_ts - start_ts)) + \
         'target aids count: %d\n\n' % aids_len + \
         'main loop: visited: %d, added: %s, others: %d\n\n' \
-            % (main_loop_visit_count, main_loop_add_count, (main_loop_visit_count - main_loop_add_count)) + \
+        % (main_loop_visit_count, main_loop_add_count, (main_loop_visit_count - main_loop_add_count)) + \
         'fail aids: %s, count: %d\n\n' % (fail_aids, len(fail_aids)) + \
         'by.bunnyxt, %s' % ts_s_to_str(get_ts_s())
 
@@ -277,15 +278,15 @@ def update_aids_c30(aids):
     summary = \
         '11 updating c30 aids done\n\n' + \
         'start: %s, finish: %s, timespan: %ss\n\n' \
-            % (ts_s_to_str(start_ts), ts_s_to_str(finish_ts), (finish_ts - start_ts)) + \
+        % (ts_s_to_str(start_ts), ts_s_to_str(finish_ts), (finish_ts - start_ts)) + \
         'target aids count: %d\n\n' % aids_len + \
         'main loop: visited: %d, added: %s, others: %d\n\n' \
-            % (main_loop_visit_count, main_loop_add_count, (main_loop_visit_count - main_loop_add_count)) + \
+        % (main_loop_visit_count, main_loop_add_count, (main_loop_visit_count - main_loop_add_count)) + \
         'aids left in aids: visited: %d, solved: %d, others: %d\n\n' \
-            % (left_aids_visit_count, left_aids_solve_count, (left_aids_visit_count - left_aids_solve_count)) + \
+        % (left_aids_visit_count, left_aids_solve_count, (left_aids_visit_count - left_aids_solve_count)) + \
         'not added aids: visited: %d, solved: %d, others: %d\n\n' \
-            % (not_added_aids_visit_count, not_added_aids_solve_count,
-            (not_added_aids_visit_count - not_added_aids_solve_count)) + \
+        % (not_added_aids_visit_count, not_added_aids_solve_count,
+           (not_added_aids_visit_count - not_added_aids_solve_count)) + \
         'by.bunnyxt, %s' % ts_s_to_str(get_ts_s())
 
     logger_11.info('Finish updating c30 aids!')
@@ -316,9 +317,70 @@ def update_aids_c30(aids):
     # tmp update recent field end
 
     # tmp update activity field begin
-    if time.strftime('%w', time.localtime(time.time())) == '6':
-        # TODO
-        pass
+    try:
+        this_week_ts_begin = int(time.mktime(time.strptime(str(datetime.date.today()), '%Y-%m-%d'))) + 4 * 60 * 60
+        this_week_ts_end = this_week_ts_begin + 30 * 60
+        this_week_results = session.execute(
+            'select r.`aid`, `view` from tdd_video_record r join tdd_video v on r.aid = v.aid ' +
+            'where r.added >= %d && r.added <= %d' % (this_week_ts_begin, this_week_ts_end))
+        this_week_records = {}
+        for result in this_week_results:
+            aid = result[0]
+            view = result[1]
+            if aid in this_week_records.keys():
+                last_view = this_week_records[aid]
+                if view > last_view:
+                    this_week_records[aid] = view
+            else:
+                this_week_records[aid] = view
+
+        last_week_ts_begin = this_week_ts_begin - 7 * 24 * 60 * 60
+        last_week_ts_end = last_week_ts_begin + 30 * 60
+        last_week_results = session.execute(
+            'select r.`aid`, `view` from tdd_video_record r join tdd_video v on r.aid = v.aid ' +
+            'where r.added >= %d && r.added <= %d' % (last_week_ts_begin, last_week_ts_end))
+        last_week_records = {}
+        for result in last_week_results:
+            aid = result[0]
+            view = result[1]
+            if aid in last_week_records.keys():
+                last_view = last_week_records[aid]
+                if view < last_view:
+                    last_week_records[aid] = view
+            else:
+                last_week_records[aid] = view
+
+        last_week_record_keys = last_week_records.keys()
+        diff_records = {}
+        for aid in this_week_records.keys():
+            if aid in last_week_record_keys:
+                diff_records[aid] = this_week_records[aid] - last_week_records[aid]
+            else:
+                diff_records[aid] = this_week_records[aid]
+
+        active_aids = []
+        hot_aids = []
+        for aid, view in diff_records.items():
+            if view >= 5000:
+                hot_aids.append(aid)
+            elif view >= 1000:
+                active_aids.append(aid)
+
+        session.execute('update tdd_video set active = 0')
+        session.commit()
+
+        for aid in active_aids:
+            session.execute('update tdd_video set active = 1 where aid = %d' % aid)
+            session.commit()
+
+        for aid in hot_aids:
+            session.execute('update tdd_video set active = 2 where aid = %d' % aid)
+            session.commit()
+
+        logger_11.info('active_aids: %r' % active_aids)
+        logger_11.info('hot_aids: %r' % hot_aids)
+    except Exception as e:
+        logger_11.info(e)
     # tmp update activity field end
 
     session.close()
