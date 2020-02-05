@@ -153,7 +153,8 @@ def add_new_video_record_via_awesome_api(aids, time_label):
         last_page_aids = this_page_aids
         this_page_aids = []
 
-        logger_14.info('%s Page %d / %d done, %d added.' % (time_label, page_num, page_total, this_page_added))
+        if this_page_added > 0:
+            logger_14.info('%s Page %d / %d done, %d added.' % (time_label, page_num, page_total, this_page_added))
 
         # update page num
         page_total = math.ceil(obj['data']['page']['count'] / 50)
