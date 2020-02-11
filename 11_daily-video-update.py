@@ -318,6 +318,7 @@ def update_aids_c30(aids):
 
     # tmp update activity field begin
     try:
+        # update everyday
         this_week_ts_begin = int(time.mktime(time.strptime(str(datetime.date.today()), '%Y-%m-%d'))) + 4 * 60 * 60
         this_week_ts_end = this_week_ts_begin + 30 * 60
         this_week_results = session.execute(
@@ -366,15 +367,15 @@ def update_aids_c30(aids):
             elif view >= 1000:
                 active_aids.append(aid)
 
-        session.execute('update tdd_video set active = 0')
+        session.execute('update tdd_video set activity = 0')
         session.commit()
 
         for aid in active_aids:
-            session.execute('update tdd_video set active = 1 where aid = %d' % aid)
+            session.execute('update tdd_video set activity = 1 where aid = %d' % aid)
             session.commit()
 
         for aid in hot_aids:
-            session.execute('update tdd_video set active = 2 where aid = %d' % aid)
+            session.execute('update tdd_video set activity = 2 where aid = %d' % aid)
             session.commit()
 
         logger_11.info('active_aids: %r' % active_aids)
