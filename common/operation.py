@@ -117,8 +117,9 @@ def update_video(aid, bapi, session):
     # check following attr
     try:
         if view_obj['code'] != old_obj.code:
-            video_update_logs.append(TddVideoLog(added, aid, 'code', old_obj.code, view_obj['code']))
-            old_obj.code = view_obj['code']
+            if view_obj['code'] != -403:  # just due to not logged in, actually it's okay
+                video_update_logs.append(TddVideoLog(added, aid, 'code', old_obj.code, view_obj['code']))
+                old_obj.code = view_obj['code']
         if view_obj['code'] == 0:
             if view_obj['data']['videos'] != old_obj.videos:
                 video_update_logs.append(TddVideoLog(added, aid, 'videos', old_obj.videos, view_obj['data']['videos']))
