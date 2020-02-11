@@ -187,3 +187,13 @@ class DBOperation:
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'is_tid_30': is_tid_30}), exc_info=True)
             return None
+
+    @classmethod
+    def query_video_aids(cls, offset, size, session):
+        try:
+            result = session.execute(
+                'select aid from tdd_video limit %d, %d' % (offset, size))
+            return list(r[0] for r in result)
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'offset': offset, 'size': size}), exc_info=True)
+            return None
