@@ -1,4 +1,4 @@
-__all__ = ['TddCommonError', 'AlreadyExistError', 'InvalidObjError', 'InvalidObjCodeError', 'InvalidParamError']
+__all__ = ['TddCommonError', 'AlreadyExistError', 'NotExistError', 'InvalidObjError', 'InvalidObjCodeError', 'InvalidParamError']
 
 
 class TddCommonError(Exception):
@@ -19,6 +19,17 @@ class AlreadyExistError(TddCommonError):
 
     def __str__(self):
         return 'Params {0} in table {1} already exist!'.format(self.params, self.table_name)
+
+
+class NotExistError(TddCommonError):
+
+    def __init__(self, table_name, params):
+        super().__init__()
+        self.table_name = table_name
+        self.params = params
+
+    def __str__(self):
+        return 'Params {0} in table {1} not exist!'.format(self.params, self.table_name)
 
 
 class InvalidObjError(TddCommonError):
