@@ -2,7 +2,8 @@ from .basic import Base
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, BigInteger
 from sqlalchemy.dialects.mysql import LONGTEXT, TINYINT
 
-__all__ = ['TddVideo', 'TddMember', 'TddVideoStaff', 'TddVideoRecord', 'TddMemberFollowerRecord', 'TddStatDaily', 'TddVideoLog']
+__all__ = ['TddVideo', 'TddMember', 'TddVideoStaff', 'TddVideoRecord', 'TddMemberFollowerRecord', 'TddStatDaily',
+           'TddVideoLog', 'TddMemberLog']
 
 
 class TddVideo(Base):
@@ -151,3 +152,26 @@ class TddVideoLog(Base):
 
     def __repr__(self):
         return '<TddVideoLog(aid=%d,attr=%s)>' % (self.aid, self.attr)
+
+
+class TddMemberLog(Base):
+    """tdd_member_log_table"""
+
+    __tablename__ = 'tdd_member_log'
+
+    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    added = Column(Integer, nullable=False)
+    mid = Column(Integer, nullable=False)
+    attr = Column(String(30), nullable=False)
+    oldval = Column(LONGTEXT)
+    newval = Column(LONGTEXT)
+
+    def __init__(self, added, mid, attr, oldval, newval):
+        self.added = added
+        self.mid = mid
+        self.attr = attr
+        self.oldval = oldval
+        self.newval = newval
+
+    def __repr__(self):
+        return '<TddMemberLog(mid=%d,attr=%s)>' % (self.mid, self.attr)
