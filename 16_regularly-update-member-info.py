@@ -90,9 +90,7 @@ def regularly_update_member_info_task():
 
 def main():
     logger_16.info('16: regularly update member info')
-    # schedule.every().day.at('00:00').do(regularly_update_member_info_task)
-
-    regularly_update_member_info()
+    schedule.every().day.at('00:00').do(regularly_update_member_info_task)
 
     while True:
         schedule.run_pending()
