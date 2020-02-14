@@ -85,7 +85,7 @@ def regularly_update_member_info():
 
 
 def regularly_update_member_info_task():
-    threading.Thread(target=regularly_update_member_info_task).start()
+    threading.Thread(target=regularly_update_member_info).start()
 
 
 def main():
