@@ -307,6 +307,8 @@ def update_aids_c30(aids):
         now_ts = get_ts_s()
         last_1d_ts = now_ts - 1 * 24 * 60 * 60
         last_7d_ts = now_ts - 7 * 24 * 60 * 60
+        session.execute('update tdd_video set recent = 0 where added < %d' % last_7d_ts)
+        session.commit()
         session.execute('update tdd_video set recent = 1 where added >= %d && added < %d' % (last_7d_ts, last_1d_ts))
         session.commit()
         session.execute('update tdd_video set recent = 2 where added >= %d' % last_1d_ts)
