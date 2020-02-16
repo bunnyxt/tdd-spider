@@ -155,7 +155,41 @@ def update_video(aid, bapi, session):
             if new_hasstaff != old_obj.hasstaff:
                 video_update_logs.append(TddVideoLog(added, aid, 'hasstaff', old_obj.hasstaff, new_hasstaff))
                 old_obj.hasstaff = new_hasstaff
-            # TODO update staff list
+
+            # update staff list
+            old_staff_list = DBOperation.query_video_staff_via_aid(aid, session)
+            if new_hasstaff == 1:
+                for staff in view_obj['data']['staff']:
+                    # get staff in db
+                    old_staff = None
+                    for old_staff_single in old_staff_list:
+                        if old_staff_single['mid'] == staff['mid']:
+                            old_staff = old_staff_single
+                            old_staff_list.remove(old_staff)
+                    if old_staff:
+                        # staff exist, check it
+                        if staff['title'] != old_staff.title:
+                            video_update_logs.append(TddVideoLog(added, aid, 'staff.title', old_staff.title, staff['title']))
+                            old_staff.title = staff['title']
+                    else:
+                        # staff not exist, add it
+                        try:
+                            add_member(staff['mid'], bapi, session)
+                        except TddCommonError as e:
+                            print(e)
+                        try:
+                            new_staff = add_staff(added, aid, staff['mid'], staff['title'], session)
+                        except TddCommonError as e:
+                            print(e)
+                        else:
+                            video_update_logs.append(TddVideoLog(added, aid, 'staff', None, 'mid: %d; title: %s'
+                                                                 % (new_staff.mid, new_staff.title)))
+                    time.sleep(0.2)
+            # remove staff left in old_staff_list
+                for old_staff in old_staff_list:
+                    DBOperation.delete_video_staff_via_id(old_staff.id, session)
+                    video_update_logs.append(TddVideoLog(added, aid, 'staff', 'mid: %d; title: %s'
+                                                         % (old_staff.mid, old_staff.title), None))
 
             session.commit()  # commit changes
     except Exception as e:
@@ -247,7 +281,14 @@ def update_member(mid, bapi, session):
     return member_update_logs
 
 
-def add_staff(added, aid, mid, title, session):
+def add_staff(added, aid, mid, title, session, test_exist=True):
+    # test exist
+    if test_exist:
+        staff = DBOperation.query_video_staff_via_aid_mid(aid, mid, session)
+        if staff is not None:
+            # staff already exist
+            raise AlreadyExistError(table_name='tdd_video_staff', params={'aid': aid, 'mid': mid})
+
     new_staff = TddVideoStaff()
 
     # set attr
