@@ -3,7 +3,7 @@ import logging.config
 import os
 
 __all__ = ['BASE_DIR', 'LOG_DIR', 'logger_01', 'logger_11', 'logger_11_c0', 'logger_11_c30',
-           'logger_12', 'logger_13', 'logger_14', 'logger_15', 'logger_16', 'logger_db']
+           'logger_12', 'logger_13', 'logger_14', 'logger_15', 'logger_16', 'logger_17', 'logger_db']
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 LOG_DIR = os.path.join(BASE_DIR, 'log')
@@ -248,6 +248,28 @@ LOG_CONFIG_DICT = {
             'backupCount': 30,
             'filters': ['warning_plus_filter']
         },
+        'file_info_17': {
+            'level': 'INFO',
+            'formatter': 'simple',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, '17_info.log'),
+            'when': "d",
+            'interval': 1,
+            'encoding': 'utf8',
+            'backupCount': 30,
+            'filters': ['info_plus_filter']
+        },
+        'file_warning_17': {
+            'level': 'WARNING',
+            'formatter': 'simple',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, '17_warning.log'),
+            'when': "d",
+            'interval': 1,
+            'encoding': 'utf8',
+            'backupCount': 30,
+            'filters': ['warning_plus_filter']
+        },
         'file_info_db': {
             'level': 'INFO',
             'formatter': 'simple',
@@ -308,6 +330,10 @@ LOG_CONFIG_DICT = {
             'handlers': ['console_info', 'file_info_16', 'file_warning_16'],
             'level': 'INFO'
         },
+        'logger_17': {
+            'handlers': ['console_info', 'file_info_17', 'file_warning_17'],
+            'level': 'INFO'
+        },
         'logger_db': {
             'handlers': ['console_info', 'file_info_db', 'file_warning_db'],
             'level': 'INFO'
@@ -326,4 +352,5 @@ logger_13 = logging.getLogger('logger_13')
 logger_14 = logging.getLogger('logger_14')
 logger_15 = logging.getLogger('logger_15')
 logger_16 = logging.getLogger('logger_16')
+logger_17 = logging.getLogger('logger_17')
 logger_db = logging.getLogger('logger_db')
