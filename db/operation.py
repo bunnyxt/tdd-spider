@@ -234,3 +234,12 @@ class DBOperation:
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'offset': offset, 'size': size}), exc_info=True)
             return None
+
+    @classmethod
+    def query_all_member_mids(cls, session):
+        try:
+            result = session.execute('select mid from tdd_member')
+            return list(r[0] for r in result)
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
+            return None
