@@ -326,6 +326,9 @@ def _6h(time_label):
     add_15m_aids(time_label, task_label, c0_aids, c30_aids, session)
     add_1h_aids(time_label, task_label, c0_aids, c30_aids, session)
 
+    c0_aids = list(set(c0_aids))
+    c30_aids = list(set(c30_aids))
+
     update_thread_list = [threading.Thread(target=add_new_video_record_via_stat_api, args=(c0_aids, time_label)),
                           threading.Thread(target=add_new_video_record_via_awesome_api, args=(c30_aids, time_label))]
 
@@ -350,6 +353,9 @@ def _1h(time_label):
     add_15m_aids(time_label, task_label, c0_aids, c30_aids, session)
     add_1h_aids(time_label, task_label, c0_aids, c30_aids, session)
 
+    c0_aids = list(set(c0_aids))
+    c30_aids = list(set(c30_aids))
+
     update_thread_list = [threading.Thread(target=add_new_video_record_via_stat_api, args=(c0_aids, time_label)),
                           threading.Thread(target=add_new_video_record_via_awesome_api, args=(c30_aids, time_label))]
 
@@ -372,6 +378,9 @@ def _15m(time_label):
 
     task_label = '_15m'
     add_15m_aids(time_label, task_label, c0_aids, c30_aids, session)
+
+    c0_aids = list(set(c0_aids))
+    c30_aids = list(set(c30_aids))
 
     update_thread_list = [threading.Thread(target=add_new_video_record_via_stat_api, args=(c0_aids, time_label)),
                           threading.Thread(target=add_new_video_record_via_awesome_api, args=(c30_aids, time_label))]
