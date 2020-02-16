@@ -1,6 +1,6 @@
 import time
 
-__all__ = ['get_valid', 'test_video_view', 'test_video_stat', 'test_video_tags', 'test_member',
+__all__ = ['get_valid', 'test_video_view', 'test_video_stat', 'test_video_tags', 'test_member', 'test_member_relation',
            'test_archive_rank_by_partion']
 
 
@@ -80,6 +80,17 @@ def test_video_stat(obj):
 
 
 def test_member(obj):
+    try:
+        basic_test_result = basic_test(obj)
+        if basic_test_result is not None:
+            return basic_test_result
+
+        return None
+    except Exception as e:
+        return str(e)
+
+
+def test_member_relation(obj):
     try:
         basic_test_result = basic_test(obj)
         if basic_test_result is not None:
