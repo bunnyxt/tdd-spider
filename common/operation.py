@@ -1,15 +1,17 @@
-from .validation import get_valid, test_video_view, test_video_tags, test_member, test_video_stat
+from .validation import get_valid, test_video_view, test_video_tags, test_member, test_video_stat, test_member_relation
 from .error import *
 from util import get_ts_s
-from db import TddVideo, TddVideoStaff, TddMember, DBOperation, TddVideoRecord, TddVideoLog, TddMemberLog
+from db import TddVideo, TddVideoStaff, TddMember, DBOperation, TddVideoRecord, \
+    TddVideoLog, TddMemberLog, TddMemberFollowerRecord
 import time
 
 __all__ = ['add_video', 'update_video', 'add_member', 'update_member', 'add_staff', 'add_video_record_via_awesome_stat',
-           'add_video_record_via_stat_api', 'get_tags_str']
+           'add_video_record_via_stat_api', 'add_member_follower_record_via_relation_api', 'get_tags_str']
 
 
 def add_video(aid, bapi, session, test_exist=True, params=None, set_recent=True,
-              set_isvc=True, add_video_owner=True, add_video_staff=True):
+              set_isvc=True, add_video_owner=True, add_video_staff=True,
+              update_member_last_video=True, update_member_video_count=True):
     # test exist
     if test_exist:
         video = DBOperation.query_video_via_aid(aid, session)
@@ -68,6 +70,9 @@ def add_video(aid, bapi, session, test_exist=True, params=None, set_recent=True,
                 new_video.isvc = 2
                 break
 
+    member_mid_set = set()
+    member_mid_set.add(new_video.mid)
+
     # add member
     if add_video_owner:
         try:
@@ -80,6 +85,7 @@ def add_video(aid, bapi, session, test_exist=True, params=None, set_recent=True,
         if 'staff' in view_obj['data'].keys():
             new_video.hasstaff = 1
             for staff in view_obj['data']['staff']:
+                member_mid_set.add(staff['mid'])
                 try:
                     add_member(staff['mid'], bapi, session)
                 except TddCommonError as e:
@@ -94,6 +100,20 @@ def add_video(aid, bapi, session, test_exist=True, params=None, set_recent=True,
 
     # add to db
     DBOperation.add(new_video, session)
+
+    # get new video id
+    new_video = DBOperation.query_video_via_aid(aid, session)
+
+    if update_member_last_video or update_member_video_count:
+        for mid in member_mid_set:
+            member = DBOperation.query_member_via_mid(mid, session)
+            # update member last video
+            if update_member_last_video:
+                member.last_video = new_video.id
+            # update member video count
+            if update_member_video_count:
+                member.video_count += 1
+            session.commit()
 
     return new_video
 
@@ -356,6 +376,32 @@ def add_video_record_via_stat_api(aid, bapi, session):
     DBOperation.add(new_video_record, session)
 
     return new_video_record
+
+
+def add_member_follower_record_via_relation_api(mid, bapi, session):
+    # get relation_obj
+    relation_obj = get_valid(bapi.get_member_relation, (mid,), test_member_relation)
+    if relation_obj is None:
+        # fail to get valid relation_obj
+        raise InvalidObjError(obj_name='relation', params={'mid': mid})
+
+    new_member_follower_record = TddMemberFollowerRecord()
+
+    # set basic attr
+    new_member_follower_record.mid = mid
+    new_member_follower_record.added = get_ts_s()
+
+    # set attr from relation_obj
+    if relation_obj['code'] == 0:
+        new_member_follower_record.follower = relation_obj['data']['follower']
+    else:
+        # relation code != 0
+        raise InvalidObjCodeError(obj_name='relation', code=relation_obj['code'])
+
+    # add to db
+    DBOperation.add(new_member_follower_record, session)
+
+    return new_member_follower_record
 
 
 def get_tags_str(aid, bapi):
