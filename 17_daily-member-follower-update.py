@@ -33,8 +33,7 @@ def daily_member_follower_update():
             logger_17.warning(e)
             fail_mids.append(mid)
         else:
-            logger_17.info('Add new record %s' % new_member_follower_record)
-            # logger_17.debug('Add new record %s' % new_member_follower_record)
+            logger_17.debug('Add new record %s' % new_member_follower_record)
             added_mids_count += 1
 
         time.sleep(0.2)  # api duration banned
