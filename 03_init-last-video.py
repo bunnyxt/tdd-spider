@@ -37,8 +37,8 @@ def main():
     print(fail_mids)
 
     for key, value in ws.items():
-        if key <= 1930014:
-            continue
+        # if key <= 1930014:
+        #     continue
         id = value[0]
         pubdate = value[1]
         if id != 0 and pubdate != 0:
