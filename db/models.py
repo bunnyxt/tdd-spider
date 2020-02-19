@@ -3,7 +3,7 @@ from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, BigInteger
 from sqlalchemy.dialects.mysql import LONGTEXT, TINYINT
 
 __all__ = ['TddVideo', 'TddMember', 'TddVideoStaff', 'TddVideoRecord', 'TddMemberFollowerRecord', 'TddStatDaily',
-           'TddVideoLog', 'TddMemberLog']
+           'TddVideoLog', 'TddMemberLog', 'TddMemberTotalStatRecord']
 
 
 class TddVideo(Base):
@@ -179,3 +179,36 @@ class TddMemberLog(Base):
 
     def __repr__(self):
         return '<TddMemberLog(mid=%d,attr=%s)>' % (self.mid, self.attr)
+
+
+class TddMemberTotalStatRecord(Base):
+    """tdd_member_total_stat_record"""
+
+    __tablename__ = 'tdd_member_total_stat_record'
+
+    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    added = Column(Integer, nullable=False)
+    mid = Column(Integer, nullable=False)
+    video_count = Column(Integer, nullable=False)
+    view = Column(Integer, nullable=False)  # maybe '--' from api, set -1 instead
+    danmaku = Column(Integer, nullable=False)
+    reply = Column(Integer, nullable=False)
+    favorite = Column(Integer, nullable=False)
+    coin = Column(Integer, nullable=False)
+    share = Column(Integer, nullable=False)
+    like = Column(Integer, nullable=False)
+
+    def __init__(self, added, mid, video_count=0, view=0, danmaku=0, reply=0, favorite=0, coin=0, share=0, like=0):
+        self.added = added
+        self.mid = mid
+        self.video_count = video_count
+        self.view = view
+        self.danmaku = danmaku
+        self.reply = reply
+        self.favorite = favorite
+        self.coin = coin
+        self.share = share
+        self.like = like
+
+    def __repr__(self):
+        return '<TddMemberTotalStatRecord(mid=%d,video_count=%d)>' % (self.mid, self.video_count)
