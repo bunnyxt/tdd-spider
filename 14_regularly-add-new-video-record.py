@@ -325,6 +325,7 @@ def _6h(time_label):
     task_label = '_6h'
     add_15m_aids(time_label, task_label, c0_aids, c30_aids, session)
     add_1h_aids(time_label, task_label, c0_aids, c30_aids, session)
+    add_6h_aids(time_label, task_label, c0_aids, c30_aids, session)
 
     c0_aids = list(set(c0_aids))
     c30_aids = list(set(c30_aids))
