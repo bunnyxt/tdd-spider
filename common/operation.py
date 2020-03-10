@@ -183,7 +183,7 @@ def update_video(aid, bapi, session):
                     # get staff in db
                     old_staff = None
                     for old_staff_single in old_staff_list:
-                        if old_staff_single['mid'] == staff['mid']:
+                        if old_staff_single.mid == staff['mid']:
                             old_staff = old_staff_single
                             old_staff_list.remove(old_staff)
                     if old_staff:
