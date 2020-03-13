@@ -3,7 +3,7 @@ from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, BigInteger
 from sqlalchemy.dialects.mysql import LONGTEXT, TINYINT
 
 __all__ = ['TddVideo', 'TddMember', 'TddVideoStaff', 'TddVideoRecord', 'TddMemberFollowerRecord', 'TddStatDaily',
-           'TddVideoLog', 'TddMemberLog', 'TddMemberTotalStatRecord']
+           'TddVideoLog', 'TddMemberLog', 'TddMemberTotalStatRecord', 'TddTaskVisitVideoRecord']
 
 
 class TddVideo(Base):
@@ -212,3 +212,18 @@ class TddMemberTotalStatRecord(Base):
 
     def __repr__(self):
         return '<TddMemberTotalStatRecord(mid=%d,video_count=%d)>' % (self.mid, self.video_count)
+
+
+class TddTaskVisitVideoRecord(Base):
+    """tdd_task_visit_video_record"""
+
+    __tablename__ = 'tdd_task_visit_video_record'
+
+    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    added = Column(Integer, nullable=False)
+    aid = Column(Integer, nullable=False)
+    userid = Column(BigInteger, nullable=False)
+    status = Column(TINYINT, nullable=False)
+
+    def __repr__(self):
+        return '<TddTaskVisitVideoRecord(added=%d,aid=%d)>' % (self.added, self.aid)
