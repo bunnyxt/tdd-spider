@@ -1,5 +1,5 @@
 from logger import logger_db
-from .models import TddVideo, TddMember, TddVideoStaff
+from .models import TddVideo, TddMember, TddVideoStaff, TddTaskVisitVideoRecord
 from sqlalchemy import text
 
 __all__ = ['DBOperation']
@@ -242,4 +242,23 @@ class DBOperation:
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
+            return None
+
+    @classmethod
+    def query_task_video_record(cls, session):
+        try:
+            return session.query(TddTaskVisitVideoRecord).filter(TddTaskVisitVideoRecord.status == 0).all()
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
+            return None
+
+    @classmethod
+    def query_last_added_via_aid(cls, aid, session):
+        try:
+            result = session.execute(
+                'select r.added from tdd_video v left join tdd_video_record r on v.laststat=r.id where v.aid = %d'
+                % aid).first()
+            return int(result[0])
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'aid': aid}), exc_info=True)
             return None
