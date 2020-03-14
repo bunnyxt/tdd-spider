@@ -1,5 +1,8 @@
 from db import Session
 import time
+import sys
+from util import get_ts_s, ts_s_to_str
+from serverchan import sc_send
 
 
 class Log:
@@ -137,36 +140,56 @@ class Log:
 def main():
     filename = '/var/log/apache2/api/access.log'
     last_line = 0
+
+    if len(sys.argv) >= 2:
+        filename = sys.argv[1]
+        print('set filename to %s' % filename)
+    if len(sys.argv) >= 3:
+        last_line = int(sys.argv[2])
+        print('set last_line to %d' % last_line)
+
     while True:
-        session = Session()
+        try:
+            session = Session()
 
-        with open(filename) as f:
-            lines = f.readlines()
+            # read lines
+            with open(filename) as f:
+                lines = f.readlines()
 
-        if len(lines) < last_line:
-            print('last_line %d -> 0' % last_line)
-            last_line = 0
+            # file removed, reset to 0, lose some logs
+            if len(lines) < last_line:
+                print('%s last_line %d -> 0' % (ts_s_to_str(get_ts_s()), last_line))
+                last_line = 0
 
-        if last_line == len(lines):
+            # no new log
+            if last_line == len(lines):
+                session.close()
+                time.sleep(30)
+                continue
+
+            # process new log
+            for line in lines[last_line:]:
+                try:
+                    log = Log(line)
+                    sql = 'insert into tdd_api_log values ("{0}", {1}, "{2}", "{3}", "{4}", {5}, {6})'.format(
+                        log.remote_host, log.time_stamp, log.request_method, log.request_url[:100], log.request_param,
+                        log.response_status, log.response_size)
+                    session.execute(sql)
+                    session.commit()
+                except Exception as e:
+                    print(ts_s_to_str(get_ts_s()), e)
+                    session.rollback()
+
+            # update last_line
+            last_line = len(lines)
             session.close()
-            time.sleep(30)
-            continue
-
-        for line in lines[last_line:]:
-            log = Log(line)
-            try:
-                sql = 'insert into tdd_api_log values ("{0}", {1}, "{2}", "{3}", "{4}", {5}, {6})'.format(
-                    log.remote_host, log.time_stamp, log.request_method, log.request_url[:100], log.request_param,
-                    log.response_status, log.response_size)
-                session.execute(sql)
-                session.commit()
-            except Exception as e:
-                print(e)
-                session.rollback()
-
-        last_line = len(lines)
-        session.close()
-        time.sleep(5)
+            time.sleep(5)
+        except Exception as e:
+            print(ts_s_to_str(get_ts_s()), e)
+            print('%s last_line %d' % (ts_s_to_str(get_ts_s()), last_line))
+            sc_send('41_load-apache-api-log-into-db error!',
+                    '%s %r last_line %d' % (ts_s_to_str(get_ts_s()), e, last_line))
+            break
 
 
 if __name__ == '__main__':
