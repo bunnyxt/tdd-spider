@@ -262,3 +262,17 @@ class DBOperation:
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'aid': aid}), exc_info=True)
             return None
+
+    @classmethod
+    def query_freq_update_video_aids(cls, freq, is_tid_30, session):
+        try:
+            if is_tid_30:
+                result = session.query(TddVideo.aid).filter(TddVideo.tid == 30, TddVideo.code == 0,
+                                                            TddVideo.freq == freq).all()
+            else:
+                result = session.query(TddVideo.aid).filter(TddVideo.tid != 30, TddVideo.code == 0,
+                                                            TddVideo.recent == freq).all()
+            return list(r[0] for r in result)
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'is_tid_30': is_tid_30}), exc_info=True)
+            return None
