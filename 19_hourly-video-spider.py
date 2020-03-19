@@ -349,10 +349,12 @@ def hour(time_label):
     logger_19.info('08: check params of history video records')
 
     # check record
-    for record in new_video_record_list:
-        video_record_list = history_record_dict[record.aid]
-        video_record_list.sort(key=lambda r: r.added)
-        # TODO check params
+    # for record in new_video_record_list:
+    #     video_record_list = history_record_dict[record.aid]
+    #     video_record_list.sort(key=lambda r: r.added)
+    #     # TODO check params
+
+    session.close()
 
 
 def hour_task(time_label):
@@ -369,9 +371,8 @@ def main():
         '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
     ]
 
-    # for time_label in hour_list:
-    #     schedule.every().day.at(time_label).do(hour_task, time_label)
-    hour_task('20:37')  # for debug
+    for time_label in hour_list:
+        schedule.every().day.at(time_label).do(hour_task, time_label)
 
     logger_19.info('All hourly task registered.')
 
