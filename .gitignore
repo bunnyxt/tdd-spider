@@ -9,6 +9,7 @@ venv/
 __pycache__/
 
 log/
+data/
 
 library/
 test*
