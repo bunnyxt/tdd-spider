@@ -271,7 +271,7 @@ class DBOperation:
                                                             TddVideo.freq == freq).all()
             else:
                 result = session.query(TddVideo.aid).filter(TddVideo.tid != 30, TddVideo.code == 0,
-                                                            TddVideo.recent == freq).all()
+                                                            TddVideo.freq == freq).all()
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'is_tid_30': is_tid_30}), exc_info=True)
