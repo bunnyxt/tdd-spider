@@ -73,6 +73,7 @@ def hour(time_label):
             logger_19.error('Awesome api fetch %d / %d error, Exception caught. Detail: %s' % (page_num, page_total, e))
         finally:
             page_num += 1
+    logger_19.info('Awesome api fetch %d / %d done' % (page_num - 1, page_total))
 
     logger_19.info('01 done! c30_new_video_record_list count: %d' % len(c30_new_video_record_list))
 
@@ -130,6 +131,7 @@ def hour(time_label):
     c30_success_aids = []
     c30_visited = 0
     c30_not_added_record_list = []
+    need_insert_c30_aid_list_count = len(need_insert_c30_aid_list)
 
     for record in c30_new_video_record_list:
         if record.aid in need_insert_c30_aid_list:
@@ -138,28 +140,32 @@ def hour(time_label):
                 continue
             need_insert_c30_aid_list.remove(record.aid)
             session.add(record)  # TODO may cause error?
+            c30_success_aids.append(record.aid)
             c30_visited += 1
             if c30_visited % 100 == 0:
                 try:
                     session.commit()
                 except Exception as e:
                     logger_19.error('Fail to add c30 aid add %d / %d, Exception caught. Detail: %s'
-                                    % (c30_visited, len(need_insert_c30_aid_list), e))
+                                    % (c30_visited, need_insert_c30_aid_list_count, e))
                     session.rollback()
                 else:
-                    logger_19.info('c30 aid add %d / %d done' % (c30_visited, len(need_insert_c30_aid_list)))
+                    logger_19.info('c30 aid add %d / %d done' % (c30_visited, need_insert_c30_aid_list_count))
         else:
             c30_not_added_record_list.append(record)
     session.commit()
+    logger_19.info('c30 aid add %d / %d done' % (c30_visited, need_insert_c30_aid_list_count))
 
-    logger_19.info('03 done! c30_total_aids count: %d, c30_success_aids count: %d, c30_not_added_record_list count: %d'
-                   % (len(need_insert_c30_aid_list), len(c30_success_aids), len(c30_not_added_record_list)))
+    c30_left_aids = need_insert_c30_aid_list
+    logger_19.info('03 done! c30_total_aids count: %d, c30_success_aids count: %d, '
+                   % (need_insert_c30_aid_list_count, len(c30_success_aids)) +
+                   'c30_left_aids count: %d, c30_not_added_record_list count: %d'
+                   % (len(c30_left_aids), len(c30_not_added_record_list)))
 
     logger_19.info('04: check left aids, change tid or code')
 
     # there aids should got record from awesome api, but now seems they dont
     # might because they are now tid != 30 or code != 0
-    c30_left_aids = need_insert_c30_aid_list
     c30_left_unsolved_aids = []  # fail to handle
     c30_left_tid_changed_aids = []  # tid changed 30 -> new tid
     c30_left_code_changed_aids = []  # code changed 0 -> new code
