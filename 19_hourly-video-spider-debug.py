@@ -1,7 +1,7 @@
 import schedule
 import threading
 from logger import logger_19
-from db import DBOperation, Session, TddVideoRecord, TddVideoLog
+from db import DBOperation, Session, TddVideoRecord, TddVideoLog, TddVideoRecordAbnormalChange
 import time
 from util import get_ts_s, ts_s_to_str
 from pybiliapi import BiliApi
@@ -133,28 +133,27 @@ def hour(time_label):
     c30_not_added_record_list = []
     need_insert_c30_aid_list_count = len(need_insert_c30_aid_list)
 
-    # # debug skip c30_new_video_record add
-    # for record in c30_new_video_record_list:
-    #     if record.aid in need_insert_c30_aid_list:
-    #         if record.aid in c30_success_aids:
-    #             logger_19.warning('c30 aid %d already added' % record.aid)
-    #             continue
-    #         need_insert_c30_aid_list.remove(record.aid)
-    #         session.add(record)  # TODO may cause error?
-    #         c30_success_aids.append(record.aid)
-    #         c30_visited += 1
-    #         if c30_visited % 100 == 0:
-    #             try:
-    #                 session.commit()
-    #             except Exception as e:
-    #                 logger_19.error('Fail to add c30 aid add %d / %d, Exception caught. Detail: %s'
-    #                                 % (c30_visited, need_insert_c30_aid_list_count, e))
-    #                 session.rollback()
-    #             else:
-    #                 logger_19.info('c30 aid add %d / %d done' % (c30_visited, need_insert_c30_aid_list_count))
-    #     else:
-    #         c30_not_added_record_list.append(record)
-    # session.commit()
+    for record in c30_new_video_record_list:
+        if record.aid in need_insert_c30_aid_list:
+            if record.aid in c30_success_aids:
+                logger_19.warning('c30 aid %d already added' % record.aid)
+                continue
+            need_insert_c30_aid_list.remove(record.aid)
+            session.add(record)  # TODO may cause error?
+            c30_success_aids.append(record.aid)
+            c30_visited += 1
+            if c30_visited % 100 == 0:
+                try:
+                    session.commit()
+                except Exception as e:
+                    logger_19.error('Fail to add c30 aid add %d / %d, Exception caught. Detail: %s'
+                                    % (c30_visited, need_insert_c30_aid_list_count, e))
+                    session.rollback()
+                else:
+                    logger_19.info('c30 aid add %d / %d done' % (c30_visited, need_insert_c30_aid_list_count))
+        else:
+            c30_not_added_record_list.append(record)
+    session.commit()
     logger_19.info('c30 aid add %d / %d done' % (c30_visited, need_insert_c30_aid_list_count))
 
     c30_left_aids = need_insert_c30_aid_list
@@ -173,92 +172,91 @@ def hour(time_label):
     c30_left_added_aids = []  # tid = 30 and code = 0, add new video record
 
     logger_19.info('got %d c30 left aids' % len(c30_left_aids))
-    # # debug skip c30_new_video_record add
-    # for aid in c30_left_aids:
-    #     time.sleep(0.2)  # api duration banned
-    #     # get view obj
-    #     view_obj = get_valid(bapi.get_video_view, (aid,), test_video_view)
-    #     if view_obj is None:
-    #         logger_19.warning('Aid %d fail! Cannot get valid view obj.' % aid)
-    #         c30_left_unsolved_aids.append(aid)
-    #         continue
-    #
-    #     # record view obj request ts
-    #     view_obj_added = get_ts_s()
-    #
-    #     try:
-    #         # get video code
-    #         code = view_obj['code']
-    #
-    #         if code == 0:
-    #             # code==0, check tid next
-    #             if 'tid' in view_obj['data'].keys():
-    #                 # get video tid
-    #                 tid = view_obj['data']['tid']
-    #                 if tid != 30:
-    #                     # video tid!=30 now, change tid
-    #                     try:
-    #                         old_video = DBOperation.query_video_via_aid(aid, session)
-    #                         session.add(TddVideoLog(view_obj_added, aid, 'tid', old_video.tid, tid))
-    #                         old_video.tid = tid
-    #                         session.add(TddVideoLog(view_obj_added, aid, 'isvc', old_video.isvc, 5))
-    #                         old_video.isvc = 5
-    #                         session.commit()
-    #                         logger_19.info(
-    #                             'Update video aid = %d tid from 30 to %d then update isvc = %d.'
-    #                             % (aid, tid, 5))
-    #                         c30_left_tid_changed_aids.append(aid)
-    #                     except Exception as e:
-    #                         session.rollback()
-    #                         logger_19.warning(
-    #                             'Fail to update video aid = %d tid from 30 to %d then update isvc = %d. ' % (
-    #                                 aid, tid, 5) + 'Exception caught. Detail: %s' % e)
-    #                         c30_left_unsolved_aids.append(aid)
-    #                 else:
-    #                     # video tid==30, add video record
-    #                     # logger_19.warning(
-    #                     #     'Found aid = %d code == 0 and tid == 30! Now try add video record...' % aid)
-    #
-    #                     # get stat first
-    #                     stat = view_obj['data']['stat']
-    #
-    #                     # make new tdd video record obj and assign stat info from api
-    #                     new_video_record = TddVideoRecord()
-    #                     new_video_record.aid = aid
-    #                     new_video_record.added = view_obj_added
-    #                     new_video_record.view = -1 if stat['view'] == '--' else stat['view']
-    #                     new_video_record.danmaku = stat['danmaku']
-    #                     new_video_record.reply = stat['reply']
-    #                     new_video_record.favorite = stat['favorite']
-    #                     new_video_record.coin = stat['coin']
-    #                     new_video_record.share = stat['share']
-    #                     new_video_record.like = stat['like']
-    #
-    #                     # add to db
-    #                     DBOperation.add(new_video_record, session)
-    #                     logger_19.info('Add record %s.' % new_video_record)
-    #                     c30_left_added_aids.append(aid)
-    #             else:
-    #                 logger_19.error('View obj %s got code == 0 but no tid field! Need further check!' % view_obj)
-    #                 c30_left_unsolved_aids.append(aid)
-    #         else:
-    #             # code!=0, change code
-    #             try:
-    #                 old_video = DBOperation.query_video_via_aid(aid, session)
-    #                 session.add(TddVideoLog(view_obj_added, aid, 'code', old_video.code, code))
-    #                 old_video.code = code
-    #                 session.commit()
-    #                 logger_19.info('Update video aid = %d code from 0 to %d.' % (aid, code))
-    #                 c30_left_code_changed_aids.append(aid)
-    #             except Exception as e:
-    #                 session.rollback()
-    #                 logger_19.warning('Fail to update video aid = %d code from 0 to %d.' % (aid, code) +
-    #                                   'Exception caught. Detail: %s' % e)
-    #                 c30_left_unsolved_aids.append(aid)
-    #     except Exception as e:
-    #         logger_19.error(
-    #             'Exception caught when process view obj of left aid %d. Detail: %s' % (aid, e))
-    #         c30_left_unsolved_aids.append(aid)
+    for aid in c30_left_aids:
+        time.sleep(0.2)  # api duration banned
+        # get view obj
+        view_obj = get_valid(bapi.get_video_view, (aid,), test_video_view)
+        if view_obj is None:
+            logger_19.warning('Aid %d fail! Cannot get valid view obj.' % aid)
+            c30_left_unsolved_aids.append(aid)
+            continue
+
+        # record view obj request ts
+        view_obj_added = get_ts_s()
+
+        try:
+            # get video code
+            code = view_obj['code']
+
+            if code == 0:
+                # code==0, check tid next
+                if 'tid' in view_obj['data'].keys():
+                    # get video tid
+                    tid = view_obj['data']['tid']
+                    if tid != 30:
+                        # video tid!=30 now, change tid
+                        try:
+                            old_video = DBOperation.query_video_via_aid(aid, session)
+                            session.add(TddVideoLog(view_obj_added, aid, 'tid', old_video.tid, tid))
+                            old_video.tid = tid
+                            session.add(TddVideoLog(view_obj_added, aid, 'isvc', old_video.isvc, 5))
+                            old_video.isvc = 5
+                            session.commit()
+                            logger_19.info(
+                                'Update video aid = %d tid from 30 to %d then update isvc = %d.'
+                                % (aid, tid, 5))
+                            c30_left_tid_changed_aids.append(aid)
+                        except Exception as e:
+                            session.rollback()
+                            logger_19.warning(
+                                'Fail to update video aid = %d tid from 30 to %d then update isvc = %d. ' % (
+                                    aid, tid, 5) + 'Exception caught. Detail: %s' % e)
+                            c30_left_unsolved_aids.append(aid)
+                    else:
+                        # video tid==30, add video record
+                        # logger_19.warning(
+                        #     'Found aid = %d code == 0 and tid == 30! Now try add video record...' % aid)
+
+                        # get stat first
+                        stat = view_obj['data']['stat']
+
+                        # make new tdd video record obj and assign stat info from api
+                        new_video_record = TddVideoRecord()
+                        new_video_record.aid = aid
+                        new_video_record.added = view_obj_added
+                        new_video_record.view = -1 if stat['view'] == '--' else stat['view']
+                        new_video_record.danmaku = stat['danmaku']
+                        new_video_record.reply = stat['reply']
+                        new_video_record.favorite = stat['favorite']
+                        new_video_record.coin = stat['coin']
+                        new_video_record.share = stat['share']
+                        new_video_record.like = stat['like']
+
+                        # add to db
+                        DBOperation.add(new_video_record, session)
+                        logger_19.info('Add record %s.' % new_video_record)
+                        c30_left_added_aids.append(aid)
+                else:
+                    logger_19.error('View obj %s got code == 0 but no tid field! Need further check!' % view_obj)
+                    c30_left_unsolved_aids.append(aid)
+            else:
+                # code!=0, change code
+                try:
+                    old_video = DBOperation.query_video_via_aid(aid, session)
+                    session.add(TddVideoLog(view_obj_added, aid, 'code', old_video.code, code))
+                    old_video.code = code
+                    session.commit()
+                    logger_19.info('Update video aid = %d code from 0 to %d.' % (aid, code))
+                    c30_left_code_changed_aids.append(aid)
+                except Exception as e:
+                    session.rollback()
+                    logger_19.warning('Fail to update video aid = %d code from 0 to %d.' % (aid, code) +
+                                      'Exception caught. Detail: %s' % e)
+                    c30_left_unsolved_aids.append(aid)
+        except Exception as e:
+            logger_19.error(
+                'Exception caught when process view obj of left aid %d. Detail: %s' % (aid, e))
+            c30_left_unsolved_aids.append(aid)
 
     logger_19.info('04 done. c30_left_aids count: %d, c30_left_unsolved_aids count: %d, '
                    % (len(c30_left_aids), len(c30_left_unsolved_aids)) +
@@ -272,25 +270,25 @@ def hour(time_label):
     if time_label == '04:00':
         logger_19.info('got %d c30 not added records' % len(c30_not_added_record_list))
 
-        # # check not added record list
-        # for record in c30_not_added_record_list:
-        #     time.sleep(0.2)  # api duration banned
-        #     aid = record.aid
-        #     # add video
-        #     try:
-        #         new_video = add_video(aid, bapi, session)
-        #     except AlreadyExistError:
-        #         # video already exist, which is absolutely common
-        #         pass
-        #     except TddCommonError as e:
-        #         logger_19.warning('Fail to add video aid %d. Exception caught. Detail: %s' % (aid, e))
-        #         continue
-        #     else:
-        #         logger_19.info('Add new video %s' % new_video)
-        #         c30_not_added_add_video_aids.append(aid)
-        #
-        #     # add video record
-        #     DBOperation.add(record, session)
+        # check not added record list
+        for record in c30_not_added_record_list:
+            time.sleep(0.2)  # api duration banned
+            aid = record.aid
+            # add video
+            try:
+                new_video = add_video(aid, bapi, session)
+            except AlreadyExistError:
+                # video already exist, which is absolutely common
+                pass
+            except TddCommonError as e:
+                logger_19.warning('Fail to add video aid %d. Exception caught. Detail: %s' % (aid, e))
+                continue
+            else:
+                logger_19.info('Add new video %s' % new_video)
+                c30_not_added_add_video_aids.append(aid)
+
+            # add video record
+            DBOperation.add(record, session)
 
         logger_19.info('05 done! c30_not_added_add_video_aids count: %d' % len(c30_not_added_add_video_aids))
     else:
@@ -350,11 +348,133 @@ def hour(time_label):
 
     logger_19.info('08: check params of history video records')
 
+    # get video pubdate
+    video_pubdate_list = DBOperation.query_video_pubdate_all(session)
+    video_pubdate_dict = dict()
+    for (aid, pubdate) in video_pubdate_list:
+        video_pubdate_dict[aid] = pubdate
+    logger_19.info('Finish make video pubdate dict with %d aids.' % len(video_pubdate_dict))
+
     # check record
-    # for record in new_video_record_list:
-    #     video_record_list = history_record_dict[record.aid]
-    #     video_record_list.sort(key=lambda r: r.added)
-    #     # TODO check params
+    check_total_count = len(new_video_record_list)
+    check_visited_count = 0
+    for record in new_video_record_list:
+        video_record_list = history_record_dict[record.aid]
+        if len(video_record_list) <= 2:  # at least require 3 record
+            continue
+
+        video_record_list.sort(key=lambda r: r.added)
+
+        timespan_now = video_record_list[-1].added - video_record_list[-2].added
+        speed_now_dict = dict()
+        speed_now_dict['view'] = (video_record_list[-1].view - video_record_list[-2].view) / timespan_now * 3600
+        speed_now_dict['danmaku'] = (video_record_list[-1].danmaku - video_record_list[-2].danmaku) / timespan_now * 3600
+        speed_now_dict['reply'] = (video_record_list[-1].reply - video_record_list[-2].reply) / timespan_now * 3600
+        speed_now_dict['favorite'] = (video_record_list[-1].favorite - video_record_list[-2].favorite) / timespan_now * 3600
+        speed_now_dict['coin'] = (video_record_list[-1].coin - video_record_list[-2].coin) / timespan_now * 3600
+        speed_now_dict['share'] = (video_record_list[-1].share - video_record_list[-2].share) / timespan_now * 3600
+        speed_now_dict['like'] = (video_record_list[-1].like - video_record_list[-2].like) / timespan_now * 3600
+
+        timespan_last = video_record_list[-2].added - video_record_list[-3].added
+        speed_last_dict = dict()
+        speed_last_dict['view'] = (video_record_list[-2].view - video_record_list[-3].view) / timespan_last * 3600
+        speed_last_dict['danmaku'] = (video_record_list[-2].danmaku - video_record_list[-3].danmaku) / timespan_last * 3600
+        speed_last_dict['reply'] = (video_record_list[-2].reply - video_record_list[-3].reply) / timespan_last * 3600
+        speed_last_dict['favorite'] = (video_record_list[-2].favorite - video_record_list[-3].favorite) / timespan_last * 3600
+        speed_last_dict['coin'] = (video_record_list[-2].coin - video_record_list[-3].coin) / timespan_last * 3600
+        speed_last_dict['share'] = (video_record_list[-2].share - video_record_list[-3].share) / timespan_last * 3600
+        speed_last_dict['like'] = (video_record_list[-2].like - video_record_list[-3].like) / timespan_last * 3600
+
+        speed_now_incr_rate_dict = dict()
+        speed_now_incr_rate_dict['view'] = (speed_now_dict['view'] - speed_last_dict['view']) / speed_last_dict['view']
+        speed_now_incr_rate_dict['danmaku'] = (speed_now_dict['danmaku'] - speed_last_dict['danmaku']) / speed_last_dict['danmaku']
+        speed_now_incr_rate_dict['reply'] = (speed_now_dict['reply'] - speed_last_dict['reply']) / speed_last_dict['reply']
+        speed_now_incr_rate_dict['favorite'] = (speed_now_dict['favorite'] - speed_last_dict['favorite']) / speed_last_dict['favorite']
+        speed_now_incr_rate_dict['coin'] = (speed_now_dict['coin'] - speed_last_dict['coin']) / speed_last_dict['coin']
+        speed_now_incr_rate_dict['share'] = (speed_now_dict['share'] - speed_last_dict['share']) / speed_last_dict['share']
+        speed_now_incr_rate_dict['like'] = (speed_now_dict['like'] - speed_last_dict['like']) / speed_last_dict['like']
+
+        period_range = video_record_list[-1].added - video_record_list[0].added
+
+        speed_period_dict = dict()
+        speed_period_dict['view'] = (video_record_list[-1].view - video_record_list[0].view) / period_range * 3600
+        speed_period_dict['danmaku'] = (video_record_list[-1].danmaku - video_record_list[0].danmaku) / period_range * 3600
+        speed_period_dict['reply'] = (video_record_list[-1].reply - video_record_list[0].reply) / period_range * 3600
+        speed_period_dict['favorite'] = (video_record_list[-1].favorite - video_record_list[0].favorite) / period_range * 3600
+        speed_period_dict['coin'] = (video_record_list[-1].coin - video_record_list[0].coin) / period_range * 3600
+        speed_period_dict['share'] = (video_record_list[-1].share - video_record_list[0].share) / period_range * 3600
+        speed_period_dict['like'] = (video_record_list[-1].like - video_record_list[0].like) / period_range * 3600
+
+        overall_range = video_record_list[-1].added - video_pubdate_dict[record.aid]
+
+        speed_overall_dict = dict()
+        speed_overall_dict['view'] = video_record_list[-1].view / overall_range * 3600
+        speed_overall_dict['danmaku'] = video_record_list[-1].danmaku / overall_range * 3600
+        speed_overall_dict['reply'] = video_record_list[-1].reply / overall_range * 3600
+        speed_overall_dict['favorite'] = video_record_list[-1].favorite / overall_range * 3600
+        speed_overall_dict['coin'] = video_record_list[-1].coin / overall_range * 3600
+        speed_overall_dict['share'] = video_record_list[-1].share / overall_range * 3600
+        speed_overall_dict['like'] = video_record_list[-1].like / overall_range * 3600
+
+        has_abnormal_change = False
+        new_change_list = []
+
+        # check unexpected drop
+        for (key, value) in speed_now_dict:
+            if value < -10:
+                new_change = TddVideoRecordAbnormalChange()
+                new_change.added = video_record_list[-1].added
+                new_change.aid = record.aid
+                new_change.attr = key
+                new_change.speed_now = speed_now_dict[key]
+                new_change.speed_last = speed_last_dict[key]
+                new_change.speed_now_incr_rate = speed_now_incr_rate_dict[key]
+                new_change.period_range = period_range
+                new_change.speed_overall = speed_overall_dict[key]
+                new_change.description = 'unexpected drop detected, speed now of %s is %f, < -10' % (key, value)
+                logger_19.info('%d change: %s' % new_change.description)
+                has_abnormal_change = True
+                new_change_list.append(new_change)
+
+        # check unexpected increase speed
+        for (key, value) in speed_now_incr_rate_dict:
+            if value > 2:
+                new_change = TddVideoRecordAbnormalChange()
+                new_change.added = video_record_list[-1].added
+                new_change.aid = record.aid
+                new_change.attr = key
+                new_change.speed_now = speed_now_dict[key]
+                new_change.speed_last = speed_last_dict[key]
+                new_change.speed_now_incr_rate = speed_now_incr_rate_dict[key]
+                new_change.period_range = period_range
+                new_change.speed_overall = speed_overall_dict[key]
+                new_change.description = 'unexpected increase speed detected, speed now of {0} is {1}%, > 200%'.format(
+                    key, value * 100)
+                logger_19.info('%d change: %s' % new_change.description)
+                has_abnormal_change = True
+                new_change_list.append(new_change)
+
+        if has_abnormal_change and record.id is None:
+            DBOperation.add(record, session)
+            logger_19.info('Add video record %s' % record)
+
+        # TODO change freq
+
+        try:
+            for new_change in new_change_list:
+                new_change.record_id = record.id
+                session.add(new_change)
+            session.commit()
+        except Exception as e:
+            logger_19.error('Fail to add new change list with aid %d. Exception caught. Detail: %s' % (record.aid, e))
+
+        check_visited_count += 1
+        if check_visited_count % 100 == 0:
+            logger_19.info('check %d / %d done' % (check_visited_count, check_total_count))
+
+    logger_19.info('check %d / %d done' % (check_visited_count - 1, check_total_count))
+
+    logger_19.info('08 done! Finish check params of history video records')
 
     session.close()
 
@@ -372,6 +492,12 @@ def main():
         '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
         '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
     ]
+    hour_list = [
+        '00:00', '01:00', '02:00', '03:00',          '05:00',
+        '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
+        '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
+        '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
+    ]  # debug no 04:00
 
     for time_label in hour_list:
         schedule.every().day.at(time_label).do(hour_task, time_label)

@@ -1,9 +1,10 @@
 from .basic import Base
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, BigInteger
-from sqlalchemy.dialects.mysql import LONGTEXT, TINYINT
+from sqlalchemy.dialects.mysql import LONGTEXT, TINYINT, DOUBLE
 
 __all__ = ['TddVideo', 'TddMember', 'TddVideoStaff', 'TddVideoRecord', 'TddMemberFollowerRecord', 'TddStatDaily',
-           'TddVideoLog', 'TddMemberLog', 'TddMemberTotalStatRecord', 'TddTaskVisitVideoRecord']
+           'TddVideoLog', 'TddMemberLog', 'TddMemberTotalStatRecord', 'TddTaskVisitVideoRecord',
+           'TddVideoRecordAbnormalChange']
 
 
 class TddVideo(Base):
@@ -227,3 +228,26 @@ class TddTaskVisitVideoRecord(Base):
 
     def __repr__(self):
         return '<TddTaskVisitVideoRecord(added=%d,aid=%d)>' % (self.added, self.aid)
+
+
+class TddVideoRecordAbnormalChange(Base):
+    """tdd_video_record_abnormal_change"""
+
+    __tablename__ = 'tdd_video_record_abnormal_change'
+
+    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    added = Column(Integer, nullable=False)
+    aid = Column(Integer, nullable=False)
+    attr = Column(String, nullable=False)
+    speed_now = Column(DOUBLE, nullable=False)
+    speed_last = Column(DOUBLE, nullable=False)
+    speed_now_incr_rate = Column(DOUBLE, nullable=False)
+    period_range = Column(Integer, nullable=False)
+    speed_period = Column(DOUBLE, nullable=False)
+    speed_overall = Column(DOUBLE, nullable=False)
+    record_id = Column(BigInteger, nullable=False)
+    description = Column(String, default='')
+    comment = Column(String, default='')
+
+    def __repr__(self):
+        return '<TddVideoRecordAbnormalChange(aid=%d,attr=%s)>' % (self.aid, self.attr)

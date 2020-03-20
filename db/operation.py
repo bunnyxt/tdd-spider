@@ -296,3 +296,12 @@ class DBOperation:
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'is_tid_30': is_tid_30}), exc_info=True)
             return None
+
+    @classmethod
+    def query_video_pubdate_all(cls, session):
+        try:
+            result = session.query(TddVideo.aid, TddVideo.pubdate).all()
+            return list((r[0], r[1]) for r in result)
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
+            return None
