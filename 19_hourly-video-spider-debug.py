@@ -8,7 +8,7 @@ from pybiliapi import BiliApi
 import math
 from common import get_valid, test_archive_rank_by_partion, add_video_record_via_stat_api, InvalidObjCodeError, \
     update_video, TddCommonError, test_video_view, add_video, AlreadyExistError
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 
 
 def get_need_insert_aid_list(time_label, is_tid_30, session):
@@ -321,27 +321,38 @@ def hour(time_label):
             history_filename_list.append(line.rstrip('\n'))
     logger_19.info('Will load records from file list %r' % history_filename_list)
 
+    VideoRecord = namedtuple("VideoRecord",
+                             ['aid', 'added', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
     history_record_dict = defaultdict(list)
     history_record_count = 0
     for filename in history_filename_list:
-        with open(filename, 'r') as f:
-            lines = f.readlines()
-            for line in lines[1:]:
-                line_list = line.rstrip('\n').split(',')
-                video_record = TddVideoRecord()
-                video_record.aid = int(line_list[0])
-                video_record.added = int(line_list[1])
-                video_record.view = int(line_list[2])
-                video_record.danmaku = int(line_list[3])
-                video_record.reply = int(line_list[4])
-                video_record.favorite = int(line_list[5])
-                video_record.coin = int(line_list[6])
-                video_record.share = int(line_list[7])
-                video_record.like = int(line_list[8])
-                video_record_list = history_record_dict[video_record.aid]
-                video_record_list.append(video_record)
-                history_record_count += 1
-        logger_19.info('Finish load records from file %s' % filename)
+        try:
+            with open(filename, 'r') as f:
+                lines = f.readlines()
+                for line in lines[1:]:
+                    try:
+                        line_list = line.rstrip('\n').split(',')
+                        video_record = VideoRecord(
+                            int(line_list[0]),
+                            int(line_list[1]),
+                            int(line_list[2]),
+                            int(line_list[3]),
+                            int(line_list[4]),
+                            int(line_list[5]),
+                            int(line_list[6]),
+                            int(line_list[7]),
+                            int(line_list[8]),
+                        )
+                        video_record_list = history_record_dict[video_record.aid]
+                        video_record_list.append(video_record)
+                    except Exception as e:
+                        logger_19.warning('Fail to make video record from line: %s. Exception caught. Detail: %s'
+                                          % (line, e))
+                    finally:
+                        history_record_count += 1
+            logger_19.info('Finish load records from file %s' % filename)
+        except Exception as e:
+            logger_19.warning('Fail to read load records from file %s. Exception caught. Detail: %s' % (filename, e))
 
     logger_19.info('07 done! loaded %d history records from %d files'
                    % (history_record_count, len(history_filename_list)))
