@@ -455,6 +455,7 @@ def hour(time_label):
                 new_change.speed_last = speed_last_dict[key]
                 new_change.speed_now_incr_rate = speed_now_incr_rate_dict[key]
                 new_change.period_range = period_range
+                new_change.speed_period = speed_period_dict['key']
                 new_change.speed_overall = speed_overall_dict[key]
                 new_change.description = 'unexpected drop detected, speed now of %s is %f, < -10' % (key, value)
                 logger_19.info('%d change: %s' % (record.aid, new_change.description))
@@ -472,6 +473,7 @@ def hour(time_label):
                 new_change.speed_last = speed_last_dict[key]
                 new_change.speed_now_incr_rate = speed_now_incr_rate_dict[key]
                 new_change.period_range = period_range
+                new_change.speed_period = speed_period_dict['key']
                 new_change.speed_overall = speed_overall_dict[key]
                 new_change.description = 'unexpected increase speed detected, speed now of {0} is {1}%, > 200%'.format(
                     key, value * 100)
