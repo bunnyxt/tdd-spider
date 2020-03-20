@@ -378,7 +378,7 @@ def hour(time_label):
 
         timespan_now = video_record_list[-1].added - video_record_list[-2].added
         if timespan_now == 0:
-            logger_19.warning('%d got timespan_now = 0, continue')
+            logger_19.warning('%d got timespan_now = 0, continue', record.aid)
             continue
         speed_now_dict = dict()
         speed_now_dict['view'] = (video_record_list[-1].view - video_record_list[-2].view) / timespan_now * 3600
@@ -391,7 +391,7 @@ def hour(time_label):
 
         timespan_last = video_record_list[-2].added - video_record_list[-3].added
         if timespan_last == 0:
-            logger_19.warning('%d got timespan_last = 0, continue')
+            logger_19.warning('%d got timespan_last = 0, continue', record.aid)
             continue
         speed_last_dict = dict()
         speed_last_dict['view'] = (video_record_list[-2].view - video_record_list[-3].view) / timespan_last * 3600
@@ -413,7 +413,7 @@ def hour(time_label):
 
         period_range = video_record_list[-1].added - video_record_list[0].added
         if period_range == 0:
-            logger_19.warning('%d got period_range = 0, continue')
+            logger_19.warning('%d got period_range = 0, continue', record.aid)
             continue
 
         speed_period_dict = dict()
@@ -429,7 +429,7 @@ def hour(time_label):
         if record.aid in video_pubdate_dict.keys() and video_pubdate_dict[record.aid]:
             overall_range -= video_pubdate_dict[record.aid]
         if overall_range == 0:
-            logger_19.warning('%d got overall_range = 0, continue')
+            logger_19.warning('%d got overall_range = 0, continue', record.aid)
             continue
 
         speed_overall_dict = dict()
@@ -455,7 +455,7 @@ def hour(time_label):
                 new_change.speed_last = speed_last_dict[key]
                 new_change.speed_now_incr_rate = speed_now_incr_rate_dict[key]
                 new_change.period_range = period_range
-                new_change.speed_period = speed_period_dict['key']
+                new_change.speed_period = speed_period_dict[key]
                 new_change.speed_overall = speed_overall_dict[key]
                 new_change.description = 'unexpected drop detected, speed now of %s is %f, < -10' % (key, value)
                 logger_19.info('%d change: %s' % (record.aid, new_change.description))
@@ -473,7 +473,7 @@ def hour(time_label):
                 new_change.speed_last = speed_last_dict[key]
                 new_change.speed_now_incr_rate = speed_now_incr_rate_dict[key]
                 new_change.period_range = period_range
-                new_change.speed_period = speed_period_dict['key']
+                new_change.speed_period = speed_period_dict[key]
                 new_change.speed_overall = speed_overall_dict[key]
                 new_change.description = 'unexpected increase speed detected, speed now of {0} is {1}%, > 200%'.format(
                     key, value * 100)
