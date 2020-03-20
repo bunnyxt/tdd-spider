@@ -317,7 +317,7 @@ def hour(time_label):
     history_filename_list = []
     with open(index_filename, 'r') as f:
         lines = f.readlines()
-        for line in lines[-24:]:
+        for line in lines[-25:]:
             history_filename_list.append(line.rstrip('\n'))
     logger_19.info('Will load records from file list %r' % history_filename_list)
 
