@@ -394,9 +394,9 @@ def daily_video_update():
 
     # get videos aids
     session = Session()
-    aids_c30 = DBOperation.query_update_c30_aids(0, session)
+    aids_c30 = DBOperation.query_update_c30_aids_all(session)
     logger_11.info('Get %d c30 aids.' % (len(aids_c30)))
-    aids_c0 = DBOperation.query_update_c0_aids(0, session)
+    aids_c0 = DBOperation.query_update_c0_aids_all(session)
     logger_11.info('Get %d c0 aids.' % (len(aids_c0)))
     session.close()
 
