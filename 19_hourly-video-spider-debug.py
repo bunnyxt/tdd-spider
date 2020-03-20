@@ -377,6 +377,9 @@ def hour(time_label):
         video_record_list.sort(key=lambda r: r.added)
 
         timespan_now = video_record_list[-1].added - video_record_list[-2].added
+        if timespan_now == 0:
+            logger_19.warning('%d got timespan_now = 0, continue')
+            continue
         speed_now_dict = dict()
         speed_now_dict['view'] = (video_record_list[-1].view - video_record_list[-2].view) / timespan_now * 3600
         speed_now_dict['danmaku'] = (video_record_list[-1].danmaku - video_record_list[-2].danmaku) / timespan_now * 3600
@@ -387,6 +390,9 @@ def hour(time_label):
         speed_now_dict['like'] = (video_record_list[-1].like - video_record_list[-2].like) / timespan_now * 3600
 
         timespan_last = video_record_list[-2].added - video_record_list[-3].added
+        if timespan_last == 0:
+            logger_19.warning('%d got timespan_last = 0, continue')
+            continue
         speed_last_dict = dict()
         speed_last_dict['view'] = (video_record_list[-2].view - video_record_list[-3].view) / timespan_last * 3600
         speed_last_dict['danmaku'] = (video_record_list[-2].danmaku - video_record_list[-3].danmaku) / timespan_last * 3600
@@ -397,15 +403,18 @@ def hour(time_label):
         speed_last_dict['like'] = (video_record_list[-2].like - video_record_list[-3].like) / timespan_last * 3600
 
         speed_now_incr_rate_dict = dict()
-        speed_now_incr_rate_dict['view'] = (speed_now_dict['view'] - speed_last_dict['view']) / speed_last_dict['view']
-        speed_now_incr_rate_dict['danmaku'] = (speed_now_dict['danmaku'] - speed_last_dict['danmaku']) / speed_last_dict['danmaku']
-        speed_now_incr_rate_dict['reply'] = (speed_now_dict['reply'] - speed_last_dict['reply']) / speed_last_dict['reply']
-        speed_now_incr_rate_dict['favorite'] = (speed_now_dict['favorite'] - speed_last_dict['favorite']) / speed_last_dict['favorite']
-        speed_now_incr_rate_dict['coin'] = (speed_now_dict['coin'] - speed_last_dict['coin']) / speed_last_dict['coin']
-        speed_now_incr_rate_dict['share'] = (speed_now_dict['share'] - speed_last_dict['share']) / speed_last_dict['share']
-        speed_now_incr_rate_dict['like'] = (speed_now_dict['like'] - speed_last_dict['like']) / speed_last_dict['like']
+        speed_now_incr_rate_dict['view'] = (speed_now_dict['view'] - speed_last_dict['view']) / (speed_last_dict['view'] + 0.01)
+        speed_now_incr_rate_dict['danmaku'] = (speed_now_dict['danmaku'] - speed_last_dict['danmaku']) / (speed_last_dict['danmaku'] + 0.01)
+        speed_now_incr_rate_dict['reply'] = (speed_now_dict['reply'] - speed_last_dict['reply']) / (speed_last_dict['reply'] + 0.01)
+        speed_now_incr_rate_dict['favorite'] = (speed_now_dict['favorite'] - speed_last_dict['favorite']) / (speed_last_dict['favorite'] + 0.01)
+        speed_now_incr_rate_dict['coin'] = (speed_now_dict['coin'] - speed_last_dict['coin']) / (speed_last_dict['coin'] + 0.01)
+        speed_now_incr_rate_dict['share'] = (speed_now_dict['share'] - speed_last_dict['share']) / (speed_last_dict['share'] + 0.01)
+        speed_now_incr_rate_dict['like'] = (speed_now_dict['like'] - speed_last_dict['like']) / (speed_last_dict['like'] + 0.01)
 
         period_range = video_record_list[-1].added - video_record_list[0].added
+        if period_range == 0:
+            logger_19.warning('%d got period_range = 0, continue')
+            continue
 
         speed_period_dict = dict()
         speed_period_dict['view'] = (video_record_list[-1].view - video_record_list[0].view) / period_range * 3600
@@ -416,7 +425,12 @@ def hour(time_label):
         speed_period_dict['share'] = (video_record_list[-1].share - video_record_list[0].share) / period_range * 3600
         speed_period_dict['like'] = (video_record_list[-1].like - video_record_list[0].like) / period_range * 3600
 
-        overall_range = video_record_list[-1].added - video_pubdate_dict[record.aid]
+        overall_range = video_record_list[-1].added
+        if record.aid in video_pubdate_dict.keys() and video_pubdate_dict[record.aid]:
+            overall_range -= video_pubdate_dict[record.aid]
+        if overall_range == 0:
+            logger_19.warning('%d got overall_range = 0, continue')
+            continue
 
         speed_overall_dict = dict()
         speed_overall_dict['view'] = video_record_list[-1].view / overall_range * 3600
@@ -431,7 +445,7 @@ def hour(time_label):
         new_change_list = []
 
         # check unexpected drop
-        for (key, value) in speed_now_dict:
+        for (key, value) in speed_now_dict.items():
             if value < -10:
                 new_change = TddVideoRecordAbnormalChange()
                 new_change.added = video_record_list[-1].added
@@ -443,12 +457,12 @@ def hour(time_label):
                 new_change.period_range = period_range
                 new_change.speed_overall = speed_overall_dict[key]
                 new_change.description = 'unexpected drop detected, speed now of %s is %f, < -10' % (key, value)
-                logger_19.info('%d change: %s' % new_change.description)
+                logger_19.info('%d change: %s' % (record.aid, new_change.description))
                 has_abnormal_change = True
                 new_change_list.append(new_change)
 
         # check unexpected increase speed
-        for (key, value) in speed_now_incr_rate_dict:
+        for (key, value) in speed_now_incr_rate_dict.items():
             if value > 2 and speed_now_dict[key] > 50:
                 new_change = TddVideoRecordAbnormalChange()
                 new_change.added = video_record_list[-1].added
@@ -461,7 +475,7 @@ def hour(time_label):
                 new_change.speed_overall = speed_overall_dict[key]
                 new_change.description = 'unexpected increase speed detected, speed now of {0} is {1}%, > 200%'.format(
                     key, value * 100)
-                logger_19.info('%d change: %s' % new_change.description)
+                logger_19.info('%d change: %s' % (record.aid, new_change.description))
                 has_abnormal_change = True
                 new_change_list.append(new_change)
 
@@ -480,10 +494,10 @@ def hour(time_label):
             logger_19.error('Fail to add new change list with aid %d. Exception caught. Detail: %s' % (record.aid, e))
 
         check_visited_count += 1
-        if check_visited_count % 100 == 0:
+        if check_visited_count % 10000 == 0:
             logger_19.info('check %d / %d done' % (check_visited_count, check_total_count))
 
-    logger_19.info('check %d / %d done' % (check_visited_count - 1, check_total_count))
+    logger_19.info('check %d / %d done' % (check_visited_count, check_total_count))
 
     logger_19.info('08 done! Finish check params of history video records')
 
