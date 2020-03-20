@@ -326,7 +326,7 @@ def hour(time_label):
     for filename in history_filename_list:
         with open(filename, 'r') as f:
             lines = f.readlines()
-            for line in lines:
+            for line in lines[1:]:
                 line_list = line.rstrip('\n').split(' ')
                 video_record = TddVideoRecord()
                 video_record.aid = int(line_list[0])
@@ -476,6 +476,8 @@ def hour(time_label):
 
     logger_19.info('08 done! Finish check params of history video records')
 
+    # TODO change activity and recent icon
+
     session.close()
 
 
@@ -484,7 +486,7 @@ def hour_task(time_label):
 
 
 def main():
-    logger_19.info('14: hourly video spider')
+    logger_19.info('19: hourly video spider')
 
     hour_list = [
         '00:00', '01:00', '02:00', '03:00', '04:00', '05:00',
