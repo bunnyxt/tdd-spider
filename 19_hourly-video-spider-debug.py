@@ -327,7 +327,7 @@ def hour(time_label):
         with open(filename, 'r') as f:
             lines = f.readlines()
             for line in lines[1:]:
-                line_list = line.rstrip('\n').split(' ')
+                line_list = line.rstrip('\n').split(',')
                 video_record = TddVideoRecord()
                 video_record.aid = int(line_list[0])
                 video_record.added = int(line_list[1])
