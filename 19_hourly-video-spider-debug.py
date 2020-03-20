@@ -438,7 +438,7 @@ def hour(time_label):
 
         # check unexpected increase speed
         for (key, value) in speed_now_incr_rate_dict:
-            if value > 2:
+            if value > 2 and speed_now_dict[key] > 50:
                 new_change = TddVideoRecordAbnormalChange()
                 new_change.added = video_record_list[-1].added
                 new_change.aid = record.aid
