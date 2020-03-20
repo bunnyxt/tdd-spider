@@ -465,13 +465,13 @@ def main():
         schedule.every().day.at(time_label).do(_24h_task, time_label)
         logger_14.info('Will do 24h task at %s' % time_label)
 
-    for time_label in _6h_list:
-        schedule.every().day.at(time_label).do(_6h_task, time_label)
-        logger_14.info('Will do 6h task at %s' % time_label)
+    # for time_label in _6h_list:
+    #     schedule.every().day.at(time_label).do(_6h_task, time_label)
+    #     logger_14.info('Will do 6h task at %s' % time_label)
 
-    for time_label in _1h_list:
-        schedule.every().day.at(time_label).do(_1h_task, time_label)
-        logger_14.info('Will do 1h task at %s' % time_label)
+    # for time_label in _1h_list:
+    #     schedule.every().day.at(time_label).do(_1h_task, time_label)
+    #     logger_14.info('Will do 1h task at %s' % time_label)
 
     for time_label in _15m_list:
         schedule.every().day.at(time_label).do(_15m_task, time_label)
