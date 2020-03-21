@@ -376,6 +376,12 @@ def hour(time_label):
 
         video_record_list.sort(key=lambda r: r.added)
 
+        # remove all zero situation
+        if record.view == 0 and record.danmaku == 0 and record.reply == 0 and record.favorite == 0 and \
+                record.coin == 0 and record.share == 0 and record.like == 0:
+            logger_19.warning('%d got all params of record = 0, maybe API bug, continue', record.aid)
+            continue
+
         timespan_now = video_record_list[-1].added - video_record_list[-2].added
         if timespan_now == 0:
             logger_19.warning('%d got timespan_now = 0, continue', record.aid)
