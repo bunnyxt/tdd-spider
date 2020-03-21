@@ -9,6 +9,7 @@ import math
 from common import get_valid, test_archive_rank_by_partion, add_video_record_via_stat_api, InvalidObjCodeError, \
     update_video, TddCommonError, test_video_view, add_video, AlreadyExistError
 from collections import defaultdict, namedtuple
+import gc
 
 
 def get_need_insert_aid_list(time_label, is_tid_30, session):
@@ -510,6 +511,10 @@ def hour(time_label):
     logger_19.info('08 done! Finish check params of history video records')
 
     # TODO change activity and recent icon
+
+    del new_video_record_list
+    del history_record_dict
+    gc.collect()
 
     session.close()
 
