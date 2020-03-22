@@ -561,8 +561,14 @@ def hour(time_label):
                 new_change.last_coin = video_record_list[-2].coin
                 new_change.last_share = video_record_list[-2].share
                 new_change.last_like = video_record_list[-2].like
-                new_change.description = 'unexpected increase speed detected, speed now of {0} is {1}%, > 200%'.format(
-                    key, value * 100)
+                if value == 99999999:
+                    speed_now_str = 'inf'
+                elif value == -99999999:
+                    speed_now_str = '-inf'
+                else:
+                    speed_now_str = '{0}%'.format(value * 100)
+                new_change.description = 'unexpected increase speed detected, speed now of {0} is {1}, > 200%'.format(
+                    key, speed_now_str)
                 logger_19.info('%d change: %s' % (record.aid, new_change.description))
                 has_abnormal_change = True
                 new_change_list.append(new_change)
