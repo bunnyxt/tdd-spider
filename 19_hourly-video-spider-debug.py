@@ -434,41 +434,35 @@ def hour(time_label):
         speed_last_dict['share'] = (video_record_list[-2].share - video_record_list[-3].share) / timespan_last * 3600
         speed_last_dict['like'] = (video_record_list[-2].like - video_record_list[-3].like) / timespan_last * 3600
 
+        # use magic number 99999999 to represent infinity
         speed_now_incr_rate_dict = dict()
-        # speed_now_incr_rate_dict['view'] = (speed_now_dict['view'] - speed_last_dict['view']) / (speed_last_dict['view'] + 0.01)
-        # speed_now_incr_rate_dict['danmaku'] = (speed_now_dict['danmaku'] - speed_last_dict['danmaku']) / (speed_last_dict['danmaku'] + 0.01)
-        # speed_now_incr_rate_dict['reply'] = (speed_now_dict['reply'] - speed_last_dict['reply']) / (speed_last_dict['reply'] + 0.01)
-        # speed_now_incr_rate_dict['favorite'] = (speed_now_dict['favorite'] - speed_last_dict['favorite']) / (speed_last_dict['favorite'] + 0.01)
-        # speed_now_incr_rate_dict['coin'] = (speed_now_dict['coin'] - speed_last_dict['coin']) / (speed_last_dict['coin'] + 0.01)
-        # speed_now_incr_rate_dict['share'] = (speed_now_dict['share'] - speed_last_dict['share']) / (speed_last_dict['share'] + 0.01)
-        # speed_now_incr_rate_dict['like'] = (speed_now_dict['like'] - speed_last_dict['like']) / (speed_last_dict['like'] + 0.01)
         speed_now_incr_rate_dict['view'] = (speed_now_dict['view'] - speed_last_dict['view']) \
             / speed_last_dict['view'] if speed_last_dict['view'] != 0 else \
-            99999999 * (speed_now_dict['view'] - speed_last_dict['view'])  # magic number to represent infinity
+            99999999 * 1 if (speed_now_dict['view'] - speed_last_dict['view']) > 0 else -1
             # float('inf') * (speed_now_dict['view'] - speed_last_dict['view'])
         speed_now_incr_rate_dict['danmaku'] = (speed_now_dict['danmaku'] - speed_last_dict['danmaku']) \
             / speed_last_dict['danmaku'] if speed_last_dict['danmaku'] != 0 else \
-            99999999 * (speed_now_dict['danmaku'] - speed_last_dict['danmaku'])  # magic number to represent infinity
+            99999999 * 1 if (speed_now_dict['danmaku'] - speed_last_dict['danmaku']) > 0 else -1
             # float('inf') * (speed_now_dict['danmaku'] - speed_last_dict['danmaku'])
         speed_now_incr_rate_dict['reply'] = (speed_now_dict['reply'] - speed_last_dict['reply']) \
             / speed_last_dict['reply'] if speed_last_dict['reply'] != 0 else \
-            99999999 * (speed_now_dict['reply'] - speed_last_dict['reply'])  # magic number to represent infinity
+            99999999 * 1 if (speed_now_dict['reply'] - speed_last_dict['reply']) > 0 else -1
             # float('inf') * (speed_now_dict['reply'] - speed_last_dict['reply'])
         speed_now_incr_rate_dict['favorite'] = (speed_now_dict['favorite'] - speed_last_dict['favorite']) \
             / speed_last_dict['favorite'] if speed_last_dict['favorite'] != 0 else \
-            99999999 * (speed_now_dict['favorite'] - speed_last_dict['favorite'])  # magic number to represent infinity
+            99999999 * 1 if (speed_now_dict['favorite'] - speed_last_dict['favorite']) > 0 else -1
             # float('inf') * (speed_now_dict['favorite'] - speed_last_dict['favorite'])
         speed_now_incr_rate_dict['coin'] = (speed_now_dict['coin'] - speed_last_dict['coin']) \
             / speed_last_dict['coin'] if speed_last_dict['coin'] != 0 else \
-            99999999 * (speed_now_dict['coin'] - speed_last_dict['coin'])  # magic number to represent infinity
+            99999999 * 1 if (speed_now_dict['coin'] - speed_last_dict['coin']) > 0 else -1
             # float('inf') * (speed_now_dict['coin'] - speed_last_dict['coin'])
         speed_now_incr_rate_dict['share'] = (speed_now_dict['share'] - speed_last_dict['share']) \
             / speed_last_dict['share'] if speed_last_dict['share'] != 0 else \
-            99999999 * (speed_now_dict['share'] - speed_last_dict['share'])  # magic number to represent infinity
+            99999999 * 1 if (speed_now_dict['share'] - speed_last_dict['share']) > 0 else -1
             # float('inf') * (speed_now_dict['share'] - speed_last_dict['share'])
         speed_now_incr_rate_dict['like'] = (speed_now_dict['like'] - speed_last_dict['like']) \
             / speed_last_dict['like'] if speed_last_dict['like'] != 0 else \
-            99999999 * (speed_now_dict['like'] - speed_last_dict['like'])  # magic number to represent infinity
+            99999999 * 1 if (speed_now_dict['like'] - speed_last_dict['like']) > 0 else -1
             # float('inf') * (speed_now_dict['like'] - speed_last_dict['like'])
 
         period_range = video_record_list[-1].added - video_record_list[0].added
