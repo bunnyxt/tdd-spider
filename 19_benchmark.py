@@ -73,7 +73,7 @@ def main():
     aids = history_record_dict.keys()
     check_total_count = len(aids)
     check_visited_count = 0
-    for aid in aids:
+    for aid in aids[:1000]:
         video_record_list = history_record_dict[aid]
         if len(video_record_list) <= 2:  # at least require 3 record
             continue
@@ -293,7 +293,7 @@ def main():
         #     logger_19.error('Fail to add new change list with aid %d. Exception caught. Detail: %s' % (record.aid, e))
 
         check_visited_count += 1
-        if check_visited_count % 10000 == 0:
+        if check_visited_count % 100 == 0:
             prt('check %d / %d done' % (check_visited_count, check_total_count))
 
     prt('check %d / %d done' % (check_visited_count, check_total_count))
