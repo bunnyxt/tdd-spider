@@ -368,19 +368,27 @@ def hour(time_label):
     logger_19.info('Finish make video pubdate dict with %d aids.' % len(video_pubdate_dict))
 
     # check record
-    check_total_count = len(new_video_record_list)
+    # check_total_count = len(new_video_record_list)  # OLD
+    last_aids = list(history_record_dict.keys())
+    check_total_count = len(last_aids)
     check_visited_count = 0
-    for record in new_video_record_list:
-        video_record_list = history_record_dict[record.aid]
+    # for record in new_video_record_list:  # OLD
+    for aid in last_aids:
+        video_record_list = history_record_dict[aid]
         if len(video_record_list) <= 2:  # at least require 3 record
             continue
 
         video_record_list.sort(key=lambda r: r.added)
 
         # remove all zero situation
-        if record.view == 0 and record.danmaku == 0 and record.reply == 0 and record.favorite == 0 and \
-                record.coin == 0 and record.share == 0 and record.like == 0:
-            logger_19.warning('%d got all params of record = 0, maybe API bug, continue' % record.aid)
+        if video_record_list[-1].view == 0 and \
+                video_record_list[-1].danmaku == 0 and \
+                video_record_list[-1].reply == 0 and \
+                video_record_list[-1].favorite == 0 and \
+                video_record_list[-1].coin == 0 and \
+                video_record_list[-1].share == 0 and \
+                video_record_list[-1].like == 0:
+            logger_19.warning('%d got all params of record = 0, maybe API bug, continue' % aid)
             continue
 
         # remove abnormal all zero VideoRecord
@@ -402,7 +410,7 @@ def hour(time_label):
                         abnormal_all_zero_index_list.append(i)  # from not all zero to zero, remove it
         for i in reversed(abnormal_all_zero_index_list):
             logger_19.warning('%d found abnormal all zero video record at %d, delete it'
-                              % (record.aid, video_record_list[i].added))
+                              % (aid, video_record_list[i].added))
             del video_record_list[i]
 
         if len(video_record_list) <= 2:  # at least require 3 record
@@ -410,7 +418,7 @@ def hour(time_label):
 
         timespan_now = video_record_list[-1].added - video_record_list[-2].added
         if timespan_now == 0:
-            logger_19.warning('%d got timespan_now = 0, continue' % record.aid)
+            logger_19.warning('%d got timespan_now = 0, continue' % aid)
             continue
         speed_now_dict = dict()
         speed_now_dict['view'] = (video_record_list[-1].view - video_record_list[-2].view) / timespan_now * 3600
@@ -423,7 +431,7 @@ def hour(time_label):
 
         timespan_last = video_record_list[-2].added - video_record_list[-3].added
         if timespan_last == 0:
-            logger_19.warning('%d got timespan_last = 0, continue' % record.aid)
+            logger_19.warning('%d got timespan_last = 0, continue' % aid)
             continue
         speed_last_dict = dict()
         speed_last_dict['view'] = (video_record_list[-2].view - video_record_list[-3].view) / timespan_last * 3600
@@ -467,7 +475,7 @@ def hour(time_label):
 
         period_range = video_record_list[-1].added - video_record_list[0].added
         if period_range == 0:
-            logger_19.warning('%d got period_range = 0, continue' % record.aid)
+            logger_19.warning('%d got period_range = 0, continue' % aid)
             continue
 
         speed_period_dict = dict()
@@ -480,10 +488,10 @@ def hour(time_label):
         speed_period_dict['like'] = (video_record_list[-1].like - video_record_list[0].like) / period_range * 3600
 
         overall_range = video_record_list[-1].added
-        if record.aid in video_pubdate_dict.keys() and video_pubdate_dict[record.aid]:
-            overall_range -= video_pubdate_dict[record.aid]
+        if aid in video_pubdate_dict.keys() and video_pubdate_dict[aid]:
+            overall_range -= video_pubdate_dict[aid]
         if overall_range == 0:
-            logger_19.warning('%d got overall_range = 0, continue' % record.aid)
+            logger_19.warning('%d got overall_range = 0, continue' % aid)
             continue
 
         speed_overall_dict = dict()
@@ -503,7 +511,7 @@ def hour(time_label):
             if value < -50:
                 new_change = TddVideoRecordAbnormalChange()
                 new_change.added = video_record_list[-1].added
-                new_change.aid = record.aid
+                new_change.aid = aid
                 new_change.attr = key
                 new_change.speed_now = speed_now_dict[key]
                 new_change.speed_last = speed_last_dict[key]
@@ -528,7 +536,7 @@ def hour(time_label):
                 new_change.last_share = video_record_list[-2].share
                 new_change.last_like = video_record_list[-2].like
                 new_change.description = 'unexpected drop detected, speed now of %s is %f, < -50' % (key, value)
-                logger_19.info('%d change: %s' % (record.aid, new_change.description))
+                logger_19.info('%d change: %s' % (aid, new_change.description))
                 has_abnormal_change = True
                 new_change_list.append(new_change)
 
@@ -537,7 +545,7 @@ def hour(time_label):
             if value > 2 and speed_now_dict[key] > 50:
                 new_change = TddVideoRecordAbnormalChange()
                 new_change.added = video_record_list[-1].added
-                new_change.aid = record.aid
+                new_change.aid = aid
                 new_change.attr = key
                 new_change.speed_now = speed_now_dict[key]
                 new_change.speed_last = speed_last_dict[key]
@@ -569,24 +577,24 @@ def hour(time_label):
                     speed_now_str = '{0}%'.format(value * 100)
                 new_change.description = 'unexpected increase speed detected, speed now of {0} is {1}, > 200%'.format(
                     key, speed_now_str)
-                logger_19.info('%d change: %s' % (record.aid, new_change.description))
+                logger_19.info('%d change: %s' % (aid, new_change.description))
                 has_abnormal_change = True
                 new_change_list.append(new_change)
 
-        if has_abnormal_change and record.id is None:
-            DBOperation.add(record, session)
-            logger_19.info('Add video record %s' % record)
+        # if has_abnormal_change and record.id is None:
+        #     DBOperation.add(record, session)
+        #     logger_19.info('Add video record %s' % record)
 
         # TODO change freq
 
         try:
             for new_change in new_change_list:
-                new_change.this_record_id = record.id
+                # new_change.this_record_id = record.id
                 # TODO make add last record to tdd_video_record
                 session.add(new_change)
             session.commit()
         except Exception as e:
-            logger_19.error('Fail to add new change list with aid %d. Exception caught. Detail: %s' % (record.aid, e))
+            logger_19.error('Fail to add new change list with aid %d. Exception caught. Detail: %s' % (aid, e))
 
         check_visited_count += 1
         if check_visited_count % 10000 == 0:
