@@ -380,7 +380,7 @@ def hour(time_label):
         # remove all zero situation
         if record.view == 0 and record.danmaku == 0 and record.reply == 0 and record.favorite == 0 and \
                 record.coin == 0 and record.share == 0 and record.like == 0:
-            logger_19.warning('%d got all params of record = 0, maybe API bug, continue', record.aid)
+            logger_19.warning('%d got all params of record = 0, maybe API bug, continue' % record.aid)
             continue
 
         # remove abnormal all zero VideoRecord
@@ -410,7 +410,7 @@ def hour(time_label):
 
         timespan_now = video_record_list[-1].added - video_record_list[-2].added
         if timespan_now == 0:
-            logger_19.warning('%d got timespan_now = 0, continue', record.aid)
+            logger_19.warning('%d got timespan_now = 0, continue' % record.aid)
             continue
         speed_now_dict = dict()
         speed_now_dict['view'] = (video_record_list[-1].view - video_record_list[-2].view) / timespan_now * 3600
@@ -423,7 +423,7 @@ def hour(time_label):
 
         timespan_last = video_record_list[-2].added - video_record_list[-3].added
         if timespan_last == 0:
-            logger_19.warning('%d got timespan_last = 0, continue', record.aid)
+            logger_19.warning('%d got timespan_last = 0, continue' % record.aid)
             continue
         speed_last_dict = dict()
         speed_last_dict['view'] = (video_record_list[-2].view - video_record_list[-3].view) / timespan_last * 3600
@@ -467,7 +467,7 @@ def hour(time_label):
 
         period_range = video_record_list[-1].added - video_record_list[0].added
         if period_range == 0:
-            logger_19.warning('%d got period_range = 0, continue', record.aid)
+            logger_19.warning('%d got period_range = 0, continue' % record.aid)
             continue
 
         speed_period_dict = dict()
@@ -483,7 +483,7 @@ def hour(time_label):
         if record.aid in video_pubdate_dict.keys() and video_pubdate_dict[record.aid]:
             overall_range -= video_pubdate_dict[record.aid]
         if overall_range == 0:
-            logger_19.warning('%d got overall_range = 0, continue', record.aid)
+            logger_19.warning('%d got overall_range = 0, continue' % record.aid)
             continue
 
         speed_overall_dict = dict()
