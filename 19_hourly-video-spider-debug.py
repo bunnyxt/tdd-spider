@@ -379,222 +379,222 @@ def hour(time_label):
             continue
 
         video_record_list.sort(key=lambda r: r.added)
-
-        # remove all zero situation
-        if video_record_list[-1].view == 0 and \
-                video_record_list[-1].danmaku == 0 and \
-                video_record_list[-1].reply == 0 and \
-                video_record_list[-1].favorite == 0 and \
-                video_record_list[-1].coin == 0 and \
-                video_record_list[-1].share == 0 and \
-                video_record_list[-1].like == 0:
-            logger_19.warning('%d got all params of record = 0, maybe API bug, continue' % aid)
-            continue
-
-        # remove abnormal all zero VideoRecord
-        abnormal_all_zero_index_list = []
-        for i in range(len(video_record_list)):
-            video_record = video_record_list[i]
-            if video_record.view == 0 and video_record.danmaku == 0 and video_record.reply == 0 and \
-                    video_record.favorite == 0 and video_record.coin == 0 and video_record.share == 0 and \
-                    video_record.like == 0:
-                if i == 0:
-                    abnormal_all_zero_index_list.append(i)  # start from all zero, remove it
-                else:
-                    video_record_last = video_record_list[i - 1]
-                    if video_record_last.view == 0 and video_record_last.danmaku == 0 and video_record_last.reply == 0 and \
-                            video_record_last.favorite == 0 and video_record_last.coin == 0 and video_record_last.share == 0 and \
-                            video_record_last.like == 0:
-                        pass
-                    else:
-                        abnormal_all_zero_index_list.append(i)  # from not all zero to zero, remove it
-        for i in reversed(abnormal_all_zero_index_list):
-            logger_19.warning('%d found abnormal all zero video record at %d, delete it'
-                              % (aid, video_record_list[i].added))
-            del video_record_list[i]
-
-        if len(video_record_list) <= 2:  # at least require 3 record
-            continue
-
-        timespan_now = video_record_list[-1].added - video_record_list[-2].added
-        if timespan_now == 0:
-            logger_19.warning('%d got timespan_now = 0, continue' % aid)
-            continue
-        speed_now_dict = dict()
-        speed_now_dict['view'] = (video_record_list[-1].view - video_record_list[-2].view) / timespan_now * 3600
-        speed_now_dict['danmaku'] = (video_record_list[-1].danmaku - video_record_list[-2].danmaku) / timespan_now * 3600
-        speed_now_dict['reply'] = (video_record_list[-1].reply - video_record_list[-2].reply) / timespan_now * 3600
-        speed_now_dict['favorite'] = (video_record_list[-1].favorite - video_record_list[-2].favorite) / timespan_now * 3600
-        speed_now_dict['coin'] = (video_record_list[-1].coin - video_record_list[-2].coin) / timespan_now * 3600
-        speed_now_dict['share'] = (video_record_list[-1].share - video_record_list[-2].share) / timespan_now * 3600
-        speed_now_dict['like'] = (video_record_list[-1].like - video_record_list[-2].like) / timespan_now * 3600
-
-        timespan_last = video_record_list[-2].added - video_record_list[-3].added
-        if timespan_last == 0:
-            logger_19.warning('%d got timespan_last = 0, continue' % aid)
-            continue
-        speed_last_dict = dict()
-        speed_last_dict['view'] = (video_record_list[-2].view - video_record_list[-3].view) / timespan_last * 3600
-        speed_last_dict['danmaku'] = (video_record_list[-2].danmaku - video_record_list[-3].danmaku) / timespan_last * 3600
-        speed_last_dict['reply'] = (video_record_list[-2].reply - video_record_list[-3].reply) / timespan_last * 3600
-        speed_last_dict['favorite'] = (video_record_list[-2].favorite - video_record_list[-3].favorite) / timespan_last * 3600
-        speed_last_dict['coin'] = (video_record_list[-2].coin - video_record_list[-3].coin) / timespan_last * 3600
-        speed_last_dict['share'] = (video_record_list[-2].share - video_record_list[-3].share) / timespan_last * 3600
-        speed_last_dict['like'] = (video_record_list[-2].like - video_record_list[-3].like) / timespan_last * 3600
-
-        # use magic number 99999999 to represent infinity
-        speed_now_incr_rate_dict = dict()
-        speed_now_incr_rate_dict['view'] = (speed_now_dict['view'] - speed_last_dict['view']) \
-            / speed_last_dict['view'] if speed_last_dict['view'] != 0 else \
-            99999999 * 1 if (speed_now_dict['view'] - speed_last_dict['view']) > 0 else -1
-            # float('inf') * (speed_now_dict['view'] - speed_last_dict['view'])
-        speed_now_incr_rate_dict['danmaku'] = (speed_now_dict['danmaku'] - speed_last_dict['danmaku']) \
-            / speed_last_dict['danmaku'] if speed_last_dict['danmaku'] != 0 else \
-            99999999 * 1 if (speed_now_dict['danmaku'] - speed_last_dict['danmaku']) > 0 else -1
-            # float('inf') * (speed_now_dict['danmaku'] - speed_last_dict['danmaku'])
-        speed_now_incr_rate_dict['reply'] = (speed_now_dict['reply'] - speed_last_dict['reply']) \
-            / speed_last_dict['reply'] if speed_last_dict['reply'] != 0 else \
-            99999999 * 1 if (speed_now_dict['reply'] - speed_last_dict['reply']) > 0 else -1
-            # float('inf') * (speed_now_dict['reply'] - speed_last_dict['reply'])
-        speed_now_incr_rate_dict['favorite'] = (speed_now_dict['favorite'] - speed_last_dict['favorite']) \
-            / speed_last_dict['favorite'] if speed_last_dict['favorite'] != 0 else \
-            99999999 * 1 if (speed_now_dict['favorite'] - speed_last_dict['favorite']) > 0 else -1
-            # float('inf') * (speed_now_dict['favorite'] - speed_last_dict['favorite'])
-        speed_now_incr_rate_dict['coin'] = (speed_now_dict['coin'] - speed_last_dict['coin']) \
-            / speed_last_dict['coin'] if speed_last_dict['coin'] != 0 else \
-            99999999 * 1 if (speed_now_dict['coin'] - speed_last_dict['coin']) > 0 else -1
-            # float('inf') * (speed_now_dict['coin'] - speed_last_dict['coin'])
-        speed_now_incr_rate_dict['share'] = (speed_now_dict['share'] - speed_last_dict['share']) \
-            / speed_last_dict['share'] if speed_last_dict['share'] != 0 else \
-            99999999 * 1 if (speed_now_dict['share'] - speed_last_dict['share']) > 0 else -1
-            # float('inf') * (speed_now_dict['share'] - speed_last_dict['share'])
-        speed_now_incr_rate_dict['like'] = (speed_now_dict['like'] - speed_last_dict['like']) \
-            / speed_last_dict['like'] if speed_last_dict['like'] != 0 else \
-            99999999 * 1 if (speed_now_dict['like'] - speed_last_dict['like']) > 0 else -1
-            # float('inf') * (speed_now_dict['like'] - speed_last_dict['like'])
-
-        period_range = video_record_list[-1].added - video_record_list[0].added
-        if period_range == 0:
-            logger_19.warning('%d got period_range = 0, continue' % aid)
-            continue
-
-        speed_period_dict = dict()
-        speed_period_dict['view'] = (video_record_list[-1].view - video_record_list[0].view) / period_range * 3600
-        speed_period_dict['danmaku'] = (video_record_list[-1].danmaku - video_record_list[0].danmaku) / period_range * 3600
-        speed_period_dict['reply'] = (video_record_list[-1].reply - video_record_list[0].reply) / period_range * 3600
-        speed_period_dict['favorite'] = (video_record_list[-1].favorite - video_record_list[0].favorite) / period_range * 3600
-        speed_period_dict['coin'] = (video_record_list[-1].coin - video_record_list[0].coin) / period_range * 3600
-        speed_period_dict['share'] = (video_record_list[-1].share - video_record_list[0].share) / period_range * 3600
-        speed_period_dict['like'] = (video_record_list[-1].like - video_record_list[0].like) / period_range * 3600
-
-        overall_range = video_record_list[-1].added
-        if aid in video_pubdate_dict.keys() and video_pubdate_dict[aid]:
-            overall_range -= video_pubdate_dict[aid]
-        if overall_range == 0:
-            logger_19.warning('%d got overall_range = 0, continue' % aid)
-            continue
-
-        speed_overall_dict = dict()
-        speed_overall_dict['view'] = video_record_list[-1].view / overall_range * 3600
-        speed_overall_dict['danmaku'] = video_record_list[-1].danmaku / overall_range * 3600
-        speed_overall_dict['reply'] = video_record_list[-1].reply / overall_range * 3600
-        speed_overall_dict['favorite'] = video_record_list[-1].favorite / overall_range * 3600
-        speed_overall_dict['coin'] = video_record_list[-1].coin / overall_range * 3600
-        speed_overall_dict['share'] = video_record_list[-1].share / overall_range * 3600
-        speed_overall_dict['like'] = video_record_list[-1].like / overall_range * 3600
-
-        has_abnormal_change = False
-        new_change_list = []
-
-        # check unexpected drop
-        for (key, value) in speed_now_dict.items():
-            if value < -50:
-                new_change = TddVideoRecordAbnormalChange()
-                new_change.added = video_record_list[-1].added
-                new_change.aid = aid
-                new_change.attr = key
-                new_change.speed_now = speed_now_dict[key]
-                new_change.speed_last = speed_last_dict[key]
-                new_change.speed_now_incr_rate = speed_now_incr_rate_dict[key]
-                new_change.period_range = period_range
-                new_change.speed_period = speed_period_dict[key]
-                new_change.speed_overall = speed_overall_dict[key]
-                new_change.this_added = video_record_list[-1].added
-                new_change.this_view = video_record_list[-1].view
-                new_change.this_danmaku = video_record_list[-1].danmaku
-                new_change.this_reply = video_record_list[-1].reply
-                new_change.this_favorite = video_record_list[-1].favorite
-                new_change.this_coin = video_record_list[-1].coin
-                new_change.this_share = video_record_list[-1].share
-                new_change.this_like = video_record_list[-1].like
-                new_change.last_added = video_record_list[-2].added
-                new_change.last_view = video_record_list[-2].view
-                new_change.last_danmaku = video_record_list[-2].danmaku
-                new_change.last_reply = video_record_list[-2].reply
-                new_change.last_favorite = video_record_list[-2].favorite
-                new_change.last_coin = video_record_list[-2].coin
-                new_change.last_share = video_record_list[-2].share
-                new_change.last_like = video_record_list[-2].like
-                new_change.description = 'unexpected drop detected, speed now of %s is %f, < -50' % (key, value)
-                logger_19.info('%d change: %s' % (aid, new_change.description))
-                has_abnormal_change = True
-                new_change_list.append(new_change)
-
-        # check unexpected increase speed
-        for (key, value) in speed_now_incr_rate_dict.items():
-            if value > 2 and speed_now_dict[key] > 50:
-                new_change = TddVideoRecordAbnormalChange()
-                new_change.added = video_record_list[-1].added
-                new_change.aid = aid
-                new_change.attr = key
-                new_change.speed_now = speed_now_dict[key]
-                new_change.speed_last = speed_last_dict[key]
-                new_change.speed_now_incr_rate = speed_now_incr_rate_dict[key]
-                new_change.period_range = period_range
-                new_change.speed_period = speed_period_dict[key]
-                new_change.speed_overall = speed_overall_dict[key]
-                new_change.this_added = video_record_list[-1].added
-                new_change.this_view = video_record_list[-1].view
-                new_change.this_danmaku = video_record_list[-1].danmaku
-                new_change.this_reply = video_record_list[-1].reply
-                new_change.this_favorite = video_record_list[-1].favorite
-                new_change.this_coin = video_record_list[-1].coin
-                new_change.this_share = video_record_list[-1].share
-                new_change.this_like = video_record_list[-1].like
-                new_change.last_added = video_record_list[-2].added
-                new_change.last_view = video_record_list[-2].view
-                new_change.last_danmaku = video_record_list[-2].danmaku
-                new_change.last_reply = video_record_list[-2].reply
-                new_change.last_favorite = video_record_list[-2].favorite
-                new_change.last_coin = video_record_list[-2].coin
-                new_change.last_share = video_record_list[-2].share
-                new_change.last_like = video_record_list[-2].like
-                if value == 99999999:
-                    speed_now_str = 'inf'
-                elif value == -99999999:
-                    speed_now_str = '-inf'
-                else:
-                    speed_now_str = '{0}%'.format(value * 100)
-                new_change.description = 'unexpected increase speed detected, speed now of {0} is {1}, > 200%'.format(
-                    key, speed_now_str)
-                logger_19.info('%d change: %s' % (aid, new_change.description))
-                has_abnormal_change = True
-                new_change_list.append(new_change)
-
-        # if has_abnormal_change and record.id is None:
-        #     DBOperation.add(record, session)
-        #     logger_19.info('Add video record %s' % record)
-
-        # TODO change freq
-
-        try:
-            for new_change in new_change_list:
-                # new_change.this_record_id = record.id
-                # TODO make add last record to tdd_video_record
-                session.add(new_change)
-            session.commit()
-        except Exception as e:
-            logger_19.error('Fail to add new change list with aid %d. Exception caught. Detail: %s' % (aid, e))
+        #
+        # # remove all zero situation
+        # if video_record_list[-1].view == 0 and \
+        #         video_record_list[-1].danmaku == 0 and \
+        #         video_record_list[-1].reply == 0 and \
+        #         video_record_list[-1].favorite == 0 and \
+        #         video_record_list[-1].coin == 0 and \
+        #         video_record_list[-1].share == 0 and \
+        #         video_record_list[-1].like == 0:
+        #     logger_19.warning('%d got all params of record = 0, maybe API bug, continue' % aid)
+        #     continue
+        #
+        # # remove abnormal all zero VideoRecord
+        # abnormal_all_zero_index_list = []
+        # for i in range(len(video_record_list)):
+        #     video_record = video_record_list[i]
+        #     if video_record.view == 0 and video_record.danmaku == 0 and video_record.reply == 0 and \
+        #             video_record.favorite == 0 and video_record.coin == 0 and video_record.share == 0 and \
+        #             video_record.like == 0:
+        #         if i == 0:
+        #             abnormal_all_zero_index_list.append(i)  # start from all zero, remove it
+        #         else:
+        #             video_record_last = video_record_list[i - 1]
+        #             if video_record_last.view == 0 and video_record_last.danmaku == 0 and video_record_last.reply == 0 and \
+        #                     video_record_last.favorite == 0 and video_record_last.coin == 0 and video_record_last.share == 0 and \
+        #                     video_record_last.like == 0:
+        #                 pass
+        #             else:
+        #                 abnormal_all_zero_index_list.append(i)  # from not all zero to zero, remove it
+        # for i in reversed(abnormal_all_zero_index_list):
+        #     logger_19.warning('%d found abnormal all zero video record at %d, delete it'
+        #                       % (aid, video_record_list[i].added))
+        #     del video_record_list[i]
+        #
+        # if len(video_record_list) <= 2:  # at least require 3 record
+        #     continue
+        #
+        # timespan_now = video_record_list[-1].added - video_record_list[-2].added
+        # if timespan_now == 0:
+        #     logger_19.warning('%d got timespan_now = 0, continue' % aid)
+        #     continue
+        # speed_now_dict = dict()
+        # speed_now_dict['view'] = (video_record_list[-1].view - video_record_list[-2].view) / timespan_now * 3600
+        # speed_now_dict['danmaku'] = (video_record_list[-1].danmaku - video_record_list[-2].danmaku) / timespan_now * 3600
+        # speed_now_dict['reply'] = (video_record_list[-1].reply - video_record_list[-2].reply) / timespan_now * 3600
+        # speed_now_dict['favorite'] = (video_record_list[-1].favorite - video_record_list[-2].favorite) / timespan_now * 3600
+        # speed_now_dict['coin'] = (video_record_list[-1].coin - video_record_list[-2].coin) / timespan_now * 3600
+        # speed_now_dict['share'] = (video_record_list[-1].share - video_record_list[-2].share) / timespan_now * 3600
+        # speed_now_dict['like'] = (video_record_list[-1].like - video_record_list[-2].like) / timespan_now * 3600
+        #
+        # timespan_last = video_record_list[-2].added - video_record_list[-3].added
+        # if timespan_last == 0:
+        #     logger_19.warning('%d got timespan_last = 0, continue' % aid)
+        #     continue
+        # speed_last_dict = dict()
+        # speed_last_dict['view'] = (video_record_list[-2].view - video_record_list[-3].view) / timespan_last * 3600
+        # speed_last_dict['danmaku'] = (video_record_list[-2].danmaku - video_record_list[-3].danmaku) / timespan_last * 3600
+        # speed_last_dict['reply'] = (video_record_list[-2].reply - video_record_list[-3].reply) / timespan_last * 3600
+        # speed_last_dict['favorite'] = (video_record_list[-2].favorite - video_record_list[-3].favorite) / timespan_last * 3600
+        # speed_last_dict['coin'] = (video_record_list[-2].coin - video_record_list[-3].coin) / timespan_last * 3600
+        # speed_last_dict['share'] = (video_record_list[-2].share - video_record_list[-3].share) / timespan_last * 3600
+        # speed_last_dict['like'] = (video_record_list[-2].like - video_record_list[-3].like) / timespan_last * 3600
+        #
+        # # use magic number 99999999 to represent infinity
+        # speed_now_incr_rate_dict = dict()
+        # speed_now_incr_rate_dict['view'] = (speed_now_dict['view'] - speed_last_dict['view']) \
+        #     / speed_last_dict['view'] if speed_last_dict['view'] != 0 else \
+        #     99999999 * 1 if (speed_now_dict['view'] - speed_last_dict['view']) > 0 else -1
+        #     # float('inf') * (speed_now_dict['view'] - speed_last_dict['view'])
+        # speed_now_incr_rate_dict['danmaku'] = (speed_now_dict['danmaku'] - speed_last_dict['danmaku']) \
+        #     / speed_last_dict['danmaku'] if speed_last_dict['danmaku'] != 0 else \
+        #     99999999 * 1 if (speed_now_dict['danmaku'] - speed_last_dict['danmaku']) > 0 else -1
+        #     # float('inf') * (speed_now_dict['danmaku'] - speed_last_dict['danmaku'])
+        # speed_now_incr_rate_dict['reply'] = (speed_now_dict['reply'] - speed_last_dict['reply']) \
+        #     / speed_last_dict['reply'] if speed_last_dict['reply'] != 0 else \
+        #     99999999 * 1 if (speed_now_dict['reply'] - speed_last_dict['reply']) > 0 else -1
+        #     # float('inf') * (speed_now_dict['reply'] - speed_last_dict['reply'])
+        # speed_now_incr_rate_dict['favorite'] = (speed_now_dict['favorite'] - speed_last_dict['favorite']) \
+        #     / speed_last_dict['favorite'] if speed_last_dict['favorite'] != 0 else \
+        #     99999999 * 1 if (speed_now_dict['favorite'] - speed_last_dict['favorite']) > 0 else -1
+        #     # float('inf') * (speed_now_dict['favorite'] - speed_last_dict['favorite'])
+        # speed_now_incr_rate_dict['coin'] = (speed_now_dict['coin'] - speed_last_dict['coin']) \
+        #     / speed_last_dict['coin'] if speed_last_dict['coin'] != 0 else \
+        #     99999999 * 1 if (speed_now_dict['coin'] - speed_last_dict['coin']) > 0 else -1
+        #     # float('inf') * (speed_now_dict['coin'] - speed_last_dict['coin'])
+        # speed_now_incr_rate_dict['share'] = (speed_now_dict['share'] - speed_last_dict['share']) \
+        #     / speed_last_dict['share'] if speed_last_dict['share'] != 0 else \
+        #     99999999 * 1 if (speed_now_dict['share'] - speed_last_dict['share']) > 0 else -1
+        #     # float('inf') * (speed_now_dict['share'] - speed_last_dict['share'])
+        # speed_now_incr_rate_dict['like'] = (speed_now_dict['like'] - speed_last_dict['like']) \
+        #     / speed_last_dict['like'] if speed_last_dict['like'] != 0 else \
+        #     99999999 * 1 if (speed_now_dict['like'] - speed_last_dict['like']) > 0 else -1
+        #     # float('inf') * (speed_now_dict['like'] - speed_last_dict['like'])
+        #
+        # period_range = video_record_list[-1].added - video_record_list[0].added
+        # if period_range == 0:
+        #     logger_19.warning('%d got period_range = 0, continue' % aid)
+        #     continue
+        #
+        # speed_period_dict = dict()
+        # speed_period_dict['view'] = (video_record_list[-1].view - video_record_list[0].view) / period_range * 3600
+        # speed_period_dict['danmaku'] = (video_record_list[-1].danmaku - video_record_list[0].danmaku) / period_range * 3600
+        # speed_period_dict['reply'] = (video_record_list[-1].reply - video_record_list[0].reply) / period_range * 3600
+        # speed_period_dict['favorite'] = (video_record_list[-1].favorite - video_record_list[0].favorite) / period_range * 3600
+        # speed_period_dict['coin'] = (video_record_list[-1].coin - video_record_list[0].coin) / period_range * 3600
+        # speed_period_dict['share'] = (video_record_list[-1].share - video_record_list[0].share) / period_range * 3600
+        # speed_period_dict['like'] = (video_record_list[-1].like - video_record_list[0].like) / period_range * 3600
+        #
+        # overall_range = video_record_list[-1].added
+        # if aid in video_pubdate_dict.keys() and video_pubdate_dict[aid]:
+        #     overall_range -= video_pubdate_dict[aid]
+        # if overall_range == 0:
+        #     logger_19.warning('%d got overall_range = 0, continue' % aid)
+        #     continue
+        #
+        # speed_overall_dict = dict()
+        # speed_overall_dict['view'] = video_record_list[-1].view / overall_range * 3600
+        # speed_overall_dict['danmaku'] = video_record_list[-1].danmaku / overall_range * 3600
+        # speed_overall_dict['reply'] = video_record_list[-1].reply / overall_range * 3600
+        # speed_overall_dict['favorite'] = video_record_list[-1].favorite / overall_range * 3600
+        # speed_overall_dict['coin'] = video_record_list[-1].coin / overall_range * 3600
+        # speed_overall_dict['share'] = video_record_list[-1].share / overall_range * 3600
+        # speed_overall_dict['like'] = video_record_list[-1].like / overall_range * 3600
+        #
+        # has_abnormal_change = False
+        # new_change_list = []
+        #
+        # # check unexpected drop
+        # for (key, value) in speed_now_dict.items():
+        #     if value < -50:
+        #         new_change = TddVideoRecordAbnormalChange()
+        #         new_change.added = video_record_list[-1].added
+        #         new_change.aid = aid
+        #         new_change.attr = key
+        #         new_change.speed_now = speed_now_dict[key]
+        #         new_change.speed_last = speed_last_dict[key]
+        #         new_change.speed_now_incr_rate = speed_now_incr_rate_dict[key]
+        #         new_change.period_range = period_range
+        #         new_change.speed_period = speed_period_dict[key]
+        #         new_change.speed_overall = speed_overall_dict[key]
+        #         new_change.this_added = video_record_list[-1].added
+        #         new_change.this_view = video_record_list[-1].view
+        #         new_change.this_danmaku = video_record_list[-1].danmaku
+        #         new_change.this_reply = video_record_list[-1].reply
+        #         new_change.this_favorite = video_record_list[-1].favorite
+        #         new_change.this_coin = video_record_list[-1].coin
+        #         new_change.this_share = video_record_list[-1].share
+        #         new_change.this_like = video_record_list[-1].like
+        #         new_change.last_added = video_record_list[-2].added
+        #         new_change.last_view = video_record_list[-2].view
+        #         new_change.last_danmaku = video_record_list[-2].danmaku
+        #         new_change.last_reply = video_record_list[-2].reply
+        #         new_change.last_favorite = video_record_list[-2].favorite
+        #         new_change.last_coin = video_record_list[-2].coin
+        #         new_change.last_share = video_record_list[-2].share
+        #         new_change.last_like = video_record_list[-2].like
+        #         new_change.description = 'unexpected drop detected, speed now of %s is %f, < -50' % (key, value)
+        #         logger_19.info('%d change: %s' % (aid, new_change.description))
+        #         has_abnormal_change = True
+        #         new_change_list.append(new_change)
+        #
+        # # check unexpected increase speed
+        # for (key, value) in speed_now_incr_rate_dict.items():
+        #     if value > 2 and speed_now_dict[key] > 50:
+        #         new_change = TddVideoRecordAbnormalChange()
+        #         new_change.added = video_record_list[-1].added
+        #         new_change.aid = aid
+        #         new_change.attr = key
+        #         new_change.speed_now = speed_now_dict[key]
+        #         new_change.speed_last = speed_last_dict[key]
+        #         new_change.speed_now_incr_rate = speed_now_incr_rate_dict[key]
+        #         new_change.period_range = period_range
+        #         new_change.speed_period = speed_period_dict[key]
+        #         new_change.speed_overall = speed_overall_dict[key]
+        #         new_change.this_added = video_record_list[-1].added
+        #         new_change.this_view = video_record_list[-1].view
+        #         new_change.this_danmaku = video_record_list[-1].danmaku
+        #         new_change.this_reply = video_record_list[-1].reply
+        #         new_change.this_favorite = video_record_list[-1].favorite
+        #         new_change.this_coin = video_record_list[-1].coin
+        #         new_change.this_share = video_record_list[-1].share
+        #         new_change.this_like = video_record_list[-1].like
+        #         new_change.last_added = video_record_list[-2].added
+        #         new_change.last_view = video_record_list[-2].view
+        #         new_change.last_danmaku = video_record_list[-2].danmaku
+        #         new_change.last_reply = video_record_list[-2].reply
+        #         new_change.last_favorite = video_record_list[-2].favorite
+        #         new_change.last_coin = video_record_list[-2].coin
+        #         new_change.last_share = video_record_list[-2].share
+        #         new_change.last_like = video_record_list[-2].like
+        #         if value == 99999999:
+        #             speed_now_str = 'inf'
+        #         elif value == -99999999:
+        #             speed_now_str = '-inf'
+        #         else:
+        #             speed_now_str = '{0}%'.format(value * 100)
+        #         new_change.description = 'unexpected increase speed detected, speed now of {0} is {1}, > 200%'.format(
+        #             key, speed_now_str)
+        #         logger_19.info('%d change: %s' % (aid, new_change.description))
+        #         has_abnormal_change = True
+        #         new_change_list.append(new_change)
+        #
+        # # if has_abnormal_change and record.id is None:
+        # #     DBOperation.add(record, session)
+        # #     logger_19.info('Add video record %s' % record)
+        #
+        # # TODO change freq
+        #
+        # try:
+        #     for new_change in new_change_list:
+        #         # new_change.this_record_id = record.id
+        #         # TODO make add last record to tdd_video_record
+        #         session.add(new_change)
+        #     session.commit()
+        # except Exception as e:
+        #     logger_19.error('Fail to add new change list with aid %d. Exception caught. Detail: %s' % (aid, e))
 
         check_visited_count += 1
         if check_visited_count % 10000 == 0:
