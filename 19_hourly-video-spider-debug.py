@@ -540,47 +540,47 @@ def hour(time_label):
                 has_abnormal_change = True
                 new_change_list.append(new_change)
 
-        # # check unexpected increase speed
-        # for (key, value) in speed_now_incr_rate_dict.items():
-        #     if value > 2 and speed_now_dict[key] > 50:
-        #         new_change = TddVideoRecordAbnormalChange()
-        #         new_change.added = video_record_list[-1].added
-        #         new_change.aid = aid
-        #         new_change.attr = key
-        #         new_change.speed_now = speed_now_dict[key]
-        #         new_change.speed_last = speed_last_dict[key]
-        #         new_change.speed_now_incr_rate = speed_now_incr_rate_dict[key]
-        #         new_change.period_range = period_range
-        #         new_change.speed_period = speed_period_dict[key]
-        #         new_change.speed_overall = speed_overall_dict[key]
-        #         new_change.this_added = video_record_list[-1].added
-        #         new_change.this_view = video_record_list[-1].view
-        #         new_change.this_danmaku = video_record_list[-1].danmaku
-        #         new_change.this_reply = video_record_list[-1].reply
-        #         new_change.this_favorite = video_record_list[-1].favorite
-        #         new_change.this_coin = video_record_list[-1].coin
-        #         new_change.this_share = video_record_list[-1].share
-        #         new_change.this_like = video_record_list[-1].like
-        #         new_change.last_added = video_record_list[-2].added
-        #         new_change.last_view = video_record_list[-2].view
-        #         new_change.last_danmaku = video_record_list[-2].danmaku
-        #         new_change.last_reply = video_record_list[-2].reply
-        #         new_change.last_favorite = video_record_list[-2].favorite
-        #         new_change.last_coin = video_record_list[-2].coin
-        #         new_change.last_share = video_record_list[-2].share
-        #         new_change.last_like = video_record_list[-2].like
-        #         if value == 99999999:
-        #             speed_now_str = 'inf'
-        #         elif value == -99999999:
-        #             speed_now_str = '-inf'
-        #         else:
-        #             speed_now_str = '{0}%'.format(value * 100)
-        #         new_change.description = 'unexpected increase speed detected, speed now of {0} is {1}, > 200%'.format(
-        #             key, speed_now_str)
-        #         logger_19.info('%d change: %s' % (aid, new_change.description))
-        #         has_abnormal_change = True
-        #         new_change_list.append(new_change)
-        #
+        # check unexpected increase speed
+        for (key, value) in speed_now_incr_rate_dict.items():
+            if value > 2 and speed_now_dict[key] > 50:
+                new_change = TddVideoRecordAbnormalChange()
+                new_change.added = video_record_list[-1].added
+                new_change.aid = aid
+                new_change.attr = key
+                new_change.speed_now = speed_now_dict[key]
+                new_change.speed_last = speed_last_dict[key]
+                new_change.speed_now_incr_rate = speed_now_incr_rate_dict[key]
+                new_change.period_range = period_range
+                new_change.speed_period = speed_period_dict[key]
+                new_change.speed_overall = speed_overall_dict[key]
+                new_change.this_added = video_record_list[-1].added
+                new_change.this_view = video_record_list[-1].view
+                new_change.this_danmaku = video_record_list[-1].danmaku
+                new_change.this_reply = video_record_list[-1].reply
+                new_change.this_favorite = video_record_list[-1].favorite
+                new_change.this_coin = video_record_list[-1].coin
+                new_change.this_share = video_record_list[-1].share
+                new_change.this_like = video_record_list[-1].like
+                new_change.last_added = video_record_list[-2].added
+                new_change.last_view = video_record_list[-2].view
+                new_change.last_danmaku = video_record_list[-2].danmaku
+                new_change.last_reply = video_record_list[-2].reply
+                new_change.last_favorite = video_record_list[-2].favorite
+                new_change.last_coin = video_record_list[-2].coin
+                new_change.last_share = video_record_list[-2].share
+                new_change.last_like = video_record_list[-2].like
+                if value == 99999999:
+                    speed_now_str = 'inf'
+                elif value == -99999999:
+                    speed_now_str = '-inf'
+                else:
+                    speed_now_str = '{0}%'.format(value * 100)
+                new_change.description = 'unexpected increase speed detected, speed now of {0} is {1}, > 200%'.format(
+                    key, speed_now_str)
+                logger_19.info('%d change: %s' % (aid, new_change.description))
+                has_abnormal_change = True
+                new_change_list.append(new_change)
+
         # # if has_abnormal_change and record.id is None:
         # #     DBOperation.add(record, session)
         # #     logger_19.info('Add video record %s' % record)
