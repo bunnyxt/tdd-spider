@@ -379,43 +379,43 @@ def hour(time_label):
             continue
 
         video_record_list.sort(key=lambda r: r.added)
-        #
-        # # remove all zero situation
-        # if video_record_list[-1].view == 0 and \
-        #         video_record_list[-1].danmaku == 0 and \
-        #         video_record_list[-1].reply == 0 and \
-        #         video_record_list[-1].favorite == 0 and \
-        #         video_record_list[-1].coin == 0 and \
-        #         video_record_list[-1].share == 0 and \
-        #         video_record_list[-1].like == 0:
-        #     logger_19.warning('%d got all params of record = 0, maybe API bug, continue' % aid)
-        #     continue
-        #
-        # # remove abnormal all zero VideoRecord
-        # abnormal_all_zero_index_list = []
-        # for i in range(len(video_record_list)):
-        #     video_record = video_record_list[i]
-        #     if video_record.view == 0 and video_record.danmaku == 0 and video_record.reply == 0 and \
-        #             video_record.favorite == 0 and video_record.coin == 0 and video_record.share == 0 and \
-        #             video_record.like == 0:
-        #         if i == 0:
-        #             abnormal_all_zero_index_list.append(i)  # start from all zero, remove it
-        #         else:
-        #             video_record_last = video_record_list[i - 1]
-        #             if video_record_last.view == 0 and video_record_last.danmaku == 0 and video_record_last.reply == 0 and \
-        #                     video_record_last.favorite == 0 and video_record_last.coin == 0 and video_record_last.share == 0 and \
-        #                     video_record_last.like == 0:
-        #                 pass
-        #             else:
-        #                 abnormal_all_zero_index_list.append(i)  # from not all zero to zero, remove it
-        # for i in reversed(abnormal_all_zero_index_list):
-        #     logger_19.warning('%d found abnormal all zero video record at %d, delete it'
-        #                       % (aid, video_record_list[i].added))
-        #     del video_record_list[i]
-        #
-        # if len(video_record_list) <= 2:  # at least require 3 record
-        #     continue
-        #
+
+        # remove all zero situation
+        if video_record_list[-1].view == 0 and \
+                video_record_list[-1].danmaku == 0 and \
+                video_record_list[-1].reply == 0 and \
+                video_record_list[-1].favorite == 0 and \
+                video_record_list[-1].coin == 0 and \
+                video_record_list[-1].share == 0 and \
+                video_record_list[-1].like == 0:
+            logger_19.warning('%d got all params of record = 0, maybe API bug, continue' % aid)
+            continue
+
+        # remove abnormal all zero VideoRecord
+        abnormal_all_zero_index_list = []
+        for i in range(len(video_record_list)):
+            video_record = video_record_list[i]
+            if video_record.view == 0 and video_record.danmaku == 0 and video_record.reply == 0 and \
+                    video_record.favorite == 0 and video_record.coin == 0 and video_record.share == 0 and \
+                    video_record.like == 0:
+                if i == 0:
+                    abnormal_all_zero_index_list.append(i)  # start from all zero, remove it
+                else:
+                    video_record_last = video_record_list[i - 1]
+                    if video_record_last.view == 0 and video_record_last.danmaku == 0 and video_record_last.reply == 0 and \
+                            video_record_last.favorite == 0 and video_record_last.coin == 0 and video_record_last.share == 0 and \
+                            video_record_last.like == 0:
+                        pass
+                    else:
+                        abnormal_all_zero_index_list.append(i)  # from not all zero to zero, remove it
+        for i in reversed(abnormal_all_zero_index_list):
+            logger_19.warning('%d found abnormal all zero video record at %d, delete it'
+                              % (aid, video_record_list[i].added))
+            del video_record_list[i]
+
+        if len(video_record_list) <= 2:  # at least require 3 record
+            continue
+
         # timespan_now = video_record_list[-1].added - video_record_list[-2].added
         # if timespan_now == 0:
         #     logger_19.warning('%d got timespan_now = 0, continue' % aid)
