@@ -584,17 +584,17 @@ def hour(time_label):
         # # if has_abnormal_change and record.id is None:
         # #     DBOperation.add(record, session)
         # #     logger_19.info('Add video record %s' % record)
-        #
-        # # TODO change freq
-        #
-        # try:
-        #     for new_change in new_change_list:
-        #         # new_change.this_record_id = record.id
-        #         # TODO make add last record to tdd_video_record
-        #         session.add(new_change)
-        #     session.commit()
-        # except Exception as e:
-        #     logger_19.error('Fail to add new change list with aid %d. Exception caught. Detail: %s' % (aid, e))
+
+        # TODO change freq
+
+        try:
+            for new_change in new_change_list:
+                # new_change.this_record_id = record.id
+                # TODO make add last record to tdd_video_record
+                session.add(new_change)
+                session.commit()
+        except Exception as e:
+            logger_19.error('Fail to add new change list with aid %d. Exception caught. Detail: %s' % (aid, e))
 
         check_visited_count += 1
         if check_visited_count % 10000 == 0:
