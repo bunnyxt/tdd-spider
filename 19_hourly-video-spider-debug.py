@@ -606,6 +606,8 @@ def hour(time_label):
 
     logger_19.info('08 done! Finish check params of history video records')
 
+    logger_19.info('09: update recent, activity and freq')
+
     # tmp update recent field begin
     try:
         now_ts = get_ts_s()
@@ -617,77 +619,81 @@ def hour(time_label):
         session.commit()
         session.execute('update tdd_video set recent = 2 where added >= %d' % last_1d_ts)
         session.commit()
-        logger_19.info('Finish update recent field')
+        logger_19.info('finish update recent field')
     except Exception as e:
         logger_19.error(e)
     # tmp update recent field end
 
     # tmp update activity field begin
-    try:
-        # update everyday
-        this_week_ts_begin = int(time.mktime(time.strptime(str(datetime.date.today()), '%Y-%m-%d'))) + 4 * 60 * 60
-        this_week_ts_end = this_week_ts_begin + 30 * 60
-        this_week_results = session.execute(
-            'select r.`aid`, `view` from tdd_video_record r join tdd_video v on r.aid = v.aid ' +
-            'where r.added >= %d && r.added <= %d' % (this_week_ts_begin, this_week_ts_end))
-        this_week_records = {}
-        for result in this_week_results:
-            aid = result[0]
-            view = result[1]
-            if aid in this_week_records.keys():
-                last_view = this_week_records[aid]
-                if view > last_view:
+    if time_label == '04:00':
+        try:
+            # update everyday
+            this_week_ts_begin = int(time.mktime(time.strptime(str(datetime.date.today()), '%Y-%m-%d'))) + 4 * 60 * 60
+            this_week_ts_end = this_week_ts_begin + 30 * 60
+            this_week_results = session.execute(
+                'select r.`aid`, `view` from tdd_video_record r join tdd_video v on r.aid = v.aid ' +
+                'where r.added >= %d && r.added <= %d' % (this_week_ts_begin, this_week_ts_end))
+            this_week_records = {}
+            for result in this_week_results:
+                aid = result[0]
+                view = result[1]
+                if aid in this_week_records.keys():
+                    last_view = this_week_records[aid]
+                    if view > last_view:
+                        this_week_records[aid] = view
+                else:
                     this_week_records[aid] = view
-            else:
-                this_week_records[aid] = view
 
-        last_week_ts_begin = this_week_ts_begin - 7 * 24 * 60 * 60
-        last_week_ts_end = last_week_ts_begin + 30 * 60
-        last_week_results = session.execute(
-            'select r.`aid`, `view` from tdd_video_record r join tdd_video v on r.aid = v.aid ' +
-            'where r.added >= %d && r.added <= %d' % (last_week_ts_begin, last_week_ts_end))
-        last_week_records = {}
-        for result in last_week_results:
-            aid = result[0]
-            view = result[1]
-            if aid in last_week_records.keys():
-                last_view = last_week_records[aid]
-                if view < last_view:
+            last_week_ts_begin = this_week_ts_begin - 7 * 24 * 60 * 60
+            last_week_ts_end = last_week_ts_begin + 30 * 60
+            last_week_results = session.execute(
+                'select r.`aid`, `view` from tdd_video_record r join tdd_video v on r.aid = v.aid ' +
+                'where r.added >= %d && r.added <= %d' % (last_week_ts_begin, last_week_ts_end))
+            last_week_records = {}
+            for result in last_week_results:
+                aid = result[0]
+                view = result[1]
+                if aid in last_week_records.keys():
+                    last_view = last_week_records[aid]
+                    if view < last_view:
+                        last_week_records[aid] = view
+                else:
                     last_week_records[aid] = view
-            else:
-                last_week_records[aid] = view
 
-        last_week_record_keys = last_week_records.keys()
-        diff_records = {}
-        for aid in this_week_records.keys():
-            if aid in last_week_record_keys:
-                diff_records[aid] = this_week_records[aid] - last_week_records[aid]
-            else:
-                diff_records[aid] = this_week_records[aid]
+            last_week_record_keys = last_week_records.keys()
+            diff_records = {}
+            for aid in this_week_records.keys():
+                if aid in last_week_record_keys:
+                    diff_records[aid] = this_week_records[aid] - last_week_records[aid]
+                else:
+                    diff_records[aid] = this_week_records[aid]
 
-        active_aids = []
-        hot_aids = []
-        for aid, view in diff_records.items():
-            if view >= 5000:
-                hot_aids.append(aid)
-            elif view >= 1000:
-                active_aids.append(aid)
+            active_aids = []
+            hot_aids = []
+            for aid, view in diff_records.items():
+                if view >= 5000:
+                    hot_aids.append(aid)
+                elif view >= 1000:
+                    active_aids.append(aid)
 
-        session.execute('update tdd_video set activity = 0')
-        session.commit()
-
-        for aid in active_aids:
-            session.execute('update tdd_video set activity = 1 where aid = %d' % aid)
+            session.execute('update tdd_video set activity = 0')
             session.commit()
 
-        for aid in hot_aids:
-            session.execute('update tdd_video set activity = 2 where aid = %d' % aid)
+            for aid in active_aids:
+                session.execute('update tdd_video set activity = 1 where aid = %d' % aid)
             session.commit()
 
-        logger_19.info('active_aids: %r' % active_aids)
-        logger_19.info('hot_aids: %r' % hot_aids)
-    except Exception as e:
-        logger_19.info(e)
+            for aid in hot_aids:
+                session.execute('update tdd_video set activity = 2 where aid = %d' % aid)
+            session.commit()
+
+            logger_19.info('finish update activity field')
+            logger_19.debug('active_aids: %r' % active_aids)
+            logger_19.debug('hot_aids: %r' % hot_aids)
+        except Exception as e:
+            logger_19.info(e)
+    else:
+        logger_19.info('time label is not 04:00, no need to update activity')
     # tmp update activity field end
 
     # tmp update freq
@@ -698,10 +704,12 @@ def hour(time_label):
         session.commit()
         session.execute('update tdd_video set freq = 2 where activity = 2 || recent = 1')
         session.commit()
-        logger_19.info('Finish update freq')
+        logger_19.info('finish update freq field')
     except Exception as e:
         logger_19.error(e)
     # tmp update freq end
+
+    logger_19.info('09 done! Finish update recent, activity and freq field')
 
     del new_video_record_list
     del history_record_dict
