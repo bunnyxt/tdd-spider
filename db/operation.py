@@ -65,12 +65,30 @@ class DBOperation:
             return None
 
     @classmethod
+    def query_video_via_bvid(cls, bvid, session):
+        try:
+            result = session.query(TddVideo).filter(TddVideo.bvid == bvid).first()
+            return result
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'bvid': bvid}), exc_info=True)
+            return None
+
+    @classmethod
     def query_video_staff_via_aid_mid(cls, aid, mid, session):
         try:
             result = session.query(TddVideoStaff).filter(TddVideoStaff.aid == aid, TddVideoStaff.mid == mid).first()
             return result
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'aid': aid, 'mid': mid}), exc_info=True)
+            return None
+
+    @classmethod
+    def query_video_staff_via_bvid_mid(cls, bvid, mid, session):
+        try:
+            result = session.query(TddVideoStaff).filter(TddVideoStaff.bvid == bvid, TddVideoStaff.mid == mid).first()
+            return result
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'bvid': bvid, 'mid': mid}), exc_info=True)
             return None
 
     @classmethod

@@ -15,6 +15,7 @@ class TddVideo(Base):
     id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     aid = Column(Integer, nullable=False, unique=True)
+    bvid = Column(String(10), nullable=False)
     videos = Column(Integer, default=None)
     tid = Column(Integer, default=None)
     tname = Column(String(30), default=None)
@@ -71,6 +72,7 @@ class TddVideoStaff(Base):
     id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     aid = Column(Integer, nullable=False)
+    bvid = Column(String(10), nullable=False)
     mid = Column(Integer, nullable=False)
     title = Column(String(30), nullable=False)
 

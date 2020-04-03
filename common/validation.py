@@ -1,7 +1,7 @@
 import time
 
-__all__ = ['get_valid', 'test_video_view', 'test_video_stat', 'test_video_tags', 'test_member', 'test_member_relation',
-           'test_archive_rank_by_partion']
+__all__ = ['get_valid', 'test_video_view', 'test_video_view_via_bvid', 'test_video_stat', 'test_video_tags_via_bvid',
+           'test_video_tags', 'test_member', 'test_member_relation', 'test_archive_rank_by_partion']
 
 
 def get_valid(get_obj_func, get_obj_func_args, test_obj_func, repeat_count=5, colddown=1):
@@ -57,7 +57,29 @@ def test_video_view(obj):
         return str(e)
 
 
+def test_video_view_via_bvid(obj):
+    try:
+        basic_test_result = basic_test(obj)
+        if basic_test_result is not None:
+            return basic_test_result
+
+        return None
+    except Exception as e:
+        return str(e)
+
+
 def test_video_tags(obj):
+    try:
+        basic_test_result = basic_test(obj)
+        if basic_test_result is not None:
+            return basic_test_result
+
+        return None
+    except Exception as e:
+        return str(e)
+
+
+def test_video_tags_via_bvid(obj):
     try:
         basic_test_result = basic_test(obj)
         if basic_test_result is not None:
