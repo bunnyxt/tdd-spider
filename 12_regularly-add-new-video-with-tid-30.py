@@ -57,7 +57,7 @@ def regularly_add_new_video():
 
                 if bvid in last_15_bvids:
                     last_bvid_count += 1
-                    logger_12.debug('Bvid %d in last bvids, count %d / 5, now continue' % (bvid, last_bvid_count))
+                    logger_12.debug('Bvid %s in last bvids, count %d / 5, now continue' % (bvid, last_bvid_count))
                     continue
 
                 # add video
@@ -79,7 +79,7 @@ def regularly_add_new_video():
                         else:
                             logger_12.info('Add new video record %s' % new_video_record)
                     else:
-                        logger_12.warning('Fail to get stat info of video with bvid %d from awesome api!' % bvid)
+                        logger_12.warning('Fail to get stat info of video with bvid %s from awesome api!' % bvid)
 
         except Exception as e:
             logger_12.error('Exception caught. Detail: %s' % e)
