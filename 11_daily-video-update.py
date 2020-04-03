@@ -6,9 +6,9 @@ from logger import logger_11, logger_11_c0, logger_11_c30
 from pybiliapi import BiliApi
 import math
 from db import Session, DBOperation, TddVideoRecord
-from util import get_ts_s, ts_s_to_str
+from util import get_ts_s, ts_s_to_str, a2b
 from common import get_valid, test_video_view, test_video_stat, test_archive_rank_by_partion, \
-    add_video_record_via_stat_api, add_video_record_via_awesome_stat, add_video, \
+    add_video_record_via_stat_api, add_video_record_via_awesome_stat, add_video, add_video_via_bvid, \
     TddCommonError, InvalidObjCodeError, AlreadyExistError
 from serverchan import sc_send
 
@@ -242,7 +242,8 @@ def update_aids_c30(aids):
 
         # add video
         try:
-            new_video = add_video(aid, bapi, session)
+            # new_video = add_video(aid, bapi, session)  TODO change to bvid totally
+            new_video = add_video_via_bvid(a2b(aid), bapi, session)
         except AlreadyExistError:
             # video already exist, which is absolutely common
             pass

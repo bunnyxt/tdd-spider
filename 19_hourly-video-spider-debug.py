@@ -3,11 +3,11 @@ import threading
 from logger import logger_19
 from db import DBOperation, Session, TddVideoRecord, TddVideoLog, TddVideoRecordAbnormalChange
 import time
-from util import get_ts_s, ts_s_to_str
+from util import get_ts_s, ts_s_to_str, a2b
 from pybiliapi import BiliApi
 import math
 from common import get_valid, test_archive_rank_by_partion, add_video_record_via_stat_api, InvalidObjCodeError, \
-    update_video, TddCommonError, test_video_view, add_video, AlreadyExistError
+    update_video, TddCommonError, test_video_view, add_video, add_video_via_bvid, AlreadyExistError
 from collections import defaultdict, namedtuple
 import gc
 import datetime
@@ -278,7 +278,8 @@ def hour(time_label):
             aid = record.aid
             # add video
             try:
-                new_video = add_video(aid, bapi, session)
+                # new_video = add_video(aid, bapi, session)  TODO change to bvid totally
+                new_video = add_video_via_bvid(a2b(aid), bapi, session)
             except AlreadyExistError:
                 # video already exist, which is absolutely common
                 pass
