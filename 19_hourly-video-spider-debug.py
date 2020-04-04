@@ -301,14 +301,15 @@ def hour(time_label):
 
     # save to file
     new_video_record_list = c30_new_video_record_list + c0_new_video_record_list
-    filename = 'data/%s.csv' % task_label
+    data_folder = 'data/'
+    filename = data_folder + '%s.csv' % task_label
     with open(filename, 'w') as f:
         f.write('aid,added,view,danmaku,reply,favorite,coin,share,like\n')
         for record in new_video_record_list:
             f.write('%d,%d,%d,%d,%d,%d,%d,%d,%d\n'
                     % (record.aid, record.added, record.view, record.danmaku,
                        record.reply, record.favorite, record.coin, record.share, record.like))
-    index_filename = 'data/index.txt'
+    index_filename = data_folder + 'index.txt'
     with open(index_filename, 'a') as f:
         f.write('%s\n' % filename)
 
@@ -320,7 +321,7 @@ def hour(time_label):
     history_filename_list = []
     with open(index_filename, 'r') as f:
         lines = f.readlines()
-        for line in lines[-13:]:
+        for line in lines[-7:]:
             history_filename_list.append(line.rstrip('\n'))
     logger_19.info('Will load records from file list %r' % history_filename_list)
 
