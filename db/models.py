@@ -146,13 +146,15 @@ class TddVideoLog(Base):
     id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     aid = Column(Integer, nullable=False)
+    bvid = Column(String(10), nullable=False)
     attr = Column(String(30), nullable=False)
     oldval = Column(LONGTEXT)
     newval = Column(LONGTEXT)
 
-    def __init__(self, added, aid, attr, oldval, newval):
+    def __init__(self, added, aid, bvid, attr, oldval, newval):
         self.added = added
         self.aid = aid
+        self.bvid = bvid
         self.attr = attr
         self.oldval = oldval
         self.newval = newval
