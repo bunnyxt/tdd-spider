@@ -47,14 +47,15 @@ def hour(time_label):
 
     page_num = 1
     while page_num <= page_total:
-        # get obj via awesome api
-        obj = get_valid(bapi.get_archive_rank_by_partion, (30, page_num, 50), test_archive_rank_by_partion)
-        if obj is None:
-            logger_19.warning('Page num %d fail! Cannot get valid obj.' % page_num)
-            page_num += 1
-            continue
 
         try:
+            # get obj via awesome api
+            obj = get_valid(bapi.get_archive_rank_by_partion, (30, page_num, 50), test_archive_rank_by_partion)
+            if obj is None:
+                logger_19.warning('Page num %d fail! Cannot get valid obj.' % page_num)
+                page_num += 1
+                continue
+
             added = get_ts_s()
             for arch in obj['data']['archives']:
                 # make new video record
