@@ -725,7 +725,7 @@ def hour(time_label):
         sql = 'insert into ' \
               'tdd_video_record_hourly(added, timelabel, bvid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
               'values(%d, "%s", "%s", %d, %d, %d, %d, %d, %d, %d)' % \
-              (record.added, time_label, a2b(record.aid), record.view, record.danmaku, record.reply, record.favorite,
+              (record.added, task_label, a2b(record.aid), record.view, record.danmaku, record.reply, record.favorite,
                record.coin, record.share, record.like)
         session.execute(sql)
         new_video_record_hourly_added_count += 1
