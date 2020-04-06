@@ -264,6 +264,16 @@ class DBOperation:
             return None
 
     @classmethod
+    def query_video_bvids(cls, offset, size, session):
+        try:
+            result = session.execute(
+                'select bvid from tdd_video limit %d, %d' % (offset, size))
+            return list(r[0] for r in result)
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'offset': offset, 'size': size}), exc_info=True)
+            return None
+
+    @classmethod
     def query_member_mids(cls, offset, size, session):
         try:
             result = session.execute(
