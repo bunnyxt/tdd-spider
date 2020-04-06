@@ -4,7 +4,7 @@ import time
 from logger import logger_15
 from db import DBOperation, Session
 from pybiliapi import BiliApi
-from common import update_video, TddCommonError
+from common import update_video_via_bvid, TddCommonError
 from serverchan import sc_send
 from util import get_ts_s, ts_s_to_str
 
@@ -19,21 +19,21 @@ def regularly_update_video_info():
     week_num = int(time.strftime('%w', time.localtime(time.time())))
     size = 40000
     offset = week_num * size
-    logger_15.info('Week %d, go fetch aids, %d ~ %s' % (week_num, offset + 1, offset + size))
+    logger_15.info('Week %d, go fetch bvid, %d ~ %s' % (week_num, offset + 1, offset + size))
 
-    aids = DBOperation.query_video_aids(offset, size, session)
-    logger_15.info('% aids got' % len(aids))
+    bvids = DBOperation.query_video_bvids(offset, size, session)
+    logger_15.info('%d bvids got' % len(bvids))
 
-    total_count = len(aids)
+    total_count = len(bvids)
     tdd_common_error_count = 0
     other_exception_count = 0
     no_update_count = 0
     change_count = 0
     change_log_count = 0
 
-    for aid in aids:
+    for bvid in bvids:
         try:
-            tdd_video_logs = update_video(aid, bapi, session)
+            tdd_video_logs = update_video_via_bvid(bvid, bapi, session)
         except TddCommonError as e:
             logger_15.error(e)
             tdd_common_error_count += 1
@@ -46,9 +46,9 @@ def regularly_update_video_info():
             else:
                 change_count += 1
             for log in tdd_video_logs:
-                logger_15.info('%d, %s, %s, %s' % (log.aid, log.attr, log.oldval, log.newval))
+                logger_15.info('%s, %s, %s, %s' % (log.bvid, log.attr, log.oldval, log.newval))
                 change_log_count += 1
-            logger_15.debug('Finish update video info aid %d' % aid)
+            logger_15.debug('Finish update video info bvid %s' % bvid)
         time.sleep(0.2)  # avoid ban ip
 
     # get finish ts
