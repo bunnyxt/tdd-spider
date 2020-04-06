@@ -199,10 +199,12 @@ def hour(time_label):
                         # video tid!=30 now, change tid
                         try:
                             old_video = DBOperation.query_video_via_aid(aid, session)
-                            session.add(TddVideoLog(view_obj_added, aid, 'tid', old_video.tid, tid))
-                            old_video.tid = tid
-                            session.add(TddVideoLog(view_obj_added, aid, 'isvc', old_video.isvc, 5))
-                            old_video.isvc = 5
+                            if old_video.tid != tid:
+                                session.add(TddVideoLog(view_obj_added, aid, a2b(aid), 'tid', old_video.tid, tid))
+                                old_video.tid = tid
+                            if old_video.isvc != 5:
+                                session.add(TddVideoLog(view_obj_added, aid, a2b(aid), 'isvc', old_video.isvc, 5))
+                                old_video.isvc = 5
                             session.commit()
                             logger_19.info(
                                 'Update video aid = %d tid from 30 to %d then update isvc = %d.'
@@ -245,10 +247,11 @@ def hour(time_label):
                 # code!=0, change code
                 try:
                     old_video = DBOperation.query_video_via_aid(aid, session)
-                    session.add(TddVideoLog(view_obj_added, aid, 'code', old_video.code, code))
-                    old_video.code = code
-                    session.commit()
-                    logger_19.info('Update video aid = %d code from 0 to %d.' % (aid, code))
+                    if old_video.code != code:
+                        session.add(TddVideoLog(view_obj_added, aid, a2b(aid), 'code', old_video.code, code))
+                        old_video.code = code
+                        session.commit()
+                        logger_19.info('Update video aid = %d code from 0 to %d.' % (aid, code))
                     c30_left_code_changed_aids.append(aid)
                 except Exception as e:
                     session.rollback()
