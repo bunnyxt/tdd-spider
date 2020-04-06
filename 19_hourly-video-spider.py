@@ -11,6 +11,7 @@ from common import get_valid, test_archive_rank_by_partion, add_video_record_via
 from collections import defaultdict, namedtuple
 import gc
 import datetime
+import os
 
 
 def get_need_insert_aid_list(time_label, is_tid_30, session):
@@ -281,7 +282,6 @@ def hour(time_label):
             aid = record.aid
             # add video
             try:
-                # new_video = add_video(aid, bapi, session)  TODO change to bvid totally
                 new_video = add_video_via_bvid(a2b(aid), bapi, session)
             except AlreadyExistError:
                 # video already exist, which is absolutely common
@@ -305,8 +305,8 @@ def hour(time_label):
     # save to file
     new_video_record_list = c30_new_video_record_list + c0_new_video_record_list
     data_folder = 'data/'
-    filename = data_folder + '%s.csv' % task_label
-    with open(filename, 'w') as f:
+    filename = '%s.csv' % task_label
+    with open(data_folder + filename, 'w') as f:
         f.write('aid,added,view,danmaku,reply,favorite,coin,share,like\n')
         for record in new_video_record_list:
             f.write('%d,%d,%d,%d,%d,%d,%d,%d,%d\n'
@@ -316,7 +316,7 @@ def hour(time_label):
     with open(index_filename, 'a') as f:
         f.write('%s\n' % filename)
 
-    logger_19.info('06 done! %d record(s) stored in file %s' % (len(new_video_record_list), filename))
+    logger_19.info('06 done! %d record(s) stored in file %s' % (len(new_video_record_list), data_folder + filename))
 
     logger_19.info('07: load records from history files')
 
@@ -325,7 +325,7 @@ def hour(time_label):
     with open(index_filename, 'r') as f:
         lines = f.readlines()
         for line in lines[-7:]:
-            history_filename_list.append(line.rstrip('\n'))
+            history_filename_list.append(data_folder + line.rstrip('\n'))
     logger_19.info('Will load records from file list %r' % history_filename_list)
 
     VideoRecord = namedtuple("VideoRecord",
@@ -715,6 +715,52 @@ def hour(time_label):
     # tmp update freq end
 
     logger_19.info('09 done! Finish update recent, activity and freq field')
+
+    logger_19.info('10: insert into tdd video record hourly table')
+
+    new_video_record_hourly_added_count = 0
+    for record in new_video_record_list:
+        # dont use sql alchemy in order to save memory
+        sql = 'insert into ' \
+              'tdd_video_record_hourly(added, timelabel, bvid, view, danmaku, reply, favorite, coin, share, like) ' \
+              'values(%d, "%s", "%s", %d, %d, %d, %d, %d, %d, %d)' % \
+              (record.added, time_label, a2b(record.aid), record.view, record.danmaku, record.reply, record.favorite,
+               record.coin, record.share, record.like)
+        session.execute(sql)
+        new_video_record_hourly_added_count += 1
+        if new_video_record_hourly_added_count % 10000 == 0:
+            session.commit()
+            logger_19.info('insert %d / %d done' % (new_video_record_hourly_added_count, len(new_video_record_list)))
+    session.commit()
+    logger_19.info('insert %d / %d done' % (new_video_record_hourly_added_count, len(new_video_record_list)))
+
+    logger_19.info('10 done! Finish insert into tdd video record hourly table')
+
+    logger_19.info('11: pack daily video record file')
+
+    if time_label == '00:00':
+        # get 10 days before filename prefix
+        day_str = ts_s_to_str(get_ts_s() - 10 * 24 * 60 * 60)[:10]
+
+        # pack file
+        pack_result = os.popen('mkdir {0} && mv {1}*.csv {2} && tar -zcvf {3}.tar.gz {4} && rm -r {5}'.format(
+            day_str, day_str, day_str, day_str, day_str, day_str
+        ))
+        for line in pack_result:
+            logger_19.info(line.rstrip('\n'))
+
+        # remove from index.txt
+        index_list = []
+        with open(index_filename, 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                if not line.startswith(day_str):
+                    index_list.append(line)
+        with open(index_filename, 'w') as f:
+            for index in index_list:
+                f.write('%s' % index)
+    else:
+        logger_19.info('11 done! time label is not 00:00, no need to pack daily video record file')
 
     del new_video_record_list
     del history_record_dict
