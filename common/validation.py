@@ -18,7 +18,7 @@ def get_valid(get_obj_func, get_obj_func_args, test_obj_func, repeat_count=5, co
                 # print(err, request_count)
                 time.sleep(colddown)
         except Exception as e:
-            # print(e, request_count)
+            print(e, request_count)
             time.sleep(colddown)
         finally:
             request_count += 1
