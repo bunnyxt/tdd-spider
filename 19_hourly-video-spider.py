@@ -55,6 +55,7 @@ def hour(time_label):
                 logger_19.warning('Page num %d fail! Cannot get valid obj.' % page_num)
                 page_num += 1
                 continue
+            logger_19.info('%d obj got' % page_num)
 
             added = get_ts_s()
             for arch in obj['data']['archives']:
@@ -71,6 +72,9 @@ def hour(time_label):
                 new_video_record.like = arch['stat']['like']
 
                 c30_new_video_record_list.append(new_video_record)
+
+            logger_19.info('%d new video records made' % page_num)
+
             if page_num % 100 == 0:
                 logger_19.info('Awesome api fetch %d / %d done' % (page_num, page_total))
         except Exception as e:
