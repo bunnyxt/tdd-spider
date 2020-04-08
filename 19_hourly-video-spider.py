@@ -749,7 +749,8 @@ def hour(time_label):
 
         # pack file
         pack_result = os.popen('mkdir {0} && mv {1}*.csv {2} && tar -zcvf {3}.tar.gz {4} && rm -r {5}'.format(
-            day_str, day_str, day_str, day_str, day_str, day_str
+            data_folder + day_str, data_folder + day_str, data_folder + day_str, data_folder + day_str,
+            data_folder + day_str, data_folder + day_str
         ))
         for line in pack_result:
             logger_19.info(line.rstrip('\n'))
