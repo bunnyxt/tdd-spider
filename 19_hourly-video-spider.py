@@ -141,6 +141,8 @@ def hour(time_label):
     c30_not_added_record_list = []
     need_insert_c30_aid_list_count = len(need_insert_c30_aid_list)
 
+    commit_batch = 200 if len(c30_new_video_record_list) < 100000 else 2000
+
     for record in c30_new_video_record_list:
         if record.aid in need_insert_c30_aid_list:
             if record.aid in c30_success_aids:
@@ -150,7 +152,7 @@ def hour(time_label):
             session.add(record)  # TODO may cause error?
             c30_success_aids.append(record.aid)
             c30_visited += 1
-            if c30_visited % 100 == 0:
+            if c30_visited % commit_batch == 0:
                 try:
                     session.commit()
                 except Exception as e:
