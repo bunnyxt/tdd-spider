@@ -39,6 +39,8 @@ def hour(time_label):
     logger_19.info('01: make c30 new video records from awesome api')
 
     c30_new_video_record_list = []
+    last_page_aids = []  # aids added in last page
+    this_page_aids = []  # aids added in this page
 
     # get page total
     obj = bapi.get_archive_rank_by_partion(30, 1, 50)
@@ -55,10 +57,14 @@ def hour(time_label):
                 logger_19.warning('Page num %d fail! Cannot get valid obj.' % page_num)
                 page_num += 1
                 continue
-            # logger_19.info('%d obj got' % page_num)
 
             added = get_ts_s()
             for arch in obj['data']['archives']:
+                if arch['aid'] in last_page_aids:
+                    # aid added in last page, continue
+                    logger_19.warning('Aid %d already added in last page (page_num = %d).' % (arch['aid'], page_num - 1))
+                    continue
+
                 # make new video record
                 new_video_record = TddVideoRecord()
                 new_video_record.aid = arch['aid']
@@ -72,8 +78,11 @@ def hour(time_label):
                 new_video_record.like = arch['stat']['like']
 
                 c30_new_video_record_list.append(new_video_record)
+                this_page_aids.append(arch['aid'])
 
-            # logger_19.info('%d new video records made' % page_num)
+            # assign this page aids to last page aids and reset it
+            last_page_aids = this_page_aids
+            this_page_aids = []
 
             if page_num % 100 == 0:
                 logger_19.info('Awesome api fetch %d / %d done' % (page_num, page_total))
@@ -145,9 +154,6 @@ def hour(time_label):
 
     for record in c30_new_video_record_list:
         if record.aid in need_insert_c30_aid_list:
-            if record.aid in c30_success_aids:
-                logger_19.warning('c30 aid %d already added' % record.aid)
-                continue
             need_insert_c30_aid_list.remove(record.aid)
             session.add(record)  # TODO may cause error?
             c30_success_aids.append(record.aid)
