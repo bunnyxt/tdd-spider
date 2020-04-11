@@ -17,7 +17,7 @@ import os
 def get_need_insert_aid_list(time_label, is_tid_30, session):
     if time_label == '04:00':
         # return total
-        return DBOperation.query_freq_update_video_aids(0, is_tid_30, session)
+        return DBOperation.query_video_aids(is_tid_30, session)
 
     # add 1 hour aids
     aid_list = DBOperation.query_freq_update_video_aids(2, is_tid_30, session)
