@@ -312,6 +312,18 @@ class DBOperation:
             return None
 
     @classmethod
+    def query_all_update_video_aids(cls, is_tid_30, session):
+        try:
+            if is_tid_30:
+                result = session.query(TddVideo.aid).filter(TddVideo.tid == 30, TddVideo.code == 0).all()
+            else:
+                result = session.query(TddVideo.aid).filter(TddVideo.tid != 30, TddVideo.code == 0).all()
+            return list(r[0] for r in result)
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'is_tid_30': is_tid_30}), exc_info=True)
+            return None
+
+    @classmethod
     def query_freq_update_video_aids(cls, freq, is_tid_30, session):
         try:
             if is_tid_30:
@@ -322,7 +334,7 @@ class DBOperation:
                                                             TddVideo.freq == freq).all()
             return list(r[0] for r in result)
         except Exception as e:
-            logger_db.error('Exception: %s, params: %s' % (e, {'is_tid_30': is_tid_30}), exc_info=True)
+            logger_db.error('Exception: %s, params: %s' % (e, {'freq': freq, 'is_tid_30': is_tid_30}), exc_info=True)
             return None
 
     @classmethod
