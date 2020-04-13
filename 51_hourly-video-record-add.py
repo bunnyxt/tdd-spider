@@ -786,7 +786,7 @@ def hour(time_label):
 def main():
     logger_51.info('51: hourly video spider')
 
-    time_label = ts_s_to_str(get_ts_s())[11:16]
+    time_label = ts_s_to_str(get_ts_s())[11:13] + ':00'
     logger_51.info('Now start, time label: %s' % time_label)
     hour(time_label)
     logger_51.info('Done! time label: %s' % time_label)
