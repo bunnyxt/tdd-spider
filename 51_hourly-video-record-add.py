@@ -735,10 +735,10 @@ def hour(time_label):
     for record in new_video_record_list:
         # dont use sql alchemy in order to save memory
         sql = 'insert into ' \
-              'tdd_video_record_hourly(added, timelabel, bvid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
-              'values(%d, "%s", "%s", %d, %d, %d, %d, %d, %d, %d)' % \
-              (record.added, task_label, a2b(record.aid), record.view, record.danmaku, record.reply, record.favorite,
-               record.coin, record.share, record.like)
+              'tdd_video_record_hourly(added, bvid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
+              'values(%d, "%s", %d, %d, %d, %d, %d, %d, %d)' % \
+              (record.added, a2b(record.aid), record.view, record.danmaku, record.reply,
+               record.favorite, record.coin, record.share, record.like)
         session.execute(sql)
         new_video_record_hourly_added_count += 1
         if new_video_record_hourly_added_count % 10000 == 0:
