@@ -751,30 +751,44 @@ def hour(time_label):
 
     logger_51.info('11: pack daily video record file')
 
-    if time_label == '00:00':
-        # get 10 days before filename prefix
-        day_str = ts_s_to_str(get_ts_s() - 10 * 24 * 60 * 60)[:10]
+    if time_label == '23:00':
+        try:
+            # get today filename prefix
+            day_str = ts_s_to_str(get_ts_s())[:10]
 
-        # pack file
-        pack_result = os.popen('mkdir {0} && mv {1}*.csv {2} && tar -zcvf {3}.tar.gz {4} && rm -r {5}'.format(
-            data_folder + day_str, data_folder + day_str, data_folder + day_str, data_folder + day_str,
-            data_folder + day_str, data_folder + day_str
-        ))
-        for line in pack_result:
-            logger_51.info(line.rstrip('\n'))
+            # pack today file
+            pack_result = os.popen(('mkdir {0} && cp {1}*.csv {2} && tar -zcvf {3}.tar.gz {4} && ' +
+                                    'rm -r {5} && bypy upload {6}.tar.gz').format(
+                data_folder + day_str, data_folder + day_str, data_folder + day_str, data_folder + day_str,
+                data_folder + day_str, data_folder + day_str, data_folder + day_str
+            ))
+            for line in pack_result:
+                logger_51.info(line.rstrip('\n'))
 
-        # remove from index.txt
-        index_list = []
-        with open(index_filename, 'r') as f:
-            lines = f.readlines()
-            for line in lines:
-                if not line.startswith(day_str):
-                    index_list.append(line)
-        with open(index_filename, 'w') as f:
-            for index in index_list:
-                f.write('%s' % index)
+            # get 3 day before filename prefix
+            day_str = ts_s_to_str(get_ts_s() - 3 * 24 * 60 * 60)[:10]
+
+            # remove 3 day before csv file
+            pack_result = os.popen('rm {0}*.csv'.format(data_folder))
+            for line in pack_result:
+                logger_51.info(line.rstrip('\n'))
+
+            # remove 3 day before csv from index.txt
+            index_list = []
+            with open(index_filename, 'r') as f:
+                lines = f.readlines()
+                for line in lines:
+                    if not line.startswith(day_str):
+                        index_list.append(line)
+            with open(index_filename, 'w') as f:
+                for index in index_list:
+                    f.write('%s' % index)
+        except Exception as e:
+            logger_51.warning('Error occur when executing packing shell scripts. Detail: %s' % e)
+        else:
+            logger_51.info('11 done! Finish packing daily video record files')
     else:
-        logger_51.info('11 done! time label is not 00:00, no need to pack daily video record file')
+        logger_51.info('11 done! time label is not 00:00, no need to pack daily video record files')
 
     del new_video_record_list
     del history_record_dict
