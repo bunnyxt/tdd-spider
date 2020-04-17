@@ -769,7 +769,7 @@ def hour(time_label):
             day_str = ts_s_to_str(get_ts_s() - 3 * 24 * 60 * 60)[:10]
 
             # remove 3 day before csv file
-            pack_result = os.popen('rm {0}*.csv'.format(data_folder))
+            pack_result = os.popen('rm {0}*.csv'.format(data_folder + day_str))
             for line in pack_result:
                 logger_51.info(line.rstrip('\n'))
 
