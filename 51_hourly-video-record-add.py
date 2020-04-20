@@ -387,11 +387,9 @@ def hour(time_label):
     logger_51.info('Finish make video pubdate dict with %d aids.' % len(video_pubdate_dict))
 
     # check record
-    # check_total_count = len(new_video_record_list)  # OLD
     last_aids = list(history_record_dict.keys())
     check_total_count = len(last_aids)
     check_visited_count = 0
-    # for record in new_video_record_list:  # OLD
     for aid in last_aids:
         video_record_list = history_record_dict[aid]
         if len(video_record_list) <= 2:  # at least require 3 record
