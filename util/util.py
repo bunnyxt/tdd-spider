@@ -1,7 +1,7 @@
 import datetime
 import time
 
-__all__ = ['get_ts_s', 'ts_s_to_str', 'b2a', 'a2b']
+__all__ = ['get_ts_s', 'ts_s_to_str', 'b2a', 'a2b', 'get_week_day']
 
 
 def get_ts_s():
@@ -40,3 +40,8 @@ def a2b(x):
     for i in range(6):
         r[s[i]] = table[x // 58 ** i % 58]
     return ''.join(r)[2:]  # remove BV prefix
+
+
+def get_week_day():
+    # Mon -> 0, Tue -> 1, ..., Sun -> 6
+    return datetime.datetime.now().weekday()
