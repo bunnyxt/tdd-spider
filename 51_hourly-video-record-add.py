@@ -3,7 +3,7 @@ import threading
 from logger import logger_51
 from db import DBOperation, Session, TddVideoRecord, TddVideoLog, TddVideoRecordAbnormalChange
 import time
-from util import get_ts_s, ts_s_to_str, a2b
+from util import get_ts_s, ts_s_to_str, a2b, get_week_day
 from pybiliapi import BiliApi
 import math
 from common import get_valid, test_archive_rank_by_partion, add_video_record_via_stat_api, InvalidObjCodeError, \
@@ -755,6 +755,7 @@ def hour(time_label):
             day_str = ts_s_to_str(get_ts_s())[:10]
 
             # pack today file
+            logger_51.info('pack {0}*.csv into {1}.tar.gz'.format(data_folder + day_str, data_folder + day_str))
             pack_result = os.popen(('mkdir {0} && cp {1}*.csv {2} && tar -zcvf {3}.tar.gz {4} && ' +
                                     'rm -r {5}').format(
                 data_folder + day_str, data_folder + day_str, data_folder + day_str, data_folder + day_str,
@@ -767,11 +768,13 @@ def hour(time_label):
             day_str = ts_s_to_str(get_ts_s() - 3 * 24 * 60 * 60)[:10]
 
             # remove 3 day before csv file
+            logger_51.info('remove {0}*.csv'.format(data_folder + day_str))
             pack_result = os.popen('rm {0}*.csv'.format(data_folder + day_str))
             for line in pack_result:
                 logger_51.info(line.rstrip('\n'))
 
             # remove 3 day before csv from index.txt
+            logger_51.info('remove {0}*.csv in index.txt'.format(data_folder + day_str))
             index_list = []
             with open(index_filename, 'r') as f:
                 lines = f.readlines()
