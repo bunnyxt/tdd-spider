@@ -789,7 +789,37 @@ def hour(time_label):
         else:
             logger_51.info('11 done! Finish packing daily video record files')
     else:
-        logger_51.info('11 done! time label is not 00:00, no need to pack daily video record files')
+        logger_51.info('11 done! time label is not 23:00, no need to pack daily video record files')
+
+    logger_51.info('12: change tdd_video_record_hourly table')
+
+    if time_label == '23:00':
+        try:
+            session.execute('drop table if exist tdd_video_record_hourly_3')
+            logger_51.info('drop table tdd_video_record_hourly_3')
+
+            session.execute('rename table tdd_video_record_hourly_2 to tdd_video_record_hourly_3')
+            logger_51.info('rename table tdd_video_record_hourly_2 to tdd_video_record_hourly_3')
+
+            session.execute('rename table tdd_video_record_hourly to tdd_video_record_hourly_2')
+            logger_51.info('rename table tdd_video_record_hourly to tdd_video_record_hourly_2')
+
+            session.execute('create table tdd_video_record_hourly like tdd_video_record_hourly_2')
+            logger_51.info('create table tdd_video_record_hourly like tdd_video_record_hourly_2')
+        except Exception as e:
+            session.rollback()
+            logger_51.warning('Error occur when executing change tdd_video_record_hourly table. Detail: %s' % e)
+        else:
+            logger_51.info('12 done! Finish change tdd_video_record_hourly table')
+    else:
+        logger_51.info('12 done! time label is not 23:00, no need to change tdd_video_record_hourly table')
+
+    # logger_51.info('12: store zk base video record')
+    # if time_label == '03:00' and get_week_day() == 5:
+    #     # just collect
+    #     pass
+    # else:
+    #     logger_51.info('12 done! not Sat 03:00 pass, no need to store zk base video record')
 
     del new_video_record_list
     del history_record_dict
