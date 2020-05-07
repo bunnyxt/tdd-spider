@@ -439,7 +439,7 @@ def main():
         '01:15', '01:30', '01:45',
         '02:15', '02:30', '02:45',
         '03:15', '03:30', '03:45',
-        '04:30', '04:45',
+        '04:15', '04:30', '04:45',
         '05:15', '05:30', '05:45',
         '06:15', '06:30', '06:45',
         '07:15', '07:30', '07:45',
@@ -469,9 +469,10 @@ def main():
     #     schedule.every().day.at(time_label).do(_6h_task, time_label)
     #     logger_14.info('Will do 6h task at %s' % time_label)
 
-    # for time_label in _1h_list:
-    #     schedule.every().day.at(time_label).do(_1h_task, time_label)
-    #     logger_14.info('Will do 1h task at %s' % time_label)
+    for time_label in _1h_list:
+        # schedule.every().day.at(time_label).do(_1h_task, time_label)
+        schedule.every().day.at(time_label).do(_15m_task, time_label)
+        logger_14.info('Will do 1h(15m) task at %s' % time_label)
 
     for time_label in _15m_list:
         schedule.every().day.at(time_label).do(_15m_task, time_label)
