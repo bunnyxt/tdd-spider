@@ -3,7 +3,7 @@ import threading
 from logger import logger_51
 from db import DBOperation, Session, TddVideoRecord, TddVideoLog, TddVideoRecordAbnormalChange
 import time
-from util import get_ts_s, ts_s_to_str, a2b, get_week_day
+from util import get_ts_s, ts_s_to_str, a2b, get_week_day, str_to_ts_s
 from pybiliapi import BiliApi
 import math
 from common import get_valid, test_archive_rank_by_partion, add_video_record_via_stat_api, InvalidObjCodeError, \
@@ -814,12 +814,36 @@ def hour(time_label):
     else:
         logger_51.info('12 done! time label is not 23:00, no need to change tdd_video_record_hourly table')
 
-    # logger_51.info('12: store zk base video record')
-    # if time_label == '03:00' and get_week_day() == 5:
-    #     # just collect
-    #     pass
-    # else:
-    #     logger_51.info('12 done! not Sat 03:00 pass, no need to store zk base video record')
+    # logger_51.info('13-1: update tdd_video_record_rank_weekly_base')
+    if time_label == '03:00' and get_week_day() == 5:
+        try:
+            # TODO test validity
+            # create table from tdd_video_record_hourly
+
+            # TODO move to history before drop
+            drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base_tmp'
+            session.execute(drop_tmp_table_sql)
+            logger_51.info(drop_tmp_table_sql)
+
+            hour_start_ts = str_to_ts_s(ts_s_to_str(get_ts_s())[:11] + '03:00:00')
+            create_tmp_table_sql = 'create table tdd_video_record_rank_weekly_base_tmp ' + \
+                                   'select * from tdd_video_record_hourly where added >= %d' % hour_start_ts
+            session.execute(create_tmp_table_sql)
+            logger_51.info(create_tmp_table_sql)
+
+            drop_old_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base'
+            session.execute(drop_old_table_sql)
+            logger_51.info(drop_old_table_sql)
+
+            rename_tmp_table_sql = 'rename table tdd_video_record_rank_weekly_base_tmp to ' + \
+                                   'tdd_video_record_rank_weekly_base'
+            session.execute(rename_tmp_table_sql)
+            logger_51.info(rename_tmp_table_sql)
+        except Exception as e:
+            session.rollback()
+            logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
+    else:
+        logger_51.info('13-1 done! not Sat 03:00 pass, no need to update tdd_video_record_rank_weekly_base')
 
     del new_video_record_list
     del history_record_dict
