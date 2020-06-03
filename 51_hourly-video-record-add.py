@@ -3,7 +3,7 @@ import threading
 from logger import logger_51
 from db import DBOperation, Session, TddVideoRecord, TddVideoLog, TddVideoRecordAbnormalChange
 import time
-from util import get_ts_s, ts_s_to_str, a2b, get_week_day, str_to_ts_s
+from util import get_ts_s, ts_s_to_str, a2b, get_week_day, str_to_ts_s, zk_calc
 from pybiliapi import BiliApi
 import math
 from common import get_valid, test_archive_rank_by_partion, add_video_record_via_stat_api, InvalidObjCodeError, \
@@ -76,6 +76,9 @@ def hour(time_label):
                 new_video_record.coin = arch['stat']['coin']
                 new_video_record.share = arch['stat']['share']
                 new_video_record.like = arch['stat']['like']
+
+                # add page for 13-2 use
+                new_video_record.page = arch['videos']
 
                 c30_new_video_record_list.append(new_video_record)
                 this_page_aids.append(arch['aid'])
@@ -814,7 +817,8 @@ def hour(time_label):
     else:
         logger_51.info('12 done! time label is not 23:00, no need to change tdd_video_record_hourly table')
 
-    # logger_51.info('13-1: update tdd_video_record_rank_weekly_base')
+    logger_51.info('13-1: update tdd_video_record_rank_weekly_base')
+
     if time_label == '03:00' and get_week_day() == 5:
         try:
             # TODO test validity
@@ -844,6 +848,84 @@ def hour(time_label):
             logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
     else:
         logger_51.info('13-1 done! not Sat 03:00 pass, no need to update tdd_video_record_rank_weekly_base')
+
+    logger_51.info('13-2: update tdd_video_record_rank_weekly_current')
+
+    video_record_base_dict = DBOperation.query_video_record_rank_weekly_base_dict(session)  # get record base dict
+    try:
+        create_tmp_table_sql = 'create table tdd_video_record_rank_weekly_current_tmp ' + \
+                               'like table tdd_video_record_rank_weekly_current'
+        session.execute(create_tmp_table_sql)
+        logger_51.info(create_tmp_table_sql)
+    except Exception as e:
+        session.rollback()
+        logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
+
+    video_record_weekly_curr_list = []
+    for record in new_video_record_list:
+        # check bvid exists in base or not
+        bvid = a2b(record.aid)
+        if bvid in video_record_base_dict.keys():
+            base_record = video_record_base_dict[bvid]
+        else:
+            base_record = (0, 0, 0, 0, 0, 0, 0, 0)
+        d_view = record.view - base_record[1]  # maybe occur -1?
+        d_danmaku = record.danmaku - base_record[2]
+        d_reply = record.reply - base_record[3]
+        d_favorite = record.favorite - base_record[4]
+        d_coin = record.favorite - base_record[5]
+        d_share = record.share - base_record[6]
+        d_like = record.like - base_record[7]
+        point, xiua, xiub = zk_calc(d_view, d_danmaku, d_reply, d_favorite, page=record.page)  # page added before
+        # append to list
+        video_record_weekly_curr_list.append([bvid, base_record[0], record.added,
+                                              record.view, record.danmaku, record.reply, record.favorite, record.coin,
+                                              record.share, record.like,
+                                              d_view, d_danmaku, d_reply, d_favorite, d_coin, d_share, d_like,
+                                              point, xiua, xiub, 0])
+
+    # sort via point
+    video_record_weekly_curr_list.sort(key=lambda x: (x[17], x[10])).reverse()  # TODO if point equals?
+
+    # add rank
+    rank = 0
+    for c in video_record_weekly_curr_list:
+        c[20] = rank
+        rank += 1
+
+    video_record_weekly_curr_added_count = 0
+    for c in video_record_weekly_curr_list:
+        # dont use sql alchemy in order to save memory
+        sql = 'insert into tdd_video_record_rank_weekly_current_tmp' \
+              'values("%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
+              (c[0], c[1], c[2],
+               c[3], c[4], c[5], c[6], c[7], c[8], c[9],
+               c[10], c[11], c[12], c[13], c[14], c[15], c[16],
+               c[17], c[18], c[19],
+               c[20])
+        session.execute(sql)
+        video_record_weekly_curr_added_count += 1
+        if video_record_weekly_curr_added_count % 10000 == 0:
+            session.commit()
+            logger_51.info('insert %d / %d done' % (video_record_weekly_curr_added_count,
+                                                    len(video_record_weekly_curr_list)))
+    session.commit()
+    logger_51.info('insert %d / %d done' % (video_record_weekly_curr_added_count, len(video_record_weekly_curr_list)))
+
+    try:
+        drop_old_table_sql = 'drop table if exists tdd_video_record_rank_weekly_current'
+        session.execute(drop_old_table_sql)
+        logger_51.info(drop_old_table_sql)
+
+        rename_tmp_table_sql = 'rename table tdd_video_record_rank_weekly_current_tmp to' + \
+                               'tdd_video_record_rank_weekly_current'
+        session.execute(rename_tmp_table_sql)
+        logger_51.info(rename_tmp_table_sql)
+    except Exception as e:
+        session.rollback()
+        logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
+
+    logger_51.info('13-2: done! Finish updating tdd_video_record_rank_weekly_current')
 
     del new_video_record_list
     del history_record_dict
