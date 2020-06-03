@@ -345,3 +345,15 @@ class DBOperation:
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
             return None
+
+    @classmethod
+    def query_video_record_rank_weekly_base_dict(cls, session):
+        try:
+            result = session.execute('select * from tdd_video_record_rank_hourly_base')
+            d = {}
+            for r in result:
+                d[r[1]] = (r[0], r[2], r[3], r[4], r[5], r[6], r[7], r[8])
+            return d
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
+            return None
