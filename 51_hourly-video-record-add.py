@@ -853,6 +853,10 @@ def hour(time_label):
 
     video_record_base_dict = DBOperation.query_video_record_rank_weekly_base_dict(session)  # get record base dict
     try:
+        drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_weekly_current_tmp'
+        session.execute(drop_tmp_table_sql)
+        logger_51.info(drop_tmp_table_sql)
+
         create_tmp_table_sql = 'create table tdd_video_record_rank_weekly_current_tmp ' + \
                                'like table tdd_video_record_rank_weekly_current'
         session.execute(create_tmp_table_sql)
@@ -883,15 +887,18 @@ def hour(time_label):
                                               record.share, record.like,
                                               d_view, d_danmaku, d_reply, d_favorite, d_coin, d_share, d_like,
                                               point, xiua, xiub, 0])
+    logger_51.info('finish make video_record_weekly_curr_list')
 
     # sort via point
     video_record_weekly_curr_list.sort(key=lambda x: (x[17], x[10])).reverse()  # TODO if point equals?
+    logger_51.info('finish sort video_record_weekly_curr_list')
 
     # add rank
-    rank = 0
+    rank = 1
     for c in video_record_weekly_curr_list:
         c[20] = rank
         rank += 1
+    logger_51.info('finish add rank of video_record_weekly_curr_list')
 
     video_record_weekly_curr_added_count = 0
     for c in video_record_weekly_curr_list:
