@@ -1,7 +1,8 @@
 import datetime
 import time
+import math
 
-__all__ = ['get_ts_s', 'ts_s_to_str', 'str_to_ts_s', 'b2a', 'a2b', 'get_week_day']
+__all__ = ['get_ts_s', 'ts_s_to_str', 'str_to_ts_s', 'b2a', 'a2b', 'get_week_day', 'zk_calc']
 
 
 def get_ts_s():
@@ -49,3 +50,28 @@ def a2b(x):
 def get_week_day():
     # Mon -> 0, Tue -> 1, ..., Sun -> 6
     return datetime.datetime.now().weekday()
+
+
+def zk_calc(view, danmaku, reply, favorite, page=1):
+    jichu = view / page
+    if jichu > 10000:
+        bofang = jichu * 0.5 + 5000
+    else:
+        bofang = jichu
+
+    xiub = round(favorite / view * 250, 2)
+    if xiub > 50:
+        xiub = 50
+
+    bofang_ori = bofang
+    if xiub < 10:
+        bofang = bofang * xiub * 0.1
+
+    xiua = round(
+        (bofang_ori + favorite) /
+        (bofang_ori + favorite + danmaku * 10 + reply * 20)
+        , 2)
+
+    point = math.floor(bofang + (reply * 25 + danmaku) * xiua + favorite * xiub)
+
+    return point, xiua, xiub
