@@ -889,6 +889,11 @@ def hour(time_label):
                                               point, xiua, xiub, 0])
     logger_51.info('finish make video_record_weekly_curr_list')
 
+    # TODO tmp delete to free memory
+    del new_video_record_list
+    del history_record_dict
+    gc.collect()
+
     # sort via point
     video_record_weekly_curr_list.sort(key=lambda x: (x[17], x[10])).reverse()  # TODO if point equals?
     logger_51.info('finish sort video_record_weekly_curr_list')
@@ -933,10 +938,6 @@ def hour(time_label):
         logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
 
     logger_51.info('13-2: done! Finish updating tdd_video_record_rank_weekly_current')
-
-    del new_video_record_list
-    del history_record_dict
-    gc.collect()
 
     session.close()
 
