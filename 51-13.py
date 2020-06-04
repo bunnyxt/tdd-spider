@@ -121,7 +121,7 @@ def main():
                 page = video_videos_pubdate_dict[bvid][0]
                 if start_added == 0:
                     # bvid not appear in base
-                    if video_videos_pubdate_dict[bvid][0] >= this_weekly_rank_begin_ts:
+                    if video_videos_pubdate_dict[bvid][1] >= this_weekly_rank_begin_ts:
                         # this week new video
                         start_added = video_videos_pubdate_dict[bvid][1]  # set pubdate
                     else:
