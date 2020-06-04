@@ -858,7 +858,7 @@ def hour(time_label):
         logger_51.info(drop_tmp_table_sql)
 
         create_tmp_table_sql = 'create table tdd_video_record_rank_weekly_current_tmp ' + \
-                               'like table tdd_video_record_rank_weekly_current'
+                               'like tdd_video_record_rank_weekly_current'
         session.execute(create_tmp_table_sql)
         logger_51.info(create_tmp_table_sql)
     except Exception as e:
