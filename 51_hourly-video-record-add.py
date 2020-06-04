@@ -625,6 +625,10 @@ def hour(time_label):
 
     logger_51.info('08 done! Finish check params of history video records')
 
+    # TODO tmp delect
+    del history_record_dict
+    gc.collect()
+
     logger_51.info('09: update recent, activity and freq')
 
     # tmp update recent field begin
@@ -865,7 +869,9 @@ def hour(time_label):
         session.rollback()
         logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
 
+    logger_51.info('now making video_record_weekly_curr_list...')
     video_record_weekly_curr_list = []
+    video_record_weekly_curr_made_count = 0
     for record in new_video_record_list:
         # check bvid exists in base or not
         bvid = a2b(record.aid)
@@ -887,11 +893,14 @@ def hour(time_label):
                                               record.share, record.like,
                                               d_view, d_danmaku, d_reply, d_favorite, d_coin, d_share, d_like,
                                               point, xiua, xiub, 0])
+        video_record_weekly_curr_made_count += 1
+        if video_record_weekly_curr_made_count % 10000 == 0:
+            logger_51.info('make %d / %d done' % (video_record_weekly_curr_made_count, len(new_video_record_list)))
+    logger_51.info('make %d / %d done' % (video_record_weekly_curr_made_count, len(new_video_record_list)))
     logger_51.info('finish make video_record_weekly_curr_list')
 
     # TODO tmp delete to free memory
     del new_video_record_list
-    del history_record_dict
     gc.collect()
 
     # sort via point
@@ -905,6 +914,7 @@ def hour(time_label):
         rank += 1
     logger_51.info('finish add rank of video_record_weekly_curr_list')
 
+    logger_51.info('now inserting video_record_weekly_curr_list...')
     video_record_weekly_curr_added_count = 0
     for c in video_record_weekly_curr_list:
         # dont use sql alchemy in order to save memory
