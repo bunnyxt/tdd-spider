@@ -625,7 +625,7 @@ def hour(time_label):
 
     logger_51.info('08 done! Finish check params of history video records')
 
-    # TODO tmp delect
+    # TODO tmp delete
     del history_record_dict
     gc.collect()
 
@@ -820,134 +820,134 @@ def hour(time_label):
             logger_51.info('12 done! Finish change tdd_video_record_hourly table')
     else:
         logger_51.info('12 done! time label is not 23:00, no need to change tdd_video_record_hourly table')
-
-    logger_51.info('13-1: update tdd_video_record_rank_weekly_base')
-
-    if time_label == '03:00' and get_week_day() == 5:
-        try:
-            # TODO test validity
-            # create table from tdd_video_record_hourly
-
-            # TODO move to history before drop
-            drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base_tmp'
-            session.execute(drop_tmp_table_sql)
-            logger_51.info(drop_tmp_table_sql)
-
-            hour_start_ts = str_to_ts_s(ts_s_to_str(get_ts_s())[:11] + '03:00:00')
-            create_tmp_table_sql = 'create table tdd_video_record_rank_weekly_base_tmp ' + \
-                                   'select * from tdd_video_record_hourly where added >= %d' % hour_start_ts
-            session.execute(create_tmp_table_sql)
-            logger_51.info(create_tmp_table_sql)
-
-            drop_old_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base'
-            session.execute(drop_old_table_sql)
-            logger_51.info(drop_old_table_sql)
-
-            rename_tmp_table_sql = 'rename table tdd_video_record_rank_weekly_base_tmp to ' + \
-                                   'tdd_video_record_rank_weekly_base'
-            session.execute(rename_tmp_table_sql)
-            logger_51.info(rename_tmp_table_sql)
-        except Exception as e:
-            session.rollback()
-            logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
-    else:
-        logger_51.info('13-1 done! not Sat 03:00 pass, no need to update tdd_video_record_rank_weekly_base')
-
-    logger_51.info('13-2: update tdd_video_record_rank_weekly_current')
-
-    video_record_base_dict = DBOperation.query_video_record_rank_weekly_base_dict(session)  # get record base dict
-    try:
-        drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_weekly_current_tmp'
-        session.execute(drop_tmp_table_sql)
-        logger_51.info(drop_tmp_table_sql)
-
-        create_tmp_table_sql = 'create table tdd_video_record_rank_weekly_current_tmp ' + \
-                               'like tdd_video_record_rank_weekly_current'
-        session.execute(create_tmp_table_sql)
-        logger_51.info(create_tmp_table_sql)
-    except Exception as e:
-        session.rollback()
-        logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
-
-    logger_51.info('now making video_record_weekly_curr_list...')
-    video_record_weekly_curr_list = []
-    video_record_weekly_curr_made_count = 0
-    for record in new_video_record_list:
-        # check bvid exists in base or not
-        bvid = a2b(record.aid)
-        if bvid in video_record_base_dict.keys():
-            base_record = video_record_base_dict[bvid]
-        else:
-            base_record = (0, 0, 0, 0, 0, 0, 0, 0)
-        d_view = record.view - base_record[1]  # maybe occur -1?
-        d_danmaku = record.danmaku - base_record[2]
-        d_reply = record.reply - base_record[3]
-        d_favorite = record.favorite - base_record[4]
-        d_coin = record.favorite - base_record[5]
-        d_share = record.share - base_record[6]
-        d_like = record.like - base_record[7]
-        point, xiua, xiub = zk_calc(d_view, d_danmaku, d_reply, d_favorite, page=record.page)  # page added before
-        # append to list
-        video_record_weekly_curr_list.append([bvid, base_record[0], record.added,
-                                              record.view, record.danmaku, record.reply, record.favorite, record.coin,
-                                              record.share, record.like,
-                                              d_view, d_danmaku, d_reply, d_favorite, d_coin, d_share, d_like,
-                                              point, xiua, xiub, 0])
-        video_record_weekly_curr_made_count += 1
-        if video_record_weekly_curr_made_count % 10000 == 0:
-            logger_51.info('make %d / %d done' % (video_record_weekly_curr_made_count, len(new_video_record_list)))
-    logger_51.info('make %d / %d done' % (video_record_weekly_curr_made_count, len(new_video_record_list)))
-    logger_51.info('finish make video_record_weekly_curr_list')
+    #
+    # logger_51.info('13-1: update tdd_video_record_rank_weekly_base')
+    #
+    # if time_label == '03:00' and get_week_day() == 5:
+    #     try:
+    #         # TODO test validity
+    #         # create table from tdd_video_record_hourly
+    #
+    #         # TODO move to history before drop
+    #         drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base_tmp'
+    #         session.execute(drop_tmp_table_sql)
+    #         logger_51.info(drop_tmp_table_sql)
+    #
+    #         hour_start_ts = str_to_ts_s(ts_s_to_str(get_ts_s())[:11] + '03:00:00')
+    #         create_tmp_table_sql = 'create table tdd_video_record_rank_weekly_base_tmp ' + \
+    #                                'select * from tdd_video_record_hourly where added >= %d' % hour_start_ts
+    #         session.execute(create_tmp_table_sql)
+    #         logger_51.info(create_tmp_table_sql)
+    #
+    #         drop_old_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base'
+    #         session.execute(drop_old_table_sql)
+    #         logger_51.info(drop_old_table_sql)
+    #
+    #         rename_tmp_table_sql = 'rename table tdd_video_record_rank_weekly_base_tmp to ' + \
+    #                                'tdd_video_record_rank_weekly_base'
+    #         session.execute(rename_tmp_table_sql)
+    #         logger_51.info(rename_tmp_table_sql)
+    #     except Exception as e:
+    #         session.rollback()
+    #         logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
+    # else:
+    #     logger_51.info('13-1 done! not Sat 03:00 pass, no need to update tdd_video_record_rank_weekly_base')
+    #
+    # logger_51.info('13-2: update tdd_video_record_rank_weekly_current')
+    #
+    # video_record_base_dict = DBOperation.query_video_record_rank_weekly_base_dict(session)  # get record base dict
+    # try:
+    #     drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_weekly_current_tmp'
+    #     session.execute(drop_tmp_table_sql)
+    #     logger_51.info(drop_tmp_table_sql)
+    #
+    #     create_tmp_table_sql = 'create table tdd_video_record_rank_weekly_current_tmp ' + \
+    #                            'like tdd_video_record_rank_weekly_current'
+    #     session.execute(create_tmp_table_sql)
+    #     logger_51.info(create_tmp_table_sql)
+    # except Exception as e:
+    #     session.rollback()
+    #     logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
+    #
+    # logger_51.info('now making video_record_weekly_curr_list...')
+    # video_record_weekly_curr_list = []
+    # video_record_weekly_curr_made_count = 0
+    # for record in new_video_record_list:
+    #     # check bvid exists in base or not
+    #     bvid = a2b(record.aid)
+    #     if bvid in video_record_base_dict.keys():
+    #         base_record = video_record_base_dict[bvid]
+    #     else:
+    #         base_record = (0, 0, 0, 0, 0, 0, 0, 0)
+    #     d_view = record.view - base_record[1]  # maybe occur -1?
+    #     d_danmaku = record.danmaku - base_record[2]
+    #     d_reply = record.reply - base_record[3]
+    #     d_favorite = record.favorite - base_record[4]
+    #     d_coin = record.favorite - base_record[5]
+    #     d_share = record.share - base_record[6]
+    #     d_like = record.like - base_record[7]
+    #     point, xiua, xiub = zk_calc(d_view, d_danmaku, d_reply, d_favorite, page=record.page)  # page added before
+    #     # append to list
+    #     video_record_weekly_curr_list.append([bvid, base_record[0], record.added,
+    #                                           record.view, record.danmaku, record.reply, record.favorite, record.coin,
+    #                                           record.share, record.like,
+    #                                           d_view, d_danmaku, d_reply, d_favorite, d_coin, d_share, d_like,
+    #                                           point, xiua, xiub, 0])
+    #     video_record_weekly_curr_made_count += 1
+    #     if video_record_weekly_curr_made_count % 10000 == 0:
+    #         logger_51.info('make %d / %d done' % (video_record_weekly_curr_made_count, len(new_video_record_list)))
+    # logger_51.info('make %d / %d done' % (video_record_weekly_curr_made_count, len(new_video_record_list)))
+    # logger_51.info('finish make video_record_weekly_curr_list')
 
     # TODO tmp delete to free memory
     del new_video_record_list
     gc.collect()
 
-    # sort via point
-    video_record_weekly_curr_list.sort(key=lambda x: (x[17], x[10])).reverse()  # TODO if point equals?
-    logger_51.info('finish sort video_record_weekly_curr_list')
-
-    # add rank
-    rank = 1
-    for c in video_record_weekly_curr_list:
-        c[20] = rank
-        rank += 1
-    logger_51.info('finish add rank of video_record_weekly_curr_list')
-
-    logger_51.info('now inserting video_record_weekly_curr_list...')
-    video_record_weekly_curr_added_count = 0
-    for c in video_record_weekly_curr_list:
-        # dont use sql alchemy in order to save memory
-        sql = 'insert into tdd_video_record_rank_weekly_current_tmp' \
-              'values("%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
-              (c[0], c[1], c[2],
-               c[3], c[4], c[5], c[6], c[7], c[8], c[9],
-               c[10], c[11], c[12], c[13], c[14], c[15], c[16],
-               c[17], c[18], c[19],
-               c[20])
-        session.execute(sql)
-        video_record_weekly_curr_added_count += 1
-        if video_record_weekly_curr_added_count % 10000 == 0:
-            session.commit()
-            logger_51.info('insert %d / %d done' % (video_record_weekly_curr_added_count,
-                                                    len(video_record_weekly_curr_list)))
-    session.commit()
-    logger_51.info('insert %d / %d done' % (video_record_weekly_curr_added_count, len(video_record_weekly_curr_list)))
-
-    try:
-        drop_old_table_sql = 'drop table if exists tdd_video_record_rank_weekly_current'
-        session.execute(drop_old_table_sql)
-        logger_51.info(drop_old_table_sql)
-
-        rename_tmp_table_sql = 'rename table tdd_video_record_rank_weekly_current_tmp to' + \
-                               'tdd_video_record_rank_weekly_current'
-        session.execute(rename_tmp_table_sql)
-        logger_51.info(rename_tmp_table_sql)
-    except Exception as e:
-        session.rollback()
-        logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
-
-    logger_51.info('13-2: done! Finish updating tdd_video_record_rank_weekly_current')
+    # # sort via point
+    # video_record_weekly_curr_list.sort(key=lambda x: (x[17], x[10])).reverse()  # TODO if point equals?
+    # logger_51.info('finish sort video_record_weekly_curr_list')
+    #
+    # # add rank
+    # rank = 1
+    # for c in video_record_weekly_curr_list:
+    #     c[20] = rank
+    #     rank += 1
+    # logger_51.info('finish add rank of video_record_weekly_curr_list')
+    #
+    # logger_51.info('now inserting video_record_weekly_curr_list...')
+    # video_record_weekly_curr_added_count = 0
+    # for c in video_record_weekly_curr_list:
+    #     # dont use sql alchemy in order to save memory
+    #     sql = 'insert into tdd_video_record_rank_weekly_current_tmp' \
+    #           'values("%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
+    #           (c[0], c[1], c[2],
+    #            c[3], c[4], c[5], c[6], c[7], c[8], c[9],
+    #            c[10], c[11], c[12], c[13], c[14], c[15], c[16],
+    #            c[17], c[18], c[19],
+    #            c[20])
+    #     session.execute(sql)
+    #     video_record_weekly_curr_added_count += 1
+    #     if video_record_weekly_curr_added_count % 10000 == 0:
+    #         session.commit()
+    #         logger_51.info('insert %d / %d done' % (video_record_weekly_curr_added_count,
+    #                                                 len(video_record_weekly_curr_list)))
+    # session.commit()
+    # logger_51.info('insert %d / %d done' % (video_record_weekly_curr_added_count, len(video_record_weekly_curr_list)))
+    #
+    # try:
+    #     drop_old_table_sql = 'drop table if exists tdd_video_record_rank_weekly_current'
+    #     session.execute(drop_old_table_sql)
+    #     logger_51.info(drop_old_table_sql)
+    #
+    #     rename_tmp_table_sql = 'rename table tdd_video_record_rank_weekly_current_tmp to' + \
+    #                            'tdd_video_record_rank_weekly_current'
+    #     session.execute(rename_tmp_table_sql)
+    #     logger_51.info(rename_tmp_table_sql)
+    # except Exception as e:
+    #     session.rollback()
+    #     logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
+    #
+    # logger_51.info('13-2: done! Finish updating tdd_video_record_rank_weekly_current')
 
     session.close()
 
