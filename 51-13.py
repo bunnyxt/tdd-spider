@@ -97,6 +97,7 @@ def main():
     logger_51.info('now making video_record_weekly_curr_list...')
     video_record_weekly_curr_list = []
     video_record_weekly_curr_made_count = 0
+    this_weekly_rank_begin_ts = sorted(map(lambda x: x[0], video_record_base_dict.values()))[0]
     for rn in video_record_now_list:
         try:
             # check bvid exists in base or not
@@ -116,9 +117,21 @@ def main():
             d_like = rn[8] - rb[7]
             page = 1
             if bvid in video_videos_pubdate_dict.keys():
+                # video added before
                 page = video_videos_pubdate_dict[bvid][0]
-                if start_added == 0 and video_videos_pubdate_dict[bvid][0] != 0:  # set pubdate
-                    start_added = video_videos_pubdate_dict[bvid][1]
+                if start_added == 0:
+                    # bvid not appear in base
+                    if video_videos_pubdate_dict[bvid][0] >= this_weekly_rank_begin_ts:
+                        # this week new video
+                        start_added = video_videos_pubdate_dict[bvid][1]  # set pubdate
+                    else:
+                        # old video, but not appear in base, do not add in rank
+                        logger_51.warning('old video %s found, do not add in rank' % bvid)
+                        continue
+            else:
+                # video not added, just skip
+                logger_51.warning('not added video %s found, just skip' % bvid)
+                continue
             if not page or page == 0:  # page maybe zero or None, set to default 1
                 page = 1
             point, xiua, xiub = zk_calc(d_view, d_danmaku, d_reply, d_favorite, page=page)
