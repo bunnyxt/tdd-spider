@@ -359,12 +359,12 @@ class DBOperation:
             return None
 
     @classmethod
-    def query_video_videos_dict(cls, session):
+    def query_video_videos_pubdate_dict(cls, session):
         try:
-            result = session.execute('select bvid, videos from tdd_video')
+            result = session.execute('select bvid, videos, pubdate from tdd_video')
             d = {}
             for r in result:
-                d[r[0]] = r[1]
+                d[r[0]] = (r[1], r[2])
             return d
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)

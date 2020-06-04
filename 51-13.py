@@ -78,10 +78,9 @@ def main():
                 logger_51.warning('incorrect line format, line: ' + line)
     logger_51.info('video_record_now_list loaded from file')
 
-    # get video videos(page) dict from db
-    video_videos_dict = DBOperation.query_video_videos_dict(session)
-    logger_51.info('video_videos_dict got from db')
-
+    # get video videos(page), pubdate dict from db
+    video_videos_pubdate_dict = DBOperation.query_video_videos_pubdate_dict(session)
+    logger_51.info('video_videos_pubdate_dict got from db')
     try:
         drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_weekly_current_tmp'
         session.execute(drop_tmp_table_sql)
@@ -104,8 +103,10 @@ def main():
             bvid = rn[0]
             if bvid in video_record_base_dict.keys():
                 rb = video_record_base_dict[bvid]
+                start_added = rb[0]
             else:
                 rb = (0, 0, 0, 0, 0, 0, 0, 0)
+                start_added = 0
             d_view = rn[2] - rb[1]  # maybe occur -1?
             d_danmaku = rn[3] - rb[2]
             d_reply = rn[4] - rb[3]
@@ -114,14 +115,18 @@ def main():
             d_share = rn[7] - rb[6]
             d_like = rn[8] - rb[7]
             page = 1
-            if bvid in video_videos_dict.keys():
-                page = video_videos_dict[bvid]
+            if bvid in video_videos_pubdate_dict.keys():
+                page = video_videos_pubdate_dict[bvid][0]
+                if start_added == 0 and video_videos_pubdate_dict[bvid][0] != 0:  # set pubdate
+                    start_added = video_videos_pubdate_dict[bvid][0]
+            if not page or page == 0:  # page maybe zero or None, set to default 1
+                page = 1
             point, xiua, xiub = zk_calc(d_view, d_danmaku, d_reply, d_favorite, page=page)
             # append to list
-            video_record_weekly_curr_list.append([bvid, rb[0], rn[1],  # bvid, start_added, now_added
+            video_record_weekly_curr_list.append((bvid, start_added, rn[1],  # bvid, start_added, now_added
                                                   rn[2], rn[3], rn[4], rn[5], rn[6], rn[7], rn[8],
                                                   d_view, d_danmaku, d_reply, d_favorite, d_coin, d_share, d_like,
-                                                  point, xiua, xiub])
+                                                  point, xiua, xiub))
             video_record_weekly_curr_made_count += 1
             if video_record_weekly_curr_made_count % 10000 == 0:
                 logger_51.info('make %d / %d done' % (video_record_weekly_curr_made_count, len(video_record_now_list)))
