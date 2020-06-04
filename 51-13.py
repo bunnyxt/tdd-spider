@@ -63,7 +63,17 @@ def main():
             line = line.rstrip('\n')
             line_arr = line.split(',')
             if len(line_arr) == 9:
-                video_record_now_list.append(tuple(line_arr))
+                video_record_now_list.append((
+                    int(line_arr[0]),
+                    line_arr[1],
+                    int(line_arr[2]),
+                    int(line_arr[3]),
+                    int(line_arr[4]),
+                    int(line_arr[5]),
+                    int(line_arr[6]),
+                    int(line_arr[7]),
+                    int(line_arr[8])
+                ))
             else:
                 logger_51.warning('incorrect line format, line: ' + line)
     logger_51.info('video_record_now_list loaded from file')
