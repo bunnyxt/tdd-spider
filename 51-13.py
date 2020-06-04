@@ -64,15 +64,15 @@ def main():
             line_arr = line.split(',')
             if len(line_arr) == 9:
                 video_record_now_list.append((
-                    a2b(int(line_arr[0])),
-                    line_arr[1],
-                    int(line_arr[2]),
-                    int(line_arr[3]),
-                    int(line_arr[4]),
-                    int(line_arr[5]),
-                    int(line_arr[6]),
-                    int(line_arr[7]),
-                    int(line_arr[8])
+                    a2b(int(line_arr[0])),  # bvid
+                    int(line_arr[1]),  # added
+                    int(line_arr[2]),  # view
+                    int(line_arr[3]),  # danmaku
+                    int(line_arr[4]),  # reply
+                    int(line_arr[5]),  # favorite
+                    int(line_arr[6]),  # coin
+                    int(line_arr[7]),  # share
+                    int(line_arr[8])  # like
                 ))
             else:
                 logger_51.warning('incorrect line format, line: ' + line)
@@ -100,7 +100,7 @@ def main():
     video_record_weekly_curr_made_count = 0
     for rn in video_record_now_list:
         # check bvid exists in base or not
-        bvid = rn[1]
+        bvid = rn[0]
         if bvid in video_record_base_dict.keys():
             rb = video_record_base_dict[bvid]
         else:
@@ -117,7 +117,7 @@ def main():
             page = video_videos_dict[bvid]
         point, xiua, xiub = zk_calc(d_view, d_danmaku, d_reply, d_favorite, page=page)
         # append to list
-        video_record_weekly_curr_list.append([bvid, rb[0], rn[0],
+        video_record_weekly_curr_list.append([bvid, rb[0], rn[1],  # bvid, start_added, now_added
                                               rn[2], rn[3], rn[4], rn[5], rn[6], rn[7], rn[8],
                                               d_view, d_danmaku, d_reply, d_favorite, d_coin, d_share, d_like,
                                               point, xiua, xiub])
