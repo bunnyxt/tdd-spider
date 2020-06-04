@@ -71,10 +71,13 @@ def zk_calc(view, danmaku, reply, favorite, page=1):
     if xiub < 10:
         bofang = bofang * xiub * 0.1
 
-    xiua = round(
-        (bofang_ori + favorite) /
-        (bofang_ori + favorite + danmaku * 10 + reply * 20)
-        , 2)
+    if bofang_ori + favorite == 0:
+        xiua = 0.0
+    else:
+        xiua = round(
+            (bofang_ori + favorite) /
+            (bofang_ori + favorite + danmaku * 10 + reply * 20)
+            , 2)
 
     point = math.floor(bofang + (reply * 25 + danmaku) * xiua + favorite * xiub)
 
