@@ -99,31 +99,34 @@ def main():
     video_record_weekly_curr_list = []
     video_record_weekly_curr_made_count = 0
     for rn in video_record_now_list:
-        # check bvid exists in base or not
-        bvid = rn[0]
-        if bvid in video_record_base_dict.keys():
-            rb = video_record_base_dict[bvid]
-        else:
-            rb = (0, 0, 0, 0, 0, 0, 0, 0)
-        d_view = rn[2] - rb[1]  # maybe occur -1?
-        d_danmaku = rn[3] - rb[2]
-        d_reply = rn[4] - rb[3]
-        d_favorite = rn[5] - rb[4]
-        d_coin = rn[6] - rb[5]
-        d_share = rn[7] - rb[6]
-        d_like = rn[8] - rb[7]
-        page = 1
-        if bvid in video_videos_dict.keys():
-            page = video_videos_dict[bvid]
-        point, xiua, xiub = zk_calc(d_view, d_danmaku, d_reply, d_favorite, page=page)
-        # append to list
-        video_record_weekly_curr_list.append([bvid, rb[0], rn[1],  # bvid, start_added, now_added
-                                              rn[2], rn[3], rn[4], rn[5], rn[6], rn[7], rn[8],
-                                              d_view, d_danmaku, d_reply, d_favorite, d_coin, d_share, d_like,
-                                              point, xiua, xiub])
-        video_record_weekly_curr_made_count += 1
-        if video_record_weekly_curr_made_count % 10000 == 0:
-            logger_51.info('make %d / %d done' % (video_record_weekly_curr_made_count, len(video_record_now_list)))
+        try:
+            # check bvid exists in base or not
+            bvid = rn[0]
+            if bvid in video_record_base_dict.keys():
+                rb = video_record_base_dict[bvid]
+            else:
+                rb = (0, 0, 0, 0, 0, 0, 0, 0)
+            d_view = rn[2] - rb[1]  # maybe occur -1?
+            d_danmaku = rn[3] - rb[2]
+            d_reply = rn[4] - rb[3]
+            d_favorite = rn[5] - rb[4]
+            d_coin = rn[6] - rb[5]
+            d_share = rn[7] - rb[6]
+            d_like = rn[8] - rb[7]
+            page = 1
+            if bvid in video_videos_dict.keys():
+                page = video_videos_dict[bvid]
+            point, xiua, xiub = zk_calc(d_view, d_danmaku, d_reply, d_favorite, page=page)
+            # append to list
+            video_record_weekly_curr_list.append([bvid, rb[0], rn[1],  # bvid, start_added, now_added
+                                                  rn[2], rn[3], rn[4], rn[5], rn[6], rn[7], rn[8],
+                                                  d_view, d_danmaku, d_reply, d_favorite, d_coin, d_share, d_like,
+                                                  point, xiua, xiub])
+            video_record_weekly_curr_made_count += 1
+            if video_record_weekly_curr_made_count % 10000 == 0:
+                logger_51.info('make %d / %d done' % (video_record_weekly_curr_made_count, len(video_record_now_list)))
+        except Exception as e:
+            logger_51.warning('Error occur when making video_record_weekly_curr. Detail: %s' % e)
     logger_51.info('make %d / %d done' % (video_record_weekly_curr_made_count, len(video_record_now_list)))
     logger_51.info('finish make video_record_weekly_curr_list')
 
