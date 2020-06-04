@@ -59,19 +59,24 @@ def zk_calc(view, danmaku, reply, favorite, page=1):
     else:
         bofang = jichu
 
-    # TODO how to calculate when view == 0?
-    xiub = round(favorite / view * 250, 2)
-    if xiub > 50:
+    if view == 0:
         xiub = 50
+    else:
+        xiub = round(favorite / view * 250, 2)
+        if xiub > 50:
+            xiub = 50
 
     bofang_ori = bofang
     if xiub < 10:
         bofang = bofang * xiub * 0.1
 
-    xiua = round(
-        (bofang_ori + favorite) /
-        (bofang_ori + favorite + danmaku * 10 + reply * 20)
-        , 2)
+    if bofang_ori + favorite + danmaku * 10 + reply * 20 == 0:
+        xiua = 1
+    else:
+        xiua = round(
+            (bofang_ori + favorite) /
+            (bofang_ori + favorite + danmaku * 10 + reply * 20)
+            , 2)
 
     point = math.floor(bofang + (reply * 25 + danmaku) * xiua + favorite * xiub)
 
