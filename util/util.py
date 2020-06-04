@@ -63,7 +63,7 @@ def zk_calc(view, danmaku, reply, favorite, page=1):
         xiub = 50
     else:
         xiub = round(favorite / view * 250, 2)
-        if xiub > 50:
+        if xiub > 50 or xiub < 0:
             xiub = 50
 
     bofang_ori = bofang
