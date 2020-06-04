@@ -137,7 +137,7 @@ def main():
     rank = 1
     for c in video_record_weekly_curr_list:
         # dont use sql alchemy in order to save memory
-        sql = 'insert into tdd_video_record_rank_weekly_current_tmp' \
+        sql = 'insert into tdd_video_record_rank_weekly_current_tmp ' \
               'values("%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
               (c[0], c[1], c[2],
                c[3], c[4], c[5], c[6], c[7], c[8], c[9],
