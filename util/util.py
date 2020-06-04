@@ -53,6 +53,8 @@ def get_week_day():
 
 
 def zk_calc(view, danmaku, reply, favorite, page=1):
+    if page == 0:
+        page = 1
     jichu = view / page
     if jichu > 10000:
         bofang = jichu * 0.5 + 5000
@@ -60,10 +62,12 @@ def zk_calc(view, danmaku, reply, favorite, page=1):
         bofang = jichu
 
     # TODO how to calculate when view == 0?
-    if view == 0:
-        view += 0.0001
-
-    xiub = round(favorite / view * 250, 2)
+    fenmu = view
+    if fenmu == 0:
+        fenmu += 0.0001
+    xiub = round(favorite /
+                 fenmu  # view
+                 * 250, 2)
     if xiub > 50:
         xiub = 50
 
@@ -71,13 +75,13 @@ def zk_calc(view, danmaku, reply, favorite, page=1):
     if xiub < 10:
         bofang = bofang * xiub * 0.1
 
-    if bofang_ori + favorite == 0:
-        xiua = 0.0
-    else:
-        xiua = round(
-            (bofang_ori + favorite) /
-            (bofang_ori + favorite + danmaku * 10 + reply * 20)
-            , 2)
+    fenmu = (bofang_ori + favorite + danmaku * 10 + reply * 20)
+    if fenmu == 0:
+        fenmu += 0.0001
+    xiua = round(
+        (bofang_ori + favorite) /
+        fenmu  # (bofang_ori + favorite + danmaku * 10 + reply * 20)
+        , 2)
 
     point = math.floor(bofang + (reply * 25 + danmaku) * xiua + favorite * xiub)
 
