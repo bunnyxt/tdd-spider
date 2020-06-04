@@ -1,5 +1,5 @@
 from logger import logger_51
-from util import ts_s_to_str, get_ts_s, get_week_day, str_to_ts_s, zk_calc
+from util import ts_s_to_str, get_ts_s, get_week_day, str_to_ts_s, zk_calc, a2b
 from db import Session, DBOperation
 
 
@@ -64,7 +64,7 @@ def main():
             line_arr = line.split(',')
             if len(line_arr) == 9:
                 video_record_now_list.append((
-                    int(line_arr[0]),
+                    a2b(int(line_arr[0])),
                     line_arr[1],
                     int(line_arr[2]),
                     int(line_arr[3]),
