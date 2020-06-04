@@ -128,7 +128,8 @@ def main():
     logger_51.info('finish make video_record_weekly_curr_list')
 
     # sort via point
-    video_record_weekly_curr_list.sort(key=lambda x: (x[17], x[10])).reverse()  # TODO if point equals?
+    video_record_weekly_curr_list.sort(key=lambda x: (x[17], x[10]))  # TODO if point equals?
+    video_record_weekly_curr_list.reverse()
     logger_51.info('finish sort video_record_weekly_curr_list')
 
     logger_51.info('now inserting video_record_weekly_curr_list...')
