@@ -59,6 +59,10 @@ def zk_calc(view, danmaku, reply, favorite, page=1):
     else:
         bofang = jichu
 
+    # TODO how to calculate when view == 0?
+    if view == 0:
+        view += 0.0001
+
     xiub = round(favorite / view * 250, 2)
     if xiub > 50:
         xiub = 50
