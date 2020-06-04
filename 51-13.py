@@ -118,7 +118,7 @@ def main():
             if bvid in video_videos_pubdate_dict.keys():
                 page = video_videos_pubdate_dict[bvid][0]
                 if start_added == 0 and video_videos_pubdate_dict[bvid][0] != 0:  # set pubdate
-                    start_added = video_videos_pubdate_dict[bvid][0]
+                    start_added = video_videos_pubdate_dict[bvid][1]
             if not page or page == 0:  # page maybe zero or None, set to default 1
                 page = 1
             point, xiua, xiub = zk_calc(d_view, d_danmaku, d_reply, d_favorite, page=page)
