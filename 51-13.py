@@ -167,7 +167,7 @@ def main():
         session.execute(drop_old_table_sql)
         logger_51.info(drop_old_table_sql)
 
-        rename_tmp_table_sql = 'rename table tdd_video_record_rank_weekly_current_tmp to' + \
+        rename_tmp_table_sql = 'rename table tdd_video_record_rank_weekly_current_tmp to ' + \
                                'tdd_video_record_rank_weekly_current'
         session.execute(rename_tmp_table_sql)
         logger_51.info(rename_tmp_table_sql)
