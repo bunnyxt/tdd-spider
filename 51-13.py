@@ -153,6 +153,10 @@ def main():
     video_record_weekly_curr_list.reverse()
     logger_51.info('finish sort video_record_weekly_curr_list')
 
+    # select top 10000 video
+    video_record_weekly_curr_list = video_record_weekly_curr_list[:10000]
+    logger_51.info('select top 10000 video')
+
     logger_51.info('now inserting video_record_weekly_curr_list...')
     video_record_weekly_curr_added_count = 0
     rank = 1
@@ -168,10 +172,10 @@ def main():
         rank += 1
         session.execute(sql)
         video_record_weekly_curr_added_count += 1
-        if video_record_weekly_curr_added_count % 10000 == 0:
-            session.commit()
-            logger_51.info('insert %d / %d done' % (video_record_weekly_curr_added_count,
-                                                    len(video_record_weekly_curr_list)))
+        # if video_record_weekly_curr_added_count % 10000 == 0:
+        #     session.commit()
+        #     logger_51.info('insert %d / %d done' % (video_record_weekly_curr_added_count,
+        #                                             len(video_record_weekly_curr_list)))
     session.commit()
     logger_51.info('insert %d / %d done' % (video_record_weekly_curr_added_count, len(video_record_weekly_curr_list)))
 
