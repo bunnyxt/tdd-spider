@@ -201,23 +201,23 @@ def main():
     # a
     value = float(incr_view_list[5000])
     logger_51.info('incr_view 50% %f' % value)
-    session.execute('update tdd_video_record_rank_weekly_current_color set `value` = %f ' % value +
-                    'where property = "incr_view" && separator = "a"')
+    session.execute('update tdd_video_record_rank_weekly_current_color set a = %f ' % value +
+                    'where property = "incr_view"')
     # b
     value = float(incr_view_list[9000])
     logger_51.info('incr_view 90% %f' % value)
-    session.execute('update tdd_video_record_rank_weekly_current_color set `value` = %f ' % value +
-                    'where property = "incr_view" && separator = "b"')
+    session.execute('update tdd_video_record_rank_weekly_current_color set b = %f ' % value +
+                    'where property = "incr_view"')
     # c
     value = float(incr_view_list[9900])
     logger_51.info('incr_view 99% %f' % value)
-    session.execute('update tdd_video_record_rank_weekly_current_color set `value` = %f ' % value +
-                    'where property = "incr_view" && separator = "c"')
+    session.execute('update tdd_video_record_rank_weekly_current_color set c = %f ' % value +
+                    'where property = "incr_view"')
     # d
     value = float(incr_view_list[9990])
     logger_51.info('incr_view 99.9% %f' % value)
-    session.execute('update tdd_video_record_rank_weekly_current_color set `value` = %f ' % value +
-                    'where property = "incr_view" && separator = "d"')
+    session.execute('update tdd_video_record_rank_weekly_current_color set d = %f ' % value +
+                    'where property = "incr_view"')
 
     logger_51.info('13-3: done! Finish updating tdd_video_record_rank_weekly_current_color')
 
