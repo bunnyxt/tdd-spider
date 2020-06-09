@@ -194,6 +194,33 @@ def main():
 
     logger_51.info('13-2: done! Finish updating tdd_video_record_rank_weekly_current')
 
+    logger_51.info('13-3: update tdd_video_record_rank_weekly_current_color')
+
+    # incr_view
+    incr_view_list = sorted(list(map(lambda x: x[10], video_record_weekly_curr_list)))
+    # a
+    value = float(incr_view_list[5000])
+    logger_51.info('incr_view 50% %f' % value)
+    session.execute('update tdd_video_record_rank_weekly_current_color set `value` = %f ' % value +
+                    'where property = "incr_view" && separator = "a"')
+    # b
+    value = float(incr_view_list[9000])
+    logger_51.info('incr_view 90% %f' % value)
+    session.execute('update tdd_video_record_rank_weekly_current_color set `value` = %f ' % value +
+                    'where property = "incr_view" && separator = "b"')
+    # c
+    value = float(incr_view_list[9900])
+    logger_51.info('incr_view 99% %f' % value)
+    session.execute('update tdd_video_record_rank_weekly_current_color set `value` = %f ' % value +
+                    'where property = "incr_view" && separator = "c"')
+    # d
+    value = float(incr_view_list[9990])
+    logger_51.info('incr_view 99.9% %f' % value)
+    session.execute('update tdd_video_record_rank_weekly_current_color set `value` = %f ' % value +
+                    'where property = "incr_view" && separator = "d"')
+
+    logger_51.info('13-3: done! Finish updating tdd_video_record_rank_weekly_current_color')
+
     session.close()
 
 
