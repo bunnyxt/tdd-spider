@@ -203,21 +203,25 @@ def main():
     logger_51.info('incr_view 50% {0}'.format(value))
     session.execute('update tdd_video_record_rank_weekly_current_color set a = %f ' % value +
                     'where property = "incr_view"')
+    session.commit()
     # b
     value = float(incr_view_list[9000])
     logger_51.info('incr_view 90% {0}'.format(value))
     session.execute('update tdd_video_record_rank_weekly_current_color set b = %f ' % value +
                     'where property = "incr_view"')
+    session.commit()
     # c
     value = float(incr_view_list[9900])
     logger_51.info('incr_view 99% {0}'.format(value))
     session.execute('update tdd_video_record_rank_weekly_current_color set c = %f ' % value +
                     'where property = "incr_view"')
+    session.commit()
     # d
     value = float(incr_view_list[9990])
     logger_51.info('incr_view 99.9% {0}'.format(value))
     session.execute('update tdd_video_record_rank_weekly_current_color set d = %f ' % value +
                     'where property = "incr_view"')
+    session.commit()
 
     logger_51.info('13-3: done! Finish updating tdd_video_record_rank_weekly_current_color')
 
