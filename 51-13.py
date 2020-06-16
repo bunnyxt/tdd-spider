@@ -200,22 +200,22 @@ def main():
     incr_view_list = sorted(list(map(lambda x: x[10], video_record_weekly_curr_list)))
     # a
     value = float(incr_view_list[5000])
-    logger_51.info('incr_view 50% %f' % value)
+    logger_51.info('incr_view 50% {0}'.format(value))
     session.execute('update tdd_video_record_rank_weekly_current_color set a = %f ' % value +
                     'where property = "incr_view"')
     # b
     value = float(incr_view_list[9000])
-    logger_51.info('incr_view 90% %f' % value)
+    logger_51.info('incr_view 90% {0}'.format(value))
     session.execute('update tdd_video_record_rank_weekly_current_color set b = %f ' % value +
                     'where property = "incr_view"')
     # c
     value = float(incr_view_list[9900])
-    logger_51.info('incr_view 99% %f' % value)
+    logger_51.info('incr_view 99% {0}'.format(value))
     session.execute('update tdd_video_record_rank_weekly_current_color set c = %f ' % value +
                     'where property = "incr_view"')
     # d
     value = float(incr_view_list[9990])
-    logger_51.info('incr_view 99.9% %f' % value)
+    logger_51.info('incr_view 99.9% {0}'.format(value))
     session.execute('update tdd_video_record_rank_weekly_current_color set d = %f ' % value +
                     'where property = "incr_view"')
 
