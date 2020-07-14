@@ -196,32 +196,40 @@ def main():
 
     logger_51.info('13-3: update tdd_video_record_rank_weekly_current_color')
 
-    # incr_view
-    incr_view_list = sorted(list(map(lambda x: x[10], video_record_weekly_curr_list)))
-    # a
-    value = float(incr_view_list[5000])
-    logger_51.info('incr_view 50% {0}'.format(value))
-    session.execute('update tdd_video_record_rank_weekly_current_color set a = %f ' % value +
-                    'where property = "incr_view"')
-    session.commit()
-    # b
-    value = float(incr_view_list[9000])
-    logger_51.info('incr_view 90% {0}'.format(value))
-    session.execute('update tdd_video_record_rank_weekly_current_color set b = %f ' % value +
-                    'where property = "incr_view"')
-    session.commit()
-    # c
-    value = float(incr_view_list[9900])
-    logger_51.info('incr_view 99% {0}'.format(value))
-    session.execute('update tdd_video_record_rank_weekly_current_color set c = %f ' % value +
-                    'where property = "incr_view"')
-    session.commit()
-    # d
-    value = float(incr_view_list[9990])
-    logger_51.info('incr_view 99.9% {0}'.format(value))
-    session.execute('update tdd_video_record_rank_weekly_current_color set d = %f ' % value +
-                    'where property = "incr_view"')
-    session.commit()
+    color_dict = {
+        10: 'incr_view',
+        11: 'incr_danmaku',
+        12: 'incr_reply',
+        13: 'incr_favorite',
+        14: 'incr_coin',
+        15: 'incr_share',
+        16: 'incr_like'
+    }
+
+    for prop_idx, prop in color_dict.items():
+        prop_list = sorted(list(map(lambda x: x[prop_idx], video_record_weekly_curr_list)))
+        # a
+        value = float(prop_list[5000])
+        logger_51.info('{0} 50% {1}'.format(prop, value))
+        session.execute('update tdd_video_record_rank_weekly_current_color set a = %f ' % value +
+                        'where property = "%s"' % prop)
+        # b
+        value = float(prop_list[9000])
+        logger_51.info('incr_view 90% {0}'.format(value))
+        session.execute('update tdd_video_record_rank_weekly_current_color set b = %f ' % value +
+                        'where property = "%s"' % prop)
+        # c
+        value = float(prop_list[9900])
+        logger_51.info('incr_view 99% {0}'.format(value))
+        session.execute('update tdd_video_record_rank_weekly_current_color set c = %f ' % value +
+                        'where property = "%s"' % prop)
+        session.commit()
+        # d
+        value = float(prop_list[9990])
+        logger_51.info('incr_view 99.9% {0}'.format(value))
+        session.execute('update tdd_video_record_rank_weekly_current_color set d = %f ' % value +
+                        'where property = "%s"' % prop)
+        session.commit()
 
     logger_51.info('13-3: done! Finish updating tdd_video_record_rank_weekly_current_color')
 
