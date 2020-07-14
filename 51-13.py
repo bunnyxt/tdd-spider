@@ -215,18 +215,18 @@ def main():
                         'where property = "%s"' % prop)
         # b
         value = float(prop_list[9000])
-        logger_51.info('incr_view 90% {0}'.format(value))
+        logger_51.info('{0} 90% {1}'.format(prop, value))
         session.execute('update tdd_video_record_rank_weekly_current_color set b = %f ' % value +
                         'where property = "%s"' % prop)
         # c
         value = float(prop_list[9900])
-        logger_51.info('incr_view 99% {0}'.format(value))
+        logger_51.info('{0} 99% {1}'.format(prop, value))
         session.execute('update tdd_video_record_rank_weekly_current_color set c = %f ' % value +
                         'where property = "%s"' % prop)
         session.commit()
         # d
         value = float(prop_list[9990])
-        logger_51.info('incr_view 99.9% {0}'.format(value))
+        logger_51.info('{0} 99.9% {1}'.format(prop, value))
         session.execute('update tdd_video_record_rank_weekly_current_color set d = %f ' % value +
                         'where property = "%s"' % prop)
         session.commit()
