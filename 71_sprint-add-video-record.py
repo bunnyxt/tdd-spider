@@ -37,6 +37,13 @@ def add_video_record():
             session.commit()
             logger_71.info('%d, %d, %d, %d, %d, %d, %d, %d, %d' %
                            (added, aid, view, danmaku, reply, favorite, coin, share, like))
+            # million reached
+            if view >= 1000000:
+                sql = 'update tdd_sprint_video set status = "finished" where aid = %d' % aid
+                session.execute(sql)
+                session.commit()
+                logger_71.info('set status of video aid: %d to finished' % aid)
+                # TODO serverchan
         except Exception as e:
             logger_71.warning(e)
         time.sleep(0.2)
