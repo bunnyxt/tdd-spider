@@ -466,7 +466,7 @@ LOG_CONFIG_DICT = {
             'level': 'INFO'
         },
         'logger_72': {
-            'handlers': ['console_info', 'file_info_71'],
+            'handlers': ['console_info', 'file_info_72'],
             'level': 'INFO'
         },
         'logger_db': {
