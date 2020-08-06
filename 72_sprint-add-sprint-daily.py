@@ -77,9 +77,10 @@ def add_sprint_daily():
         # calc lday
         lday = math.floor((1000000 - end_view) / view_incr)
 
-        session.execute('insert into tdd_sprint_daily_record (added, `date`, aid, `view`, viewincr, videoincrincr, pday, lday) '
-                        'values (%d, %s, %d, %d, %d, %d, %d)' % (added, date, aid, end_view, view_incr, pday, lday))
+        session.execute('insert into tdd_sprint_daily_record (added, `date`, aid, `view`, viewincr, pday, lday) '
+                        'values (%d, "%s", %d, %d, %d, %d, %d)' % (added, date, aid, end_view, view_incr, pday, lday))
         session.commit()
+        logger_72.info('%d, "%s", %d, %d, %d, %d, %d' % (added, date, aid, end_view, view_incr, pday, lday))
 
         video_total += 1
 
@@ -97,8 +98,9 @@ def add_sprint_daily():
         millvids_str += '%d;' % aid
 
     session.execute('insert into tdd_sprint_daily (added, `date`, correct, vidnum, newvids, millvids, viewincr, viewincrincr, comment) '
-                    'values (%d, %s, 1, %d, %s, %s, %d, %d, '')' % (get_ts_s(), date, video_total, newvids_str, millvids_str, view_incr_total, view_incr_incr))
+                    'values (%d, "%s", 1, %d, "%s", "%s", %d, %d, "")' % (get_ts_s(), date, video_total, newvids_str, millvids_str, view_incr_total, view_incr_incr))
     session.commit()
+    logger_72.info('%d, "%s", %d, "%s", "%s", %d, %d' % (get_ts_s(), date, video_total, newvids_str, millvids_str, view_incr_total, view_incr_incr))
 
     session.close()
 
