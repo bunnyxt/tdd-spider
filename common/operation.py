@@ -325,7 +325,7 @@ def update_video(aid, bapi, session):
                             video_update_logs.append(TddVideoLog(added, aid, bvid, 'staff', None, 'mid: %d; title: %s'
                                                                  % (new_staff.mid, new_staff.title)))
                     time.sleep(0.2)
-            # remove staff left in old_staff_list
+                # remove staff left in old_staff_list
                 for old_staff in old_staff_list:
                     DBOperation.delete_video_staff_via_id(old_staff.id, session)
                     video_update_logs.append(TddVideoLog(added, aid, bvid, 'staff', 'mid: %d; title: %s'
@@ -426,14 +426,14 @@ def update_video_via_bvid(bvid, bapi, session):
                         except TddCommonError as e:
                             print(e)
                         try:
-                            new_staff = add_staff(added, aid, staff['mid'], staff['title'], session)
+                            new_staff = add_staff_via_bvid(added, bvid, staff['mid'], staff['title'], session)
                         except TddCommonError as e:
                             print(e)
                         else:
                             video_update_logs.append(TddVideoLog(added, aid, bvid, 'staff', None, 'mid: %d; title: %s'
                                                                  % (new_staff.mid, new_staff.title)))
                     time.sleep(0.2)
-            # remove staff left in old_staff_list
+                # remove staff left in old_staff_list
                 for old_staff in old_staff_list:
                     DBOperation.delete_video_staff_via_id(old_staff.id, session)
                     video_update_logs.append(TddVideoLog(added, aid, bvid, 'staff', 'mid: %d; title: %s'
