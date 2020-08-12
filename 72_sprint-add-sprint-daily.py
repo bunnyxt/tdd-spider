@@ -85,7 +85,8 @@ def add_sprint_daily():
         video_total += 1
 
     # calc view incr incr
-    result = session.execute('select `viewincr` from tdd_sprint_daily order by id desc limit 1')
+    result = session.execute('select `viewincr` from tdd_sprint_daily where viewincr is not NULL '
+                             'order by id desc limit 1')
     last_view_incr = [r['viewincr'] for r in result][0]
     view_incr_incr = view_incr_total - last_view_incr
 
