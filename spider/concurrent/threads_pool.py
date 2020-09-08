@@ -32,6 +32,7 @@ class ThreadPool(object):
         self._thread_saver = None                                           # saver thread, be None if not saver
         self._thread_proxieser = None                                       # proxieser thread, be None if not proxieser
         self._thread_stop_flag = False                                      # default: False, stop flag of threads
+        self._fetcher_fail_url_list = []                                    # by bunnyxt, url list of fail fetcher
 
         self._queue_fetch = queue.PriorityQueue(-1)                         # (priority, url, keys, deep, repeat)
         self._queue_parse = queue.PriorityQueue(queue_parse_size)           # (priority, url, keys, deep, content)
@@ -105,6 +106,9 @@ class ThreadPool(object):
         self._thread_stop_flag = False
 
         self._thread_fetcher_list = [FetchThread("fetcher-%d" % (i+1), copy.deepcopy(self._inst_fetcher), self) for i in range(fetcher_num)]
+        # by bunnyxt
+        for _thread_fetcher in self._thread_fetcher_list:
+            _thread_fetcher._worker._fetch_fail_urls = self._fetcher_fail_url_list
         self._thread_parser = ParseThread("parser", self._inst_parser, self) if self._inst_parser else None
         self._thread_saver = SaveThread("saver", self._inst_saver, self) if self._inst_saver else None
         self._thread_proxieser = ProxiesThread("proxieser", self._inst_proxieser, self) if self._inst_proxieser else None
@@ -254,3 +258,7 @@ class ThreadPool(object):
         elif task_name == TPEnum.PROXIES:
             self._queue_proxies.task_done()
         return
+
+    # by bunnyxt
+    def get_fetcher_fail_url_list(self):
+        return self._fetcher_fail_url_list
