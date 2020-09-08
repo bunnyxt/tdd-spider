@@ -71,8 +71,8 @@ def parse_error_message(line):
     """
     parse error message based on CONFIG_ERROR_MESSAGE, return a tuple (priority, keys, deep, url)
     """
-    regu = CONFIG_ERROR_MESSAGE_RE.search(line)
-    return int(regu.group("priority")), eval(regu.group("keys").strip()), int(regu.group("deep")), regu.group("url").strip()
+    re_gu = CONFIG_ERROR_MESSAGE_RE.search(line)
+    return int(re_gu.group("priority")), eval(re_gu.group("keys").strip()), int(re_gu.group("deep")), re_gu.group("url").strip()
 
 
 def parse_raw_form(raw_form_string, ignore_none=False):
