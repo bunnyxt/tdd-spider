@@ -96,7 +96,7 @@ def spider_17():
         fetcher_fail_url_list = web_spider.get_fetcher_fail_url_list()
         if len(fetcher_fail_url_list) > 0:
             # go continue
-            logging.warning('round', spyder_round, 'done, url left', len(fetcher_fail_url_list))
+            logging.warning('round %d done, url left %d' % (spyder_round, len(fetcher_fail_url_list)))
             spyder_round += 1
 
             web_spider = spider.WebSpider(fetcher=ApiFetcher(sleep_time=0, max_repeat=10),
@@ -109,7 +109,7 @@ def spider_17():
                 web_spider.put_item_to_queue_fetch(1, url, {}, 0, 0)
         else:
             break
-    logging.warning('round', spyder_round, 'done, all finished')
+    logging.warning('round %d done, all finished' % spyder_round)
 
     end_ts = get_ts_s()
     logging.warning('start time', ts_s_to_str(start_ts))
