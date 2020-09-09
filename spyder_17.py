@@ -84,7 +84,7 @@ def spider_17():
     mids = [r[0] for r in result]
     session.close()
     # add urls to fetch queue
-    for mid in mids[:1000]:
+    for mid in mids:
         url = 'http://api.bilibili.com/x/relation/stat?vmid={0}'.format(mid)
         web_spider.put_item_to_queue_fetch(1, url, {}, 0, 0)
 
