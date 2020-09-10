@@ -112,9 +112,9 @@ def spider_17():
     logging.warning('round %d done, all finished' % spyder_round)
 
     end_ts = get_ts_s()
-    logging.warning('start time', ts_s_to_str(start_ts))
-    logging.warning('end time', ts_s_to_str(end_ts))
-    logging.warning('timespan', (end_ts - start_ts) // 60, 'min')
+    logging.warning('start time %s' % ts_s_to_str(start_ts))
+    logging.warning('end time %s' % ts_s_to_str(end_ts))
+    logging.warning('timespan %d min' % (end_ts - start_ts) // 60)
 
 
 if __name__ == "__main__":
