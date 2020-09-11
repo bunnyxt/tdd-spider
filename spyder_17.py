@@ -114,7 +114,7 @@ def spider_17():
     end_ts = get_ts_s()
     logging.warning('start time %s' % ts_s_to_str(start_ts))
     logging.warning('end time %s' % ts_s_to_str(end_ts))
-    logging.warning('timespan %d min' % (end_ts - start_ts) // 60)
+    logging.warning('timespan %d min' % ((end_ts - start_ts) // 60))
 
 
 if __name__ == "__main__":
