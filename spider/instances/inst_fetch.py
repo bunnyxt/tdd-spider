@@ -21,7 +21,7 @@ class Fetcher(object):
         """
         self._sleep_time = sleep_time
         self._max_repeat = max_repeat
-        self._fetch_fail_urls = None  # by bunnyxt
+        self._fail_urls = None  # by bunnyxt
         return
 
     def working(self, priority: int, url: str, keys: dict, deep: int, repeat: int, proxies=None) -> (int, object, int):
@@ -40,8 +40,8 @@ class Fetcher(object):
         except Exception as excep:
             fetch_state, content, proxies_state = (-1 if repeat >= self._max_repeat else 0), [self.__class__.__name__, str(excep)], -1
             # by bunnyxt
-            if fetch_state == -1 and self._fetch_fail_urls is not None:
-                self._fetch_fail_urls.append(url)
+            if fetch_state == -1 and self._fail_urls is not None:
+                self._fail_urls.append(url)
 
         return fetch_state, content, proxies_state
 

@@ -10,6 +10,13 @@ class Parser(object):
     class of Parser, must include function working()
     """
 
+    def __init__(self):
+        """
+        constructor
+        """
+        self._fail_urls = None  # by bunnyxt
+        return
+
     def working(self, priority: int, url: str, keys: dict, deep: int, content: object) -> (int, list, object):
         """
         working function, must "try, except" and don't change the parameters and returns
@@ -21,6 +28,9 @@ class Parser(object):
             parse_state, url_list, item = self.htm_parse(priority, url, keys, deep, content)
         except Exception as excep:
             parse_state, url_list, item = -1, [self.__class__.__name__, str(excep)], None
+            # by bunnyxt
+            if parse_state == -1 and self._fail_urls is not None:
+                self._fail_urls.append(url)
 
         return parse_state, url_list, item
 
