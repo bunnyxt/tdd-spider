@@ -103,7 +103,7 @@ def spider_17():
                                           parser=TddMemberFollowerRecordParser(),
                                           saver=DbSaver(get_session=Session),
                                           proxieser=LocalProxies(sleep_time=5, proxy_num=75),
-                                          queue_parse_size=200, queue_proxies_size=200)
+                                          queue_parse_size=200, queue_proxies_size=300)
 
             for url in fetcher_fail_url_list:
                 web_spider.put_item_to_queue_fetch(1, url, {}, 0, 0)
