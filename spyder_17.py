@@ -5,13 +5,17 @@ from db import Session
 from util import get_ts_s, ts_s_to_str
 
 
+def create_web_spider():
+    return WebSpider(fetcher=ApiFetcher(sleep_time=0, max_repeat=10),
+                     parser=TddMemberFollowerRecordParser(),
+                     saver=DbSaver(get_session=Session),
+                     proxieser=LocalProxieser(sleep_time=5, proxy_num=100),
+                     queue_parse_size=200, queue_proxies_size=500)
+
+
 def spider_17():
     start_ts = get_ts_s()
-    web_spider = WebSpider(fetcher=ApiFetcher(sleep_time=0, max_repeat=10),
-                           parser=TddMemberFollowerRecordParser(),
-                           saver=DbSaver(get_session=Session),
-                           proxieser=LocalProxieser(sleep_time=5, proxy_num=100),
-                           queue_parse_size=200, queue_proxies_size=300)
+    web_spider = create_web_spider()
 
     # load all mids
     session = Session()
@@ -35,11 +39,7 @@ def spider_17():
             logging.warning('round %d done, url left %d' % (spyder_round, len(fetcher_fail_url_list)))
             spyder_round += 1
 
-            web_spider = WebSpider(fetcher=ApiFetcher(sleep_time=0, max_repeat=10),
-                                   parser=TddMemberFollowerRecordParser(),
-                                   saver=DbSaver(get_session=Session),
-                                   proxieser=LocalProxieser(sleep_time=5, proxy_num=100),
-                                   queue_parse_size=200, queue_proxies_size=300)
+            web_spider = create_web_spider()
 
             for url in fetcher_fail_url_list:
                 web_spider.put_item_to_queue_fetch(1, url, {}, 0, 0)
