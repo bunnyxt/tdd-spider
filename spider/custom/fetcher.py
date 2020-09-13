@@ -23,4 +23,6 @@ class ApiFetcher(Fetcher):
         response = requests.get(url, proxies=proxies, verify=False, allow_redirects=False,
                                 headers={'User-Agent': self.random_ua()}, timeout=(3.05, 10))
         response.raise_for_status()
+        if response.headers['Content-Type'].find('application/json') == -1:
+            raise RuntimeError('response should have application/json MIME type')
         return 1, (response.status_code, response.url, response.text), 1  # fetch_state (1: success), content, proxies_state (1: success)
