@@ -30,7 +30,7 @@ class Parser(object):
             parse_state, url_list, item = -1, [self.__class__.__name__, str(excep)], None
             # by bunnyxt
             if parse_state == -1 and self._fail_urls is not None:
-                self._fail_urls.append(url)
+                self._fail_urls.append(url)  # TODO cannot append to that list in ThreadPool
 
         return parse_state, url_list, item
 
