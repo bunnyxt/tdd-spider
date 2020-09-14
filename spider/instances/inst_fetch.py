@@ -32,8 +32,8 @@ class Fetcher(object):
         :return proxies_state: can be -1(unavailable), 0(return to queue), 1(available)
         """
         # time.sleep(random.randint(0, self._sleep_time))
-        # time.sleep(random.random() * self._sleep_time)  # by bunnyxt
-        time.sleep(self._sleep_time)  # by bunnyxt
+        time.sleep(random.random() * self._sleep_time)  # by bunnyxt
+        # time.sleep(self._sleep_time)  # by bunnyxt
 
         try:
             fetch_state, content, proxies_state = self.url_fetch(priority, url, keys, deep, repeat, proxies=proxies)
