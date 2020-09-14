@@ -262,5 +262,5 @@ class ThreadPool(object):
         return
 
     # by bunnyxt
-    def get_fetcher_fail_url_list(self):
+    def get_fail_url_list(self):
         return self._fail_url_list
