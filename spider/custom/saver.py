@@ -1,5 +1,4 @@
 from ..instances import Saver
-from db import DBOperation
 
 
 class FileSaver(Saver):
@@ -18,5 +17,10 @@ class DbSaver(Saver):
         self._session = get_session()
 
     def item_save(self, priority: int, url: str, keys: dict, deep: int, item: dict):
-        DBOperation.add(item, self._session)
+        try:
+            self._session.add(item)
+            self._session.commit()
+        except Exception as e:
+            self._session.rollback()
+            raise e
         return 1, None
