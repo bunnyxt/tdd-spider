@@ -12,39 +12,7 @@ def main():
 
     session = Session()
 
-    logger_51.info('13-1: update tdd_video_record_rank_weekly_base')
-
-    if time_label == '03:00' and get_week_day() == 5:
-        try:
-            # TODO test validity
-            # create table from tdd_video_record_hourly
-
-            # TODO move to history before drop
-            drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base_tmp'
-            session.execute(drop_tmp_table_sql)
-            logger_51.info(drop_tmp_table_sql)
-
-            hour_start_ts = str_to_ts_s(ts_s_to_str(get_ts_s())[:11] + '03:00:00')
-            create_tmp_table_sql = 'create table tdd_video_record_rank_weekly_base_tmp ' + \
-                                   'select * from tdd_video_record_hourly where added >= %d' % hour_start_ts
-            session.execute(create_tmp_table_sql)
-            logger_51.info(create_tmp_table_sql)
-
-            drop_old_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base'
-            session.execute(drop_old_table_sql)
-            logger_51.info(drop_old_table_sql)
-
-            rename_tmp_table_sql = 'rename table tdd_video_record_rank_weekly_base_tmp to ' + \
-                                   'tdd_video_record_rank_weekly_base'
-            session.execute(rename_tmp_table_sql)
-            logger_51.info(rename_tmp_table_sql)
-        except Exception as e:
-            session.rollback()
-            logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
-    else:
-        logger_51.info('13-1 done! not Sat 03:00 pass, no need to update tdd_video_record_rank_weekly_base')
-
-    logger_51.info('13-2: update tdd_video_record_rank_weekly_current')
+    logger_51.info('13-1: update tdd_video_record_rank_weekly_current')
 
     # get record base dict
     video_record_base_dict = DBOperation.query_video_record_rank_weekly_base_dict(session)
@@ -76,7 +44,6 @@ def main():
                 ))
             else:
                 logger_51.warning('incorrect line format, line: ' + line)
-    logger_51.info('video_record_now_list loaded from file')
 
     # get video videos(page), pubdate dict from db
     video_videos_pubdate_dict = DBOperation.query_video_videos_pubdate_dict(session)
@@ -192,9 +159,9 @@ def main():
         session.rollback()
         logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
 
-    logger_51.info('13-2: done! Finish updating tdd_video_record_rank_weekly_current')
+    logger_51.info('13-1: done! Finish updating tdd_video_record_rank_weekly_current')
 
-    logger_51.info('13-3: update tdd_video_record_rank_weekly_current_color')
+    logger_51.info('13-2: update tdd_video_record_rank_weekly_current_color')
 
     color_dict = {
         10: 'incr_view',
@@ -231,7 +198,90 @@ def main():
                         'where property = "%s"' % prop)
         session.commit()
 
-    logger_51.info('13-3: done! Finish updating tdd_video_record_rank_weekly_current_color')
+    logger_51.info('13-2: done! Finish updating tdd_video_record_rank_weekly_current_color')
+
+    logger_51.info('13-3: archive and update tdd_video_record_rank_weekly_base')
+
+    # Saturday 03:00, new week start, archive last week score and start new week
+    if time_label == '03:00' and get_week_day() == 5:
+        # TODO test validity
+        # create table from tdd_video_record_hourly
+
+        try:
+            # calc archive overview
+            ts_str = ts_s_to_str(get_ts_s())
+            end_ts = str_to_ts_s(ts_str[:11] + '03:00:00')
+            start_ts = end_ts - 7 * 24 * 60 * 60
+            arch_name = ts_str[:4] + ts_str[5:7] + ts_str[8:10]
+            session.execute('insert into tdd_video_record_rank_weekly_archive_overview (`name`, start_ts, end_ts) ' +
+                            'values ("%s", %d, %d)' % (arch_name, start_ts, end_ts))
+            session.commit()
+
+            # get arch id
+            result = session.query('select id from tdd_video_record_rank_weekly_archive_overview '
+                                   'where arch_name = "%s"' % arch_name)
+            arch_id = 0
+            for r in result:
+                arch_id = int(r[0])
+
+            # archive, just like add current, just add 1 more column called arch_id
+            logger_51.info('now archiving...')
+            video_record_weekly_archive_added_count = 0
+            rank = 1
+            for c in video_record_weekly_curr_list:
+                # dont use sql alchemy in order to save memory
+                sql = 'insert into tdd_video_record_rank_weekly_current_tmp values(' \
+                      '%d, "%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
+                      (arch_id, c[0], c[1], c[2],
+                       c[3], c[4], c[5], c[6], c[7], c[8], c[9],
+                       c[10], c[11], c[12], c[13], c[14], c[15], c[16],
+                       c[17], c[18], c[19],
+                       rank)
+                rank += 1
+                session.execute(sql)
+                video_record_weekly_archive_added_count += 1
+            session.commit()
+            logger_51.info(
+                'insert %d / %d done' % (video_record_weekly_archive_added_count, len(video_record_weekly_curr_list)))
+
+            # archive color
+            logger_51.info('now archiving color...')
+            result = session.query('select * from tdd_video_record_rank_weekly_current_color')
+            for r in result:
+                prop = str(r[0])
+                a = float(r[1])
+                b = float(r[2])
+                c = float(r[3])
+                d = float(r[4])
+                session.execute('insert into tdd_video_record_rank_weekly_archive_color values('
+                                '%d, "%s", %f, %f, %f, %f)' % (arch_id, prop, a, b, c, d))
+            session.commit()
+
+            # update base
+
+            drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base_tmp'
+            session.execute(drop_tmp_table_sql)
+            logger_51.info(drop_tmp_table_sql)
+
+            hour_start_ts = str_to_ts_s(ts_s_to_str(get_ts_s())[:11] + '03:00:00')
+            create_tmp_table_sql = 'create table tdd_video_record_rank_weekly_base_tmp ' + \
+                                   'select * from tdd_video_record_hourly where added >= %d' % hour_start_ts
+            session.execute(create_tmp_table_sql)
+            logger_51.info(create_tmp_table_sql)
+
+            drop_old_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base'
+            session.execute(drop_old_table_sql)
+            logger_51.info(drop_old_table_sql)
+
+            rename_tmp_table_sql = 'rename table tdd_video_record_rank_weekly_base_tmp to ' + \
+                                   'tdd_video_record_rank_weekly_base'
+            session.execute(rename_tmp_table_sql)
+            logger_51.info(rename_tmp_table_sql)
+        except Exception as e:
+            session.rollback()
+            logger_51.warning('Error occur when executing update tdd_video_record_rank_weekly_base. Detail: %s' % e)
+    else:
+        logger_51.info('13-3 done! not Sat 03:00 pass, no need to archive and update tdd_video_record_rank_weekly_base')
 
     session.close()
 
