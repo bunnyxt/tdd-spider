@@ -10,6 +10,13 @@ class Saver(object):
     class of Saver, must include function working()
     """
 
+    def __init__(self):
+        """
+        constructor
+        """
+        self._fail_urls = None  # by bunnyxt
+        return
+
     def working(self, priority: int, url: str, keys: dict, deep: int, item: object) -> (int, object):
         """
         working function, must "try, except" and don't change the parameters and returns
@@ -20,6 +27,9 @@ class Saver(object):
             save_state, result = self.item_save(priority, url, keys, deep, item)
         except Exception as excep:
             save_state, result = -1, [self.__class__.__name__, str(excep)]
+            # by bunnyxt
+            if save_state == -1 and self._fail_urls is not None:
+                self._fail_urls.append(url)
 
         return save_state, result
 

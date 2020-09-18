@@ -113,6 +113,8 @@ class ThreadPool(object):
         # by bunnyxt
         self._thread_parser._worker._fail_urls = self._fail_url_list  # TODO cannot receive urls from parser
         self._thread_saver = SaveThread("saver", self._inst_saver, self) if self._inst_saver else None
+        # by bunnyxt
+        self._thread_saver._worker._fail_urls = self._fail_url_list
         self._thread_proxieser = ProxiesThread("proxieser", self._inst_proxieser, self) if self._inst_proxieser else None
 
         for thread_fetcher in self._thread_fetcher_list:
