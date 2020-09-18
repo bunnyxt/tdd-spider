@@ -14,12 +14,13 @@ class FetchThread(BaseThread):
     class of FetchThread, as the subclass of BaseThread
     """
 
-    def __init__(self, name, worker, pool):
+    def __init__(self, name, worker, pool, fail_urls=None):
         """
         constructor
         """
         BaseThread.__init__(self, name, worker, pool)
         self._proxies = None
+        self._fail_urls = fail_urls
         return
 
     def working(self):
@@ -47,6 +48,8 @@ class FetchThread(BaseThread):
             self._pool.add_a_task(TPEnum.URL_FETCH, (priority, url, keys, deep, repeat+1))
         else:
             self._pool.update_number_dict(TPEnum.URL_FETCH_FAIL, +1)
+            if self._fail_urls is not None:
+                self._fail_urls.append(url)
             logging.error("%s error: %s, %s", content[0], content[1], CONFIG_ERROR_MESSAGE % (priority, get_dict_buildin(keys), deep, url))
 
         # ----*----

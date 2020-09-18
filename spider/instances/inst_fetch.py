@@ -39,9 +39,6 @@ class Fetcher(object):
             fetch_state, content, proxies_state = self.url_fetch(priority, url, keys, deep, repeat, proxies=proxies)
         except Exception as excep:
             fetch_state, content, proxies_state = (-1 if repeat >= self._max_repeat else 0), [self.__class__.__name__, str(excep)], -1
-            # by bunnyxt
-            if fetch_state == -1 and self._fail_urls is not None:
-                self._fail_urls.append(url)
 
         return fetch_state, content, proxies_state
 

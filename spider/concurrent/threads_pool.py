@@ -105,16 +105,9 @@ class ThreadPool(object):
         logging.warning("ThreadPool starts working: urls_count=%s, fetcher_num=%s", self.get_number_dict(TPEnum.URL_FETCH_NOT), fetcher_num)
         self._thread_stop_flag = False
 
-        self._thread_fetcher_list = [FetchThread("fetcher-%d" % (i+1), copy.deepcopy(self._inst_fetcher), self) for i in range(fetcher_num)]
-        # by bunnyxt
-        for _thread_fetcher in self._thread_fetcher_list:
-            _thread_fetcher._worker._fail_urls = self._fail_url_list
-        self._thread_parser = ParseThread("parser", self._inst_parser, self) if self._inst_parser else None
-        # by bunnyxt
-        self._thread_parser._worker._fail_urls = self._fail_url_list  # TODO cannot receive urls from parser
-        self._thread_saver = SaveThread("saver", self._inst_saver, self) if self._inst_saver else None
-        # by bunnyxt
-        self._thread_saver._worker._fail_urls = self._fail_url_list
+        self._thread_fetcher_list = [FetchThread("fetcher-%d" % (i+1), copy.deepcopy(self._inst_fetcher), self, self._fail_url_list) for i in range(fetcher_num)]
+        self._thread_parser = ParseThread("parser", self._inst_parser, self, self._fail_url_list) if self._inst_parser else None
+        self._thread_saver = SaveThread("saver", self._inst_saver, self, self._fail_url_list) if self._inst_saver else None
         self._thread_proxieser = ProxiesThread("proxieser", self._inst_proxieser, self) if self._inst_proxieser else None
 
         for thread_fetcher in self._thread_fetcher_list:
@@ -265,4 +258,7 @@ class ThreadPool(object):
 
     # by bunnyxt
     def get_fail_url_list(self):
+        """
+        get fail url list
+        """
         return self._fail_url_list

@@ -14,6 +14,14 @@ class SaveThread(BaseThread):
     class of SaveThread, as the subclass of BaseThread
     """
 
+    def __init__(self, name, worker, pool, fail_urls=None):
+        """
+        constructor
+        """
+        BaseThread.__init__(self, name, worker, pool)
+        self._fail_urls = fail_urls
+        return
+
     def working(self):
         """
         procedure of saving, auto running, and return True
@@ -32,6 +40,8 @@ class SaveThread(BaseThread):
             self._pool.update_number_dict(TPEnum.ITEM_SAVE_SUCC, +1)
         else:
             self._pool.update_number_dict(TPEnum.ITEM_SAVE_FAIL, +1)
+            if self._fail_urls is not None:
+                self._fail_urls.append(url)
             logging.error("%s error: %s, %s", result[0], result[1], CONFIG_ERROR_MESSAGE % (priority, get_dict_buildin(keys), deep, url))
 
         # ----5----

@@ -15,12 +15,13 @@ class ParseThread(BaseThread):
     class of ParseThread, as the subclass of BaseThread
     """
 
-    def __init__(self, name, worker, pool):
+    def __init__(self, name, worker, pool, fail_urls=None):
         """
         constructor
         """
         BaseThread.__init__(self, name, worker, pool)
         self._pool_multiprocssing = multiprocessing.Pool()
+        self._fail_urls = fail_urls
         return
 
     def working(self):
@@ -49,6 +50,8 @@ class ParseThread(BaseThread):
                     self._pool.add_a_task(TPEnum.ITEM_SAVE, (priority, url, keys, deep, item))
             else:
                 self._pool.update_number_dict(TPEnum.HTM_PARSE_FAIL, +1)
+                if self._fail_urls is not None:
+                    self._fail_urls.append(url)
                 logging.error("%s error: %s, %s", url_list[0], url_list[1], CONFIG_ERROR_MESSAGE % (priority, get_dict_buildin(keys), deep, url))
 
             # ----5----
