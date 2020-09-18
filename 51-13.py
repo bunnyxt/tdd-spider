@@ -218,19 +218,19 @@ def main():
             session.commit()
 
             # get arch id
-            result = session.query('select id from tdd_video_record_rank_weekly_archive_overview '
-                                   'where arch_name = "%s"' % arch_name)
+            result = session.execute('select `id` from tdd_video_record_rank_weekly_archive_overview ' +
+                                     'where `name` = "%s"' % arch_name)
             arch_id = 0
             for r in result:
                 arch_id = int(r[0])
 
-            # archive, just like add current, just add 1 more column called arch_id
-            logger_51.info('now archiving...')
+            # archive record, just like add current, just add 1 more column called arch_id
+            logger_51.info('now archiving record...')
             video_record_weekly_archive_added_count = 0
             rank = 1
             for c in video_record_weekly_curr_list:
                 # dont use sql alchemy in order to save memory
-                sql = 'insert into tdd_video_record_rank_weekly_current_tmp values(' \
+                sql = 'insert into tdd_video_record_rank_weekly_archive values(' \
                       '%d, "%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
                       (arch_id, c[0], c[1], c[2],
                        c[3], c[4], c[5], c[6], c[7], c[8], c[9],
@@ -243,19 +243,21 @@ def main():
             session.commit()
             logger_51.info(
                 'insert %d / %d done' % (video_record_weekly_archive_added_count, len(video_record_weekly_curr_list)))
+            logger_51.info('finish archive record!')
 
             # archive color
             logger_51.info('now archiving color...')
-            result = session.query('select * from tdd_video_record_rank_weekly_current_color')
+            result = session.execute('select * from tdd_video_record_rank_weekly_current_color')
             for r in result:
                 prop = str(r[0])
                 a = float(r[1])
                 b = float(r[2])
                 c = float(r[3])
                 d = float(r[4])
-                session.execute('insert into tdd_video_record_rank_weekly_archive_color values('
+                session.execute('insert into tdd_video_record_rank_weekly_archive_color values(' +
                                 '%d, "%s", %f, %f, %f, %f)' % (arch_id, prop, a, b, c, d))
             session.commit()
+            logger_51.info('finish archive color!')
 
             # update base
 
