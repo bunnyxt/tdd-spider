@@ -15,7 +15,7 @@ class BiliApi:
 
     def _url_request(self, method, url):
         if method in ['GET']:
-            response = self.http.request(method, url)
+            response = self.http.request(method, url, timeout=5)
             if response.status == 200:
                 try:
                     html = response.data.decode()
