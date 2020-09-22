@@ -77,9 +77,6 @@ def hour(time_label):
                 new_video_record.share = arch['stat']['share']
                 new_video_record.like = arch['stat']['like']
 
-                # add page for 13-2 use
-                new_video_record.page = arch['videos']
-
                 c30_new_video_record_list.append(new_video_record)
                 this_page_aids.append(arch['aid'])
 
