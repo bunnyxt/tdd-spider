@@ -191,7 +191,11 @@ def hour(time_label):
     c30_left_added_aids = []  # tid = 30 and code = 0, add new video record
 
     logger_51.info('got %d c30 left aids' % len(c30_left_aids))
-    for aid in c30_left_aids:
+
+    # TODO remove tmp limit 100
+    logger_51.info('tmp limit, select first 100 aids...')
+
+    for aid in c30_left_aids[:100]:  # TODO remove tmp 100 limit
         time.sleep(3)  # api duration banned
         # get view obj
         view_obj = get_valid(bapi.get_video_view, (aid,), test_video_view)
@@ -292,8 +296,11 @@ def hour(time_label):
     if time_label == '04:00':
         logger_51.info('got %d c30 not added records' % len(c30_not_added_record_list))
 
+        # TODO remove tmp limit 100
+        logger_51.info('tmp limit, select first 100 records...')
+
         # check not added record list
-        for record in c30_not_added_record_list:
+        for record in c30_not_added_record_list[:100]:  # TODO remove tmp 100 limit
             time.sleep(3)  # api duration banned
             aid = record.aid
             # add video
