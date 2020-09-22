@@ -136,7 +136,7 @@ def hour(time_label):
         c0_visited += 1
         if c0_visited % 10 == 0:
             logger_51.info('c0 aid add %d / %d done' % (c0_visited, len(need_insert_c0_aid_list)))
-        time.sleep(0.2)  # api duration banned
+        time.sleep(3)  # api duration banned
 
     logger_51.info('02 done! c0_total_aids count: %d, c0_success_aids count: %d, c0_fail_aids count: %d' % (
         len(need_insert_c0_aid_list), len(c0_success_aids), len(c0_fail_aids)))
@@ -192,7 +192,7 @@ def hour(time_label):
 
     logger_51.info('got %d c30 left aids' % len(c30_left_aids))
     for aid in c30_left_aids:
-        time.sleep(0.2)  # api duration banned
+        time.sleep(3)  # api duration banned
         # get view obj
         view_obj = get_valid(bapi.get_video_view, (aid,), test_video_view)
         if view_obj is None:
@@ -294,7 +294,7 @@ def hour(time_label):
 
         # check not added record list
         for record in c30_not_added_record_list:
-            time.sleep(0.2)  # api duration banned
+            time.sleep(3)  # api duration banned
             aid = record.aid
             # add video
             try:
