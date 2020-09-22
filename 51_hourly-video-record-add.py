@@ -52,20 +52,32 @@ def hour(time_label):
 
         try:
             # get obj via awesome api
+            _tmp_start = get_ts_s()
             obj = get_valid(bapi.get_archive_rank_by_partion, (30, page_num, 50), test_archive_rank_by_partion)
             if obj is None:
                 logger_51.warning('Page num %d fail! Cannot get valid obj.' % page_num)
                 page_num += 1
                 continue
+            _tmp_end = get_ts_s()
+            _tmp_delta = _tmp_end - _tmp_start
+            if _tmp_delta > 1:
+                logger_51.warning('task: fetch, page_num: %d, delta_ts: %d' % (page_num, _tmp_delta))
 
             added = get_ts_s()
             for arch in obj['data']['archives']:
+                _tmp_start = get_ts_s()
                 if arch['aid'] in last_page_aids:
                     # aid added in last page, continue
                     logger_51.warning('Aid %d already added in last page (page_num = %d).' % (arch['aid'], page_num - 1))
                     continue
+                _tmp_end = get_ts_s()
+                _tmp_delta = _tmp_end - _tmp_start
+                if _tmp_delta > 1:
+                    logger_51.warning('task: check_aid_in_last_page, page_num: %d, delta_ts: %d, aid: %d, len_last_page_aids: %d' % (
+                        page_num, _tmp_delta, arch['aid'], len(last_page_aids)))
 
                 # make new video record
+                _tmp_start = get_ts_s()
                 new_video_record = TddVideoRecord()
                 new_video_record.aid = arch['aid']
                 new_video_record.added = added
@@ -76,9 +88,20 @@ def hour(time_label):
                 new_video_record.coin = arch['stat']['coin']
                 new_video_record.share = arch['stat']['share']
                 new_video_record.like = arch['stat']['like']
+                _tmp_end = get_ts_s()
+                _tmp_delta = _tmp_end - _tmp_start
+                if _tmp_delta > 1:
+                    logger_51.warning('task: make_new_video_record, page_num: %d, delta_ts: %d, aid: %d' % (
+                        page_num, _tmp_delta, arch['aid']))
 
+                _tmp_start = get_ts_s()
                 c30_new_video_record_list.append(new_video_record)
                 this_page_aids.append(arch['aid'])
+                _tmp_end = get_ts_s()
+                _tmp_delta = _tmp_end - _tmp_start
+                if _tmp_delta > 1:
+                    logger_51.warning('task: append, page_num: %d, delta_ts: %d, aid: %d' % (
+                        page_num, _tmp_delta, arch['aid']))
 
             # assign this page aids to last page aids and reset it
             last_page_aids = this_page_aids
