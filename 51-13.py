@@ -212,7 +212,7 @@ def main():
             ts_str = ts_s_to_str(get_ts_s())
             end_ts = str_to_ts_s(ts_str[:11] + '03:00:00')
             start_ts = end_ts - 7 * 24 * 60 * 60
-            issue_num = (start_ts - 1599850800) / (7 * 24 * 60 * 60) + 425
+            issue_num = (start_ts - 1599850800) / (7 * 24 * 60 * 60) + 424
             arch_name = 'W' + ts_str[:4] + ts_str[5:7] + ts_str[8:10] + ' - #' + str(issue_num)
             session.execute('insert into tdd_video_record_rank_weekly_archive_overview (`name`, start_ts, end_ts) ' +
                             'values ("%s", %d, %d)' % (arch_name, start_ts, end_ts))
