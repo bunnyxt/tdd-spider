@@ -168,6 +168,7 @@ def add_video_via_bvid(bvid, bapi, session, test_exist=True, params=None, set_re
         new_video.desc = view_obj['data']['desc']
         new_video.mid = view_obj['data']['owner']['mid']
         new_video.code = view_obj['code']
+        new_video.attribute = view_obj['data']['attribute']
     else:
         # video code != 0
         raise InvalidObjCodeError(obj_name='view', code=view_obj['code'])
