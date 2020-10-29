@@ -9,36 +9,45 @@ __all__ = ['iter_get_archive_rank_by_partion']
 
 
 def iter_get_archive_rank_by_partion(tid, iter_func, colddown=0.1):
+    """
+
+    :param tid: api param, category id
+    :param iter_func: function to process each iter item, format: iter_func(iter_item, **iter_context)
+    :param colddown: api request interval colddown
+    :return:
+    """
     bapi = BiliApi()
 
     last_page_aids = []  # aids occurred in last page
     this_page_aids = []  # aids occurred in this page
 
     # get page total
-    obj = bapi.get_archive_rank_by_partion(tid, 1, 50)
-    page_total = math.ceil(obj['data']['page']['count'] / 50)
+    page_obj = bapi.get_archive_rank_by_partion(tid, 1, 50)
+    page_total = math.ceil(page_obj['data']['page']['count'] / 50)
     logging.info('%d page(s) found' % page_total)
 
     # iter loop
     page_num = 1
     while page_num <= page_total:
         try:
-            # get obj via get_archive_rank_by_partion api
-            obj = get_valid(bapi.get_archive_rank_by_partion, (30, page_num, 50), test_archive_rank_by_partion)
-            if obj is None:
+            # get page_obj via get_archive_rank_by_partion api
+            page_obj = get_valid(bapi.get_archive_rank_by_partion, (30, page_num, 50), test_archive_rank_by_partion)
+            if page_obj is None:
                 logging.warning('Page num %d fail! Cannot get valid obj.' % page_num)
                 page_num += 1
                 continue
 
-            added = get_ts_s()
-            for item in obj['data']['archives']:
-                aid = item['aid']
+            added = get_ts_s()  # api response ts (approximate)
+
+            # page_obj items iter loop
+            for iter_item in page_obj['data']['archives']:
+                aid = iter_item['aid']
                 if aid in last_page_aids:
-                    # aid occurred in last page, continue
+                    # aid occurred in last page, skip
                     logging.warning('Aid %d occurred in last page (page_num = %d).' % (aid, page_num - 1))
                     continue
 
-                iter_func(item, {added: added})  # iter_item, iter_context
+                iter_func(iter_item, added=added)  # iter_item, **iter_context
 
                 this_page_aids.append(aid)
 
