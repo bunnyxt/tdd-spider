@@ -168,7 +168,7 @@ def add_video_via_bvid(bvid, bapi, session, test_exist=True, params=None, set_re
         new_video.desc = view_obj['data']['desc']
         new_video.mid = view_obj['data']['owner']['mid']
         new_video.code = view_obj['code']
-        if view_obj['data']['attribute']:
+        if 'attribute' in view_obj['data'].keys():
             new_video.attribute = view_obj['data']['attribute']
     else:
         # video code != 0
@@ -398,7 +398,7 @@ def update_video_via_bvid(bvid, bapi, session):
             if view_obj['data']['owner']['mid'] != old_obj.mid:
                 video_update_logs.append(TddVideoLog(added, aid, bvid, 'mid', old_obj.mid, view_obj['data']['owner']['mid']))
                 old_obj.mid = view_obj['data']['owner']['mid']
-            if view_obj['data']['attribute']:
+            if 'attribute' in view_obj['data']['attribute']:
                 if view_obj['data']['attribute'] != old_obj.attribute:
                     video_update_logs.append(TddVideoLog(added, aid, bvid, 'attribute', old_obj.attribute, view_obj['data']['attribute']))
                     old_obj.attribute = view_obj['data']['attribute']
