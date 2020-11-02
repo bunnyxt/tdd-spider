@@ -8,9 +8,9 @@ __all__ = ['engine', 'Base', 'Session', 'create_all', 'drop_all', 'update_engine
 
 def get_engine():
     db_args = get_db_args()
-    conn_str = "mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8".format(
+    conn_str = "mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8mb4".format(
         db_args['user'], db_args['password'], db_args['host'], db_args['port'], db_args['dbname'])  # mysql
-    eng = create_engine(conn_str, encoding='utf-8', pool_recycle=7200)
+    eng = create_engine(conn_str, pool_recycle=7200)
     return eng
 
 
