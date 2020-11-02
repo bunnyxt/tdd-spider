@@ -52,16 +52,11 @@ def hour(time_label):
 
         try:
             # get obj via awesome api
-            _tmp_start = get_ts_s()
             obj = get_valid(bapi.get_archive_rank_by_partion, (30, page_num, 50), test_archive_rank_by_partion)
             if obj is None:
                 logger_51.warning('Page num %d fail! Cannot get valid obj.' % page_num)
                 page_num += 1
                 continue
-            _tmp_end = get_ts_s()
-            _tmp_delta = _tmp_end - _tmp_start
-            if _tmp_delta > 1:
-                logger_51.warning('task: fetch, page_num: %d, delta_ts: %d' % (page_num, _tmp_delta))
 
             added = get_ts_s()
             for arch in obj['data']['archives']:
