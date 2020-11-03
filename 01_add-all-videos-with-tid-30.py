@@ -20,7 +20,7 @@ def iter_func(iter_item, context, **iter_context):
         logging.warning(e)
     else:
         logging.info('Add new video %s' % new_video)
-        
+
         # add stat record, which comes from awesome api
         if 'stat' in iter_item.keys():
             stat = iter_item['stat']
