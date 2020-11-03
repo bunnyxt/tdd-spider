@@ -2,7 +2,7 @@ import datetime
 import time
 import math
 
-__all__ = ['get_ts_s', 'ts_s_to_str', 'str_to_ts_s', 'b2a', 'a2b', 'get_week_day', 'zk_calc']
+__all__ = ['get_ts_s', 'ts_s_to_str', 'str_to_ts_s', 'print_obj', 'b2a', 'a2b', 'get_week_day', 'zk_calc']
 
 
 def get_ts_s():

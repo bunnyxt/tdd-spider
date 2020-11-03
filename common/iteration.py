@@ -19,6 +19,12 @@ def iter_get_archive_rank_by_partion(tid, iter_func, context, start_page_num=1, 
     :return:
     """
     logging.info('Now iter get archive rank by partion api...')
+    logging.info('args: ')
+    logging.info('-- tid: %d' % tid)
+    logging.info('-- iter_func: %r' % iter_func)
+    logging.info('-- context: %r' % context)
+    logging.info('-- start_page_num: %d' % start_page_num)
+    logging.info('-- colddown: %d' % colddown)
 
     bapi = BiliApi()
 
