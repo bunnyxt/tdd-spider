@@ -20,6 +20,7 @@ def iter_func(iter_item, context, **iter_context):
         logging.warning(e)
     else:
         logging.info('Add new video %s' % new_video)
+        
         # add stat record, which comes from awesome api
         if 'stat' in iter_item.keys():
             stat = iter_item['stat']
@@ -30,7 +31,7 @@ def iter_func(iter_item, context, **iter_context):
             else:
                 logging.info('Add new video record %s' % new_video_record)
         else:
-            logging.warning('fail to get stat info of video with bvid %s from awesome api' % bvid)
+            logging.warning('Fail to get stat info of video with bvid %s from awesome api' % bvid)
 
 
 def main():
