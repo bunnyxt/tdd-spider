@@ -170,7 +170,8 @@ def main():
         13: 'incr_favorite',
         14: 'incr_coin',
         15: 'incr_share',
-        16: 'incr_like'
+        16: 'incr_like',
+        17: 'point',
     }
 
     for prop_idx, prop in color_dict.items():
