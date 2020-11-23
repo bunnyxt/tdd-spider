@@ -741,30 +741,30 @@ def hour(time_label):
     logger_51.info('10: insert into tdd video record hourly table')
 
     # use sql directly, combine 1000 records into one sql to execute and commit
-    new_video_record_hourly_added_count = 0
     sql_prefix = 'insert into ' \
                  'tdd_video_record_hourly(added, bvid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
                  'values '
     sql = sql_prefix
+    new_video_record_hourly_added_count = 0
+    new_video_record_list_count = len(new_video_record_list)
     for record in new_video_record_list:
         sql += '(%d, "%s", %d, %d, %d, %d, %d, %d, %d), ' % (
             record.added, a2b(record.aid),
             record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like
         )
-        session.execute(sql)
+        new_video_record_hourly_added_count += 1
         if new_video_record_hourly_added_count % 1000 == 0:
             sql = sql[:-2]  # remove ending comma and space
             session.execute(sql)
             session.commit()
-            if new_video_record_hourly_added_count % 10000 == 0:
-                logger_51.info('insert %d / %d done' % (new_video_record_hourly_added_count, len(new_video_record_list)))
             sql = sql_prefix
-        new_video_record_hourly_added_count += 1
+            if new_video_record_hourly_added_count % 10000 == 0:
+                logger_51.info('insert %d / %d done' % (new_video_record_hourly_added_count, new_video_record_list_count))
     if sql != sql_prefix:
         sql = sql[:-2]  # remove ending comma and space
         session.execute(sql)
         session.commit()
-    logger_51.info('insert %d / %d done' % (new_video_record_hourly_added_count, len(new_video_record_list)))
+    logger_51.info('insert %d / %d done' % (new_video_record_hourly_added_count, new_video_record_list_count))
 
     logger_51.info('10 done! Finish insert into tdd video record hourly table')
 
