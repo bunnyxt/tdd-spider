@@ -328,10 +328,14 @@ def hour(time_label):
     filename = '%s.csv' % task_label
     with open(data_folder + filename, 'w') as f:
         f.write('aid,added,view,danmaku,reply,favorite,coin,share,like\n')
+        idx = 0
         for record in new_video_record_list:
             f.write('%d,%d,%d,%d,%d,%d,%d,%d,%d\n'
                     % (record.aid, record.added, record.view, record.danmaku,
                        record.reply, record.favorite, record.coin, record.share, record.like))
+            idx += 1
+            if idx % 10000 == 0:
+                logger_51.info('%d done' % idx)
     index_filename = data_folder + 'index.txt'
     with open(index_filename, 'a') as f:
         f.write('%s\n' % filename)
