@@ -2,7 +2,7 @@ import datetime
 import time
 import math
 
-__all__ = ['get_ts_s', 'ts_s_to_str', 'str_to_ts_s', 'print_obj', 'b2a', 'a2b', 'get_week_day', 'zk_calc']
+__all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s', 'print_obj', 'b2a', 'a2b', 'get_week_day', 'zk_calc']
 
 
 def get_ts_s():
@@ -11,6 +11,10 @@ def get_ts_s():
 
 def ts_s_to_str(ts):
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+
+
+def get_ts_s_str():
+    return ts_s_to_str(get_ts_s())
 
 
 def str_to_ts_s(s, mask='%Y-%m-%d %H:%M:%S'):
