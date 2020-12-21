@@ -820,8 +820,11 @@ def hour(time_label):
 
     if time_label == '23:00':
         try:
-            session.execute('drop table if exists tdd_video_record_hourly_3')
-            logger_51.info('drop table tdd_video_record_hourly_3')
+            session.execute('drop table if exists tdd_video_record_hourly_4')
+            logger_51.info('drop table tdd_video_record_hourly_4')
+
+            session.execute('rename table tdd_video_record_hourly_3 to tdd_video_record_hourly_4')
+            logger_51.info('rename table tdd_video_record_hourly_3 to tdd_video_record_hourly_4')
 
             session.execute('rename table tdd_video_record_hourly_2 to tdd_video_record_hourly_3')
             logger_51.info('rename table tdd_video_record_hourly_2 to tdd_video_record_hourly_3')
