@@ -44,9 +44,9 @@ class BiliApi:
     def get_video_tags(self, aid):
         return self._url_request('GET', 'http://api.bilibili.com/x/tag/archive/tags?aid={0}'.format(aid))
 
-    def get_video_tags_via_bvid(self, aid):
+    def get_video_tags_via_bvid(self, bvid):
         # bvid with BV/bv prefix is also acceptable
-        return self._url_request('GET', 'http://api.bilibili.com/x/tag/archive/tags?bvid={0}'.format(aid))
+        return self._url_request('GET', 'http://api.bilibili.com/x/tag/archive/tags?bvid={0}'.format(bvid))
 
     def get_video_pagelist(self, aid):
         return self._url_request('GET', 'http://api.bilibili.com/x/player/pagelist?aid={0}'.format(aid))
