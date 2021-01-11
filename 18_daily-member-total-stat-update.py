@@ -1,14 +1,15 @@
 import schedule
-from logger import logger_18
+import logging
+from logutils import logging_init
 import time
 import threading
-from db import DBOperation, Session, TddMemberTotalStatRecord
+from db import Session, TddMemberTotalStatRecord
 from util import get_ts_s, ts_s_to_str
 from serverchan import sc_send
 
 
 def daily_member_total_stat_update():
-    logger_18.info('Now start daily member total stat update...')
+    logging.info('Now start daily member total stat update...')
 
     session = Session()
 
@@ -22,7 +23,7 @@ def daily_member_total_stat_update():
         result = session.execute(sql)
         result = [[r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]] for r in result]
         result_len = len(result)
-        logger_18.info('%d result got' % result_len)
+        logging.info('%d result got' % result_len)
 
         mid_dict = {}
         for r in result:
@@ -45,7 +46,7 @@ def daily_member_total_stat_update():
             count += 1
             if count % 100 == 0:
                 session.commit()
-                logger_18.info('%d / %d added' % (count, mid_dict_len))
+                logging.info('%d / %d added' % (count, mid_dict_len))
 
         finish_ts = get_ts_s()
 
@@ -58,18 +59,18 @@ def daily_member_total_stat_update():
             'mid dict len: %d\n\n' % mid_dict_len + \
             'by.bunnyxt, %s' % ts_s_to_str(get_ts_s())
 
-        logger_18.info('Finish daily member total stat update!')
+        logging.info('Finish daily member total stat update!')
 
-        logger_18.warning(summary)
+        logging.info(summary)
 
         # send sc
         sc_result = sc_send('Finish daily member total stat update!', summary)
         if sc_result['errno'] == 0:
-            logger_18.info('Sc summary sent successfully.')
+            logging.info('Sc summary sent successfully.')
         else:
-            logger_18.warning('Sc summary sent wrong. sc_result = %s.' % sc_result)
+            logging.warning('Sc summary sent wrong. sc_result = %s.' % sc_result)
     except Exception as e:
-        logger_18.exception(e)
+        logging.exception(e)
 
     session.close()
 
@@ -79,9 +80,9 @@ def daily_member_total_stat_update_task():
 
 
 def main():
-    logger_18.info('18: daily member total stat update')
-    # daily_member_total_stat_update_task()  # debug
-    schedule.every().day.at("04:45").do(daily_member_total_stat_update_task)  # ensure do after 11 update
+    logging.info('18: daily member total stat update')
+    logging.info('will execute everyday at 04:45')
+    schedule.every().day.at("04:45").do(daily_member_total_stat_update_task)  # ensure do after daily 0400 update
 
     while True:
         schedule.run_pending()
@@ -89,4 +90,5 @@ def main():
 
 
 if __name__ == '__main__':
+    logging_init(file_prefix='18')
     main()
