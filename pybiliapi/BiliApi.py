@@ -70,11 +70,11 @@ class BiliApi:
                 except Exception:
                     continue
                 else:
-                    logging.warning(proxy_trial_index)
+                    logging.debug('[BiliApi] Get valid response at %d proxy trial(s).' % proxy_trial_index)
                     self._last_valid_proxy_url = proxy_url
                     return obj
 
-            logging.warning('[BiliApi] Fail to get valid response after %d proxy trials' % self.max_proxy_trial)
+            logging.warning('[BiliApi] Fail to get valid response after %d proxy trials.' % self.max_proxy_trial)
             return None
         else:
             response = self.http.request(method, url, timeout=self.timeout, retries=self.retries)
