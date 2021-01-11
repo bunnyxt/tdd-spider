@@ -1,5 +1,6 @@
 import urllib3
 import json
+import logging
 
 __all__ = ['BiliApi']
 
@@ -22,13 +23,13 @@ class BiliApi:
                     obj = json.loads(html)
                     return obj
                 except Exception as e:
-                    print(e)
+                    logging.warning('[BiliApi] Exception occurred during decode and parse json! %s' % e)
                     return None
             else:
-                print('Error! Fail to get response with status code %d.' % response.status)
+                logging.warning('[BiliApi] Error! Fail to get response with status code %d.' % response.status)
                 return None
         else:
-            print('Error! Method %s not support.' % method)
+            logging.warning('[BiliApi] Error! Method %s not support.' % method)
             return None
 
     def set_headers(self, headers):
