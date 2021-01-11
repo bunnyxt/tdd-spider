@@ -52,7 +52,11 @@ class BiliApi:
         if self.use_proxy:
             for proxy_trial_index in range(1, self.max_proxy_trial+1):
                 # get proxy url
-                proxy_url = self._last_valid_proxy_url if self._last_valid_proxy_url else self._get_proxy_url()
+                if self._last_valid_proxy_url:
+                    proxy_url = self._last_valid_proxy_url
+                    self._last_valid_proxy_url = None
+                else:
+                    proxy_url = self._get_proxy_url()
                 if not proxy_url:
                     logging.critical('[BiliApi] Error! Cannot connect to proxy pool at %s.' % self.proxy_pool_url)
                     exit(1)
