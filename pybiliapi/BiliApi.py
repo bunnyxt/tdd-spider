@@ -23,7 +23,7 @@ class BiliApi:
             # check proxy pool url
             proxy_url = self._get_proxy_url()
             if not proxy_url:
-                logging.critical('[BiliApi] Error! Cannot connect to proxy pool at %s' % self.proxy_pool_url)
+                logging.critical('[BiliApi] Error! Cannot connect to proxy pool at %s.' % self.proxy_pool_url)
                 exit(1)
             self._last_valid_proxy_url = None
         else:
@@ -36,11 +36,13 @@ class BiliApi:
             logging.warning('[BiliApi] Error! Cannot get proxy url in direct mode.')
             return None
 
-        r = self.http.request('GET', self.proxy_pool_url)
-        if r.status == 200:
+        try:
+            r = self.http.request('GET', self.proxy_pool_url)
+            if r.status != 200:
+                raise Exception
             proxy_url = r.data.decode()
             return 'http%s://%s' % ('s' if https else '', proxy_url)
-        else:
+        except Exception:
             logging.warning('[BiliApi] Error! Fail to get proxy url from proxy pool %s.' % self.proxy_pool_url)
             return None
 
@@ -81,17 +83,16 @@ class BiliApi:
             logging.warning('[BiliApi] Fail to get valid response after %d proxy trials.' % self.max_proxy_trial)
             return None
         else:
-            response = self.http.request(method, url, timeout=self.timeout, retries=self.retries)
-            if response.status != 200:
-                logging.warning('[BiliApi] Error! Fail to get response with status code %d.' % response.status)
-                return None
-
             try:
+                response = self.http.request(method, url, timeout=self.timeout, retries=self.retries)
+                if response.status != 200:
+                    logging.warning('[BiliApi] Error! Fail to get response with status code %d.' % response.status)
+                    return None
                 html = response.data.decode()
                 obj = json.loads(html)
                 return obj
             except Exception as e:
-                logging.warning('[BiliApi] Exception occurred during decode and parse json! %s' % e)
+                logging.warning('[BiliApi] Exception occurred during request, decode and parse json! %s' % e)
                 return None
 
     def get_video_view(self, aid):
