@@ -18,7 +18,7 @@ class BiliApi:
             self.use_proxy = True
             self.proxy_pool_url = proxy_pool_url
             self.max_proxy_trial = 50
-            self.timeout = 3
+            self.timeout = 2  # may have risk of missing valid proxy, but reduce seeking proxy time!
             self.retries = 1
             # check proxy pool url
             proxy_url = self._get_proxy_url()
