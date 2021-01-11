@@ -1,6 +1,7 @@
 import schedule
 import time
-from logger import logger_13
+import logging
+from logutils import logging_init
 from util import get_ts_s
 from db import Session, DBOperation, TddStatDaily
 
@@ -21,16 +22,16 @@ def daily_stat_add_task():
         new_stat_daily.video_record_count = video_record_count
         DBOperation.add(new_stat_daily, session)
 
-        logger_13.info('Add %r' % new_stat_daily)
+        logging.info('add %r' % new_stat_daily)
     except Exception as e:
-        logger_13.warning(e)
+        logging.warning(e)
 
     session.close()
 
 
 def main():
-    logger_13.info('Daily stat add registered.')
-    # daily_stat_add_task()
+    logging.info('13: daily stat add')
+    logging.info('will execute everyday at 06:00')
     schedule.every().day.at("06:00").do(daily_stat_add_task)
 
     while True:
@@ -39,4 +40,5 @@ def main():
 
 
 if __name__ == '__main__':
+    logging_init(file_prefix='13')
     main()
