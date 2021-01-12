@@ -13,3 +13,4 @@ data/
 
 library/
 test*
+.ipynb_checkpoints/
