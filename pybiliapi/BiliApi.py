@@ -1,6 +1,7 @@
 import urllib3
 import json
 import logging
+logger = logging.getLogger('BiliApi')
 
 __all__ = ['BiliApi']
 
@@ -23,8 +24,8 @@ class BiliApi:
             # check proxy pool url
             proxy_url = self._get_proxy_url()
             if not proxy_url:
-                logging.critical('[BiliApi] Error! Cannot connect to proxy pool at %s.' % self.proxy_pool_url)
-                exit(1)
+                logger.critical('Error! Cannot connect to proxy pool at %s.' % self.proxy_pool_url)
+                raise ConnectionError('Cannot connect to proxy pool at %s.' % self.proxy_pool_url)
             self._last_valid_proxy_url = None
         else:
             self.use_proxy = False
@@ -33,7 +34,7 @@ class BiliApi:
 
     def _get_proxy_url(self, https=False):
         if not self.use_proxy:
-            logging.warning('[BiliApi] Error! Cannot get proxy url in direct mode.')
+            logger.warning('Error! Cannot get proxy url in direct mode.')
             return None
 
         try:
@@ -43,12 +44,12 @@ class BiliApi:
             proxy_url = r.data.decode()
             return 'http%s://%s' % ('s' if https else '', proxy_url)
         except Exception:
-            logging.warning('[BiliApi] Error! Fail to get proxy url from proxy pool %s.' % self.proxy_pool_url)
+            logger.warning('Fail to get proxy url from proxy pool %s.' % self.proxy_pool_url)
             return None
 
     def _url_request(self, method, url):
         if method not in ['GET']:
-            logging.warning('[BiliApi] Error! Method %s not support.' % method)
+            logger.warning('Method %s not support.' % method)
             return None
 
         if self.use_proxy:
@@ -56,12 +57,12 @@ class BiliApi:
                 # get proxy url
                 if self._last_valid_proxy_url:
                     proxy_url = self._last_valid_proxy_url
-                    self._last_valid_proxy_url = None
+                    self._last_valid_proxy_url = None  # set to None to ensure only use once
                 else:
                     proxy_url = self._get_proxy_url()
                 if not proxy_url:
-                    logging.critical('[BiliApi] Error! Cannot connect to proxy pool at %s.' % self.proxy_pool_url)
-                    exit(1)
+                    logger.critical('Cannot connect to proxy pool at %s.' % self.proxy_pool_url)
+                    raise ConnectionError('Cannot connect to proxy pool at %s.' % self.proxy_pool_url)
 
                 # create proxy http
                 http = urllib3.ProxyManager(proxy_url)
@@ -74,25 +75,26 @@ class BiliApi:
                     html = response.data.decode()
                     obj = json.loads(html)
                 except Exception:
+                    logger.debug('Fail to get valid response at %d proxy trial(s).' % proxy_trial_index)
                     continue
                 else:
-                    logging.debug('[BiliApi] Get valid response at %d proxy trial(s).' % proxy_trial_index)
+                    logger.debug('Get valid response at %d proxy trial(s).' % proxy_trial_index)
                     self._last_valid_proxy_url = proxy_url
                     return obj
 
-            logging.warning('[BiliApi] Fail to get valid response after %d proxy trials.' % self.max_proxy_trial)
+            logger.warning('Fail to get valid response after %d proxy trials.' % self.max_proxy_trial)
             return None
         else:
             try:
                 response = self.http.request(method, url, timeout=self.timeout, retries=self.retries)
                 if response.status != 200:
-                    logging.warning('[BiliApi] Error! Fail to get response with status code %d.' % response.status)
+                    logger.warning('Fail to get response with status code %d.' % response.status)
                     return None
                 html = response.data.decode()
                 obj = json.loads(html)
                 return obj
             except Exception as e:
-                logging.warning('[BiliApi] Exception occurred during request, decode and parse json! %s' % e)
+                logger.warning('Exception occurred during request, decode and parse json! %s' % e)
                 return None
 
     def get_video_view(self, aid):
