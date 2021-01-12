@@ -517,7 +517,7 @@ def update_member(mid, bapi, session):
             if member_obj['data']['name'] != old_obj.name:
                 member_update_logs.append(TddMemberLog(added, mid, 'name', old_obj.name, member_obj['data']['name']))
                 old_obj.name = member_obj['data']['name']
-            if member_obj['data']['face'] != old_obj.face:
+            if member_obj['data']['face'][-44:] != old_obj.face[-44:]:  # remove prefix, just compare last 44 character
                 member_update_logs.append(TddMemberLog(added, mid, 'face', old_obj.face, member_obj['data']['face']))
                 old_obj.face = member_obj['data']['face']
             if member_obj['data']['sign'] != old_obj.sign:
