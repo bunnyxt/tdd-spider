@@ -29,7 +29,7 @@ def regularly_update_member_info():
     change_count = 0
     change_log_count = 0
 
-    for mid in mids:
+    for i, mid in enumerate(mids, 1):
         try:
             tdd_member_logs = update_member(mid, bapi_with_proxy, session)
         except TddCommonError as e:
@@ -47,6 +47,10 @@ def regularly_update_member_info():
                 logging.info('%d, %s, %s, %s' % (log.mid, log.attr, log.oldval, log.newval))
                 change_log_count += 1
             logging.debug('Finish update member info mid %d' % mid)
+        finally:
+            if i % 1000 == 0:
+                logging.info('%d / %d done' % (i, total_count))
+    logging.info('%d / %d done' % (total_count, total_count))
 
     # get finish ts
     finish_ts = get_ts_s()
