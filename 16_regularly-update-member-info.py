@@ -1,7 +1,6 @@
 import schedule
 import threading
 import time
-import logging
 from logutils import logging_init
 from db import DBOperation, Session
 from pybiliapi import BiliApi
@@ -9,10 +8,12 @@ from common import update_member, TddCommonError
 from serverchan import sc_send
 from util import get_ts_s, ts_s_to_str
 from conf import get_proxy_pool_url
+import logging
+logger = logging.getLogger('16')
 
 
 def regularly_update_member_info():
-    logging.info('Now start update member info...')
+    logger.info('Now start update member info...')
     start_ts = get_ts_s()  # get start ts
 
     session = Session()
@@ -20,7 +21,7 @@ def regularly_update_member_info():
 
     # get all mids
     mids = DBOperation.query_all_member_mids(session)
-    logging.info('%d mids got' % len(mids))
+    logger.info('%d mids got' % len(mids))
 
     total_count = len(mids)
     tdd_common_error_count = 0
@@ -33,10 +34,10 @@ def regularly_update_member_info():
         try:
             tdd_member_logs = update_member(mid, bapi_with_proxy, session)
         except TddCommonError as e:
-            logging.error('Fail to update member info mid %d, TddCommonError Detail: %s' % (mid, e))
+            logger.error('Fail to update member info mid %d, TddCommonError Detail: %s' % (mid, e))
             tdd_common_error_count += 1
         except Exception as e:
-            logging.error('Fail to update member info mid %d, Exception Detail: %s' % (mid, e))
+            logger.error('Fail to update member info mid %d, Exception Detail: %s' % (mid, e))
             other_exception_count += 1
         else:
             if len(tdd_member_logs) == 0:
@@ -44,13 +45,13 @@ def regularly_update_member_info():
             else:
                 change_count += 1
             for log in tdd_member_logs:
-                logging.info('%d, %s, %s, %s' % (log.mid, log.attr, log.oldval, log.newval))
+                logger.info('%d, %s, %s, %s' % (log.mid, log.attr, log.oldval, log.newval))
                 change_log_count += 1
-            logging.debug('Finish update member info mid %d' % mid)
+            logger.debug('Finish update member info mid %d' % mid)
         finally:
             if i % 1000 == 0:
-                logging.info('%d / %d done' % (i, total_count))
-    logging.info('%d / %d done' % (total_count, total_count))
+                logger.info('%d / %d done' % (i, total_count))
+    logger.info('%d / %d done' % (total_count, total_count))
 
     # get finish ts
     finish_ts = get_ts_s()
@@ -68,14 +69,14 @@ def regularly_update_member_info():
         'change log count: %d\n\n' % change_log_count + \
         'by.bunnyxt, %s' % ts_s_to_str(get_ts_s())
 
-    logging.info('Finish update member info!')
+    logger.info('Finish update member info!')
 
     # send sc
     sc_result = sc_send('Finish update member info!', summary)
     if sc_result['errno'] == 0:
-        logging.info('Sc summary sent: succeed!')
+        logger.info('Sc summary sent: succeed!')
     else:
-        logging.warning('Sc summary sent: failed! sc_result = %s.' % sc_result)
+        logger.warning('Sc summary sent: failed! sc_result = %s.' % sc_result)
 
     session.close()
 
@@ -85,8 +86,8 @@ def regularly_update_member_info_task():
 
 
 def main():
-    logging.info('16: regularly update member info')
-    logging.info('will execute everyday at 00:00')
+    logger.info('16: regularly update member info')
+    logger.info('will execute everyday at 00:00')
     schedule.every().day.at('00:00').do(regularly_update_member_info_task)
 
     while True:
