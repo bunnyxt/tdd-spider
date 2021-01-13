@@ -39,15 +39,61 @@
 
 ## 运行
 
-// TODO nohup python -u xxxx >/dev/null 2>&1 &
+本全自动定时数据采集系统由一系列脚本组成，基本用法为：
 
-// TODO 直接写脚本算了  run_start.sh xxxx  run_ls.sh  run_stop.sh xxxx
+```shell
+python <script-name.py>
+```
 
-## 脚本介绍
+绝大多数脚本为定时脚本，即会每隔一段时间（或者在某个预设的时间点）运行，因此脚本需要常驻后台一直运行。`Linux`下建议使用`nohup + &`实现后台运行，即：
 
-// TODO 从01开始，所有脚本干啥的
+```shell
+python -u <script-name.py> >/dev/null 2>&1 &
+```
+
+说明：
+
+- `python -u`表示强制脚本的标准输出也同标准错误一样不通过缓存直接打印到屏幕，此处建议设置`-u`以防止有时候出现日志没有及时输出的情况。
+- 本系统绝大多数脚本使用配置过的`logging`输出日志，默认会将日志保存到`log`文件夹下，因此后台运行时，输出到控制台的日志完全可以直接丢弃，即`>/dev/null 2>&1`。
+
+使用`nohup + &`将脚本后台运行后，需要使用`ps -aux | grep 'python -u <script-name.py>'`来查看运行状况，并通过`kill`结束进程的方式结束执行。
+
+由于启动后台运行、查看运行情况、结束后台脚本运行等操作的执行频率很高，但指令很长容易打错，因此可以使用以下三个脚本简化操作：
+
+启动后台运行
+
+```shell script
+./run_start.sh <script-name.py>
+```
+
+查看后台运行情况
+
+```shell script
+./run_ps.sh
+```
+
+结束后台脚本运行
+
+```shell script
+./run_kill.sh <pid>
+```
+
+## 脚本列表
+
+本系统内置了一些定时数据获取或处理脚本，位于根目录下，文件名满足`数字+下划线+由短横线连接的英文单词+.py`格式，例如`16_daily-update-member-info.py`。这里对这些内置的脚本做一个简单的介绍。
+
+首先解释一下文件名的含义：
+
+- 下划线前的数字为`脚本编号`，通常功能相似的脚本由相同的编号前缀（如`0`开头的表示初始化脚本，`1`开头表示涉及到BiliBili API访问的定时脚本等等）
+- 下划线后的由`-`连接的英语词组为该脚本的
+
+// TODO
 
 ## 自定义脚本
+
+内置脚本仅满足当前系统运行需要。当然，用户也可以自定义脚本，以满足未来的或者临时的需求。
+
+注意：为了方便使用`run_xxx.sh`系列工具管理，建议仿照上文提到的内置脚本的命名规范，给自定义脚本命名。
 
 // TODO 实质就是调用模块，给一个直接调用的例子，一个定时任务的例子，一个jupyter notebook的例子
 
@@ -85,4 +131,4 @@
 - Twitter [@bunnyxt29](https://twitter.com/bunnyxt29)
 - Email <a href="mailto:bunnyxt@outlook.com">bunnyxt@outlook.com</a>
 
-by. bunnyxt 2021-01-12
+by. bunnyxt 2021-01-14
