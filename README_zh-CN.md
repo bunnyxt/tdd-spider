@@ -14,9 +14,9 @@
 
 整个项目天然解耦为三个部分，通过中心数据库相连，这三个部分分别是：
 
-- 前端：数据展示与交互（[tdd-frontend](https://github.com/bunnyxt/tdd-frontend) ）
-- 后端：数据获取接口（[tdd-backend](https://github.com/bunnyxt/tdd-backend) ）
-- 爬虫：原始数据采集（tdd-spider ）
+- 前端：数据展示与交互（[tdd-frontend](https://github.com/bunnyxt/tdd-frontend)）
+- 后端：数据获取接口（[tdd-backend](https://github.com/bunnyxt/tdd-backend)）
+- 爬虫：原始数据采集（tdd-spider）
 
 整体结构如图所示
 
@@ -26,7 +26,7 @@
 
 1. 下载代码，`git clone https://github.com/bunnyxt/tdd-spider.git && cd tdd-spider`。
 2. 配置`Python 3.5+`环境（强烈推荐使用`virtualenv`或`conda`新建虚拟环境以避免依赖冲突），运行`pip install -r requirements.txt`安装依赖。
-3. 安装[ProxyPool](https://github.com/Python3WebSpider/ProxyPool) ，为了尽可能提高IP的可用性，配置以下环境变量
+3. 安装[ProxyPool](https://github.com/Python3WebSpider/ProxyPool)，为了尽可能提高IP的可用性，配置以下环境变量
     ```yaml
     CYCLE_TESTER: 10
     CYCLE_GETTER: 60
@@ -35,13 +35,41 @@
     TEST_BATCH: 100
     ```
     PS：推荐使用`docker`方式使用，并在`docker-compose.yml`文件底部`environment`之后粘贴以上环境变量配置，配置完成后使用`nohup docker-compose up &`在后台启动ProxyPool服务。
-4. 打开`conf/conf.ini`文件，填写配置，包括数据库连接（`MySQL 5.7.30`）、Server酱SCKEY（获取方式见[Server酱首页](http://sc.ftqq.com/3.version) ）、ProxyPool地址（默认[http://localhost:5555/random](http://localhost:5555/random) ）等。
+4. 打开`conf/conf.ini`文件，填写配置，包括数据库连接（`MySQL 5.7.30`）、Server酱SCKEY（获取方式见[Server酱首页](http://sc.ftqq.com/3.version)）、ProxyPool地址（默认[http://localhost:5555/random](http://localhost:5555/random)）等。
 
 ## 运行
 
-// TODO
+// TODO nohup python -u xxxx >/dev/null 2>&1 &
 
-## 文档
+// TODO 直接写脚本算了  run_start.sh xxxx  run_ls.sh  run_stop.sh xxxx
+
+## 脚本介绍
+
+// TODO 从01开始，所有脚本干啥的
+
+## 自定义脚本
+
+// TODO 实质就是调用模块，给一个直接调用的例子，一个定时任务的例子，一个jupyter notebook的例子
+
+## 模块文档
+
+### common
+
+### conf
+
+### db
+
+### logger
+
+### logutils
+
+### pybiliapi
+
+### serverchan
+
+### spider
+
+### util
 
 // TODO
 
