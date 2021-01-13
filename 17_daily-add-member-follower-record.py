@@ -28,8 +28,8 @@ def create_web_spider(sequential=False):
     return web_spider
 
 
-def daily_add_member_follower_record():
-    logger.info('Now start daily add member follower record...')
+def add_member_follower_record():
+    logger.info('Now start add member follower record...')
 
     start_ts = get_ts_s()
 
@@ -94,15 +94,15 @@ def daily_add_member_follower_record():
     logger.info('timespan %d min' % ((end_ts - start_ts) // 60))
 
 
-def daily_add_member_follower_record_task():
-    threading.Thread(target=daily_add_member_follower_record).start()
+def add_member_follower_record_task():
+    threading.Thread(target=add_member_follower_record).start()
 
 
 def main():
     # TODO get rid of spyder, use custom pipeline
     logger.info('17: daily add member follower record')
     logger.info('will execute everyday at 11:20')
-    schedule.every().day.at('11:20').do(daily_add_member_follower_record_task)
+    schedule.every().day.at('11:20').do(add_member_follower_record_task)
 
     while True:
         schedule.run_pending()

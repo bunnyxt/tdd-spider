@@ -12,7 +12,7 @@ import logging
 logger = logging.getLogger('15')
 
 
-def regularly_update_video_info():
+def update_video_info():
     logger.info('Now start update video info...')
     start_ts = get_ts_s()  # get start ts
 
@@ -92,14 +92,14 @@ def regularly_update_video_info():
     session.close()
 
 
-def regularly_update_video_info_task():
-    threading.Thread(target=regularly_update_video_info).start()
+def update_video_info_task():
+    threading.Thread(target=update_video_info).start()
 
 
 def main():
-    logger.info('15: regularly update video info')
+    logger.info('15: daily update video info')
     logger.info('will execute everyday at 06:00')
-    schedule.every().day.at('06:00').do(regularly_update_video_info_task)
+    schedule.every().day.at('06:00').do(update_video_info_task)
 
     while True:
         schedule.run_pending()

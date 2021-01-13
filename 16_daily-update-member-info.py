@@ -12,7 +12,7 @@ import logging
 logger = logging.getLogger('16')
 
 
-def regularly_update_member_info():
+def update_member_info():
     logger.info('Now start update member info...')
     start_ts = get_ts_s()  # get start ts
 
@@ -81,14 +81,14 @@ def regularly_update_member_info():
     session.close()
 
 
-def regularly_update_member_info_task():
-    threading.Thread(target=regularly_update_member_info).start()
+def update_member_info_task():
+    threading.Thread(target=update_member_info).start()
 
 
 def main():
-    logger.info('16: regularly update member info')
+    logger.info('16: daily update member info')
     logger.info('will execute everyday at 00:00')
-    schedule.every().day.at('00:00').do(regularly_update_member_info_task)
+    schedule.every().day.at('00:00').do(update_member_info_task)
 
     while True:
         schedule.run_pending()
