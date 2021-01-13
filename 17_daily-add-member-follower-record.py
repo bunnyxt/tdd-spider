@@ -1,9 +1,13 @@
 from spider import WebSpider
 from spider.custom import ApiFetcher, TddMemberFollowerRecordParser, DbSaver, LocalProxieser
-import logging
 from db import DBOperation, Session
 from util import get_ts_s, ts_s_to_str
-# from spider.custom import FileSaver
+import schedule
+import time
+import threading
+from logutils import logging_init
+import logging
+logger = logging.getLogger('17')
 
 
 def create_web_spider(sequential=False):
@@ -13,20 +17,20 @@ def create_web_spider(sequential=False):
         web_spider = WebSpider(fetcher=ApiFetcher(sleep_time=3, max_repeat=3),
                                parser=TddMemberFollowerRecordParser(),
                                saver=DbSaver(get_session=Session),
-                               # saver=FileSaver(filename='17_save.log'),
                                queue_parse_size=200)
     else:
         # for main fetch
         web_spider = WebSpider(fetcher=ApiFetcher(sleep_time=0, max_repeat=10),
                                parser=TddMemberFollowerRecordParser(),
                                saver=DbSaver(get_session=Session),
-                               # saver=FileSaver(filename='17_save.log'),
                                proxieser=LocalProxieser(sleep_time=5, proxy_num=100),
                                queue_parse_size=200, queue_proxies_size=500)
     return web_spider
 
 
-def spider_17():
+def daily_add_member_follower_record():
+    logger.info('Now start daily add member follower record...')
+
     start_ts = get_ts_s()
 
     # load all mids
@@ -53,14 +57,14 @@ def spider_17():
             web_spider.put_item_to_queue_fetch(1, url, {}, 0, 0)
 
         # launch web spider
-        logging.warning('spyder round %d start, url total %d' % (spyder_round, left_url_num))
+        logger.info('spyder round %d start, url total %d' % (spyder_round, left_url_num))
         web_spider.start_working(fetcher_num=50)
         web_spider.wait_for_finished()
 
         # update left urls
         left_url_list = web_spider.get_fail_url_list()
         left_url_num = len(left_url_list)
-        logging.warning('spyder round %d done, url left %d' % (spyder_round, left_url_num))
+        logger.info('spyder round %d done, url left %d' % (spyder_round, left_url_num))
         spyder_round += 1
 
     # residual fetch, sequential spider
@@ -73,23 +77,38 @@ def spider_17():
             web_spider.put_item_to_queue_fetch(1, url, {}, 0, 0)
 
         # launch web spider
-        logging.warning('residual spyder start, url total %d' % left_url_num)
+        logger.info('residual spyder start, url total %d' % left_url_num)
         web_spider.start_working(fetcher_num=1)  # one fetcher only
         web_spider.wait_for_finished()
 
         # update left urls
         left_url_list = web_spider.get_fail_url_list()
         left_url_num = len(left_url_list)
-        logging.warning('residual spyder done, url left %d' % left_url_num)
+        logger.info('residual spyder done, url left %d' % left_url_num)
         if left_url_num > 0:
-            logging.warning('left url list: %s' % left_url_list)
+            logger.info('left url list: %s' % left_url_list)
 
     end_ts = get_ts_s()
-    logging.warning('start time %s' % ts_s_to_str(start_ts))
-    logging.warning('end time %s' % ts_s_to_str(end_ts))
-    logging.warning('timespan %d min' % ((end_ts - start_ts) // 60))
+    logger.info('start time %s' % ts_s_to_str(start_ts))
+    logger.info('end time %s' % ts_s_to_str(end_ts))
+    logger.info('timespan %d min' % ((end_ts - start_ts) // 60))
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.WARNING, format="%(asctime)s\t%(levelname)s\t%(message)s")
-    spider_17()
+def daily_add_member_follower_record_task():
+    threading.Thread(target=daily_add_member_follower_record).start()
+
+
+def main():
+    # TODO get rid of spyder, use custom pipeline
+    logger.info('17: daily add member follower record')
+    logger.info('will execute everyday at 11:20')
+    schedule.every().day.at('11:20').do(daily_add_member_follower_record_task)
+
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+
+if __name__ == '__main__':
+    logging_init(file_prefix='17')
+    main()
