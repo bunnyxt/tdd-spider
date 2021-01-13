@@ -24,3 +24,6 @@ class DbSaver(Saver):
             self._session.rollback()
             raise e
         return 1, None
+
+    def __del__(self):
+        self._session.close()
