@@ -9,13 +9,19 @@ CAUTION: This program is related to VOCALOID CHINA, so the most of the documenta
 </h1>
 
 <div align="center">
-The data acquisition spider of <a href="https://tdd.bunnyxt.com">https://tdd.bunnyxt.com</a> via python.
+Data acquisition program of TianDian Daily (<a href="https://tdd.bunnyxt.com">https://tdd.bunnyxt.com</a>) based on Python, integrated with <a href="https://github.com/Python3WebSpider/ProxyPool">ProxyPool</a> proxy pool and <a href="http://sc.ftqq.com/3.version"> ServerChan </a> message pushing. Feel free to contact us via QQ group: <a href="https://jq.qq.com/?_wv=1027&k=588s7nw">537793686</a>！
 </div>
 
-## Contact
+## Introduction
 
-Project Web Page: [https://tdd.bunnyxt.com](https://tdd.bunnyxt.com)
+[TianDian Daily](https://tdd.bunnyxt.com) is a personal project of bunnyxt, which hopes to enhance Vocaloid China related data exchange, providing complete and easily accessible data and data visualization for everyone who interests in VC data.
 
-QQ Group: [537793686](https://jq.qq.com/?_wv=1027&k=588s7nw)
+The project is made up with three different part, connect with center database, which are: 
 
-E-mail: bunnyxt@outlook.com
+- frontend: data presentation and interaction ([tdd-frontend](https://github.com/bunnyxt/tdd-frontend))
+- backend: data access api ([tdd-backend](https://github.com/bunnyxt/tdd-backend))
+- spider: original data collection（tdd-spider）
+
+See the structure below
+
+![TianDian Daily structure](./tdd-structure.png 'TianDian Daily structure')
