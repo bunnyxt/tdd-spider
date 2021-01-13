@@ -1,28 +1,37 @@
 import schedule
 import threading
 import time
-from logger import logger_15
 from db import DBOperation, Session
 from pybiliapi import BiliApi
 from common import update_video_via_bvid, TddCommonError
 from serverchan import sc_send
-from util import get_ts_s, ts_s_to_str
+from util import get_ts_s, ts_s_to_str, get_week_day
+from conf import get_proxy_pool_url
+from logutils import logging_init
+import logging
+logger = logging.getLogger('15')
 
 
 def regularly_update_video_info():
-    logger_15.info('Now start update video info...')
+    logger.info('Now start update video info...')
     start_ts = get_ts_s()  # get start ts
 
     session = Session()
-    bapi = BiliApi()
+    bapi_with_proxy = BiliApi(get_proxy_pool_url())
 
-    week_num = int(time.strftime('%w', time.localtime(time.time())))
-    size = 40000
-    offset = week_num * size
-    logger_15.info('Week %d, go fetch bvid, %d ~ %s' % (week_num, offset + 1, offset + size))
+    all_bvids = DBOperation.query_all_video_bvids(session)
+    logger.info('%d all bvids got' % len(all_bvids))
 
-    bvids = DBOperation.query_video_bvids(offset, size, session)
-    logger_15.info('%d bvids got' % len(bvids))
+    # add latest 5000 bvids first
+    bvids = all_bvids[-5000:]
+
+    # for the rest, add 1 / 7 of them, according to the week day (0-6)
+    week_day = get_week_day()
+    for i, bvid in enumerate(all_bvids[:-5000]):
+        if i % 7 == week_day:
+            bvids.append(bvid)
+
+    logger.info('will update %d videos info' % len(bvids))
 
     total_count = len(bvids)
     tdd_common_error_count = 0
@@ -31,14 +40,14 @@ def regularly_update_video_info():
     change_count = 0
     change_log_count = 0
 
-    for bvid in bvids:
+    for i, bvid in enumerate(bvids, 1):
         try:
-            tdd_video_logs = update_video_via_bvid(bvid, bapi, session)
+            tdd_video_logs = update_video_via_bvid(bvid, bapi_with_proxy, session)
         except TddCommonError as e:
-            logger_15.error(e)
+            logger.error('Fail to update video info bvid %s, TddCommonError Detail: %s' % (bvid, e))
             tdd_common_error_count += 1
         except Exception as e:
-            logger_15.error(e)
+            logger.error('Fail to update video info bvid %s, Exception Detail: %s' % (bvid, e))
             other_exception_count += 1
         else:
             if len(tdd_video_logs) == 0:
@@ -46,10 +55,13 @@ def regularly_update_video_info():
             else:
                 change_count += 1
             for log in tdd_video_logs:
-                logger_15.info('%s, %s, %s, %s' % (log.bvid, log.attr, log.oldval, log.newval))
+                logger.info('%s, %s, %s, %s' % (log.bvid, log.attr, log.oldval, log.newval))
                 change_log_count += 1
-            logger_15.debug('Finish update video info bvid %s' % bvid)
-        time.sleep(0.2)  # avoid ban ip
+            logger.debug('Finish update video info bvid %s' % bvid)
+        finally:
+            if i % 1000 == 0:
+                logger.info('%d / %d done' % (i, total_count))
+    logger.info('%d / %d done' % (total_count, total_count))
 
     # get finish ts
     finish_ts = get_ts_s()
@@ -67,15 +79,15 @@ def regularly_update_video_info():
         'change log count: %d\n\n' % change_log_count + \
         'by.bunnyxt, %s' % ts_s_to_str(get_ts_s())
 
-    logger_15.info('Finish update video info!')
-    logger_15.warning(summary)
+    logger.info('Finish update video info!')
+    logger.warning(summary)
 
     # send sc
     sc_result = sc_send('Finish update video info!', summary)
     if sc_result['errno'] == 0:
-        logger_15.info('Sc summary sent: succeed!')
+        logger.info('Sc summary sent: succeed!')
     else:
-        logger_15.warning('Sc summary sent: failed! sc_result = %s.' % sc_result)
+        logger.warning('Sc summary sent: failed! sc_result = %s.' % sc_result)
 
     session.close()
 
@@ -85,8 +97,9 @@ def regularly_update_video_info_task():
 
 
 def main():
-    logger_15.info('15: regularly update video info')
-    schedule.every().day.at('00:00').do(regularly_update_video_info_task)
+    logger.info('15: regularly update video info')
+    logger.info('will execute everyday at 06:00')
+    schedule.every().day.at('06:00').do(regularly_update_video_info_task)
 
     while True:
         schedule.run_pending()
@@ -94,4 +107,5 @@ def main():
 
 
 if __name__ == '__main__':
+    logging_init(file_prefix='15')
     main()
