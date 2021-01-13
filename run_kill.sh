@@ -1,7 +1,7 @@
 #!/bin/bash
 
 if [[ $# -eq 0 ]]; then
-  echo 'Usage: ./run_stop.sh [pid]'
+  echo 'Usage: ./run_kill.sh [pid]'
   exit 1
 fi
 
