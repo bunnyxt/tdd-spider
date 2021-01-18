@@ -1,4 +1,3 @@
-import logging
 from logutils import logging_init
 from pybiliapi import BiliApi
 from db import Session, DBOperation
@@ -9,6 +8,8 @@ from util import get_ts_s, get_ts_s_str
 import math
 from serverchan import sc_send
 from collections import namedtuple
+import logging
+logger = logging.getLogger('51')
 
 Record = namedtuple('Record', ['added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
 
@@ -92,7 +93,8 @@ class AwesomeApiRecordParser(Thread):
 
 
 def run_c30_video_pipeline(time_label):
-    logging.info('[01-c30] c30 video pipeline start')
+    logger_c30 = logging.getLogger('51-c30')
+    logger_c30.info('c30 video pipeline start')
 
     bapi = BiliApi()
 
@@ -101,13 +103,13 @@ def run_c30_video_pipeline(time_label):
     if obj is None:
         raise RuntimeError('[01-c30] Fail to get page total via awesome api!')
     page_total = math.ceil(obj['data']['page']['count'] / 50)
-    logging.info('[01-c30] %d page(s) found' % page_total)
+    logger_c30.info('%d page(s) found' % page_total)
 
     # put page num into page_num_queue
     page_num_queue = Queue()  # store pn for awesome api fetcher to consume
     for pn in range(1, page_total + 1):
         page_num_queue.put(pn)
-    logging.info('[01-c30] %d page(s) put in page_num_queue' % page_num_queue.qsize())
+    logger_c30.info('%d page(s) put in page_num_queue' % page_num_queue.qsize())
 
     # create fetcher
     content_queue = Queue()  # store api returned object (json parsed) content for parser consume
@@ -115,21 +117,21 @@ def run_c30_video_pipeline(time_label):
     awesome_api_fetcher_list = []
     for i in range(fetcher_total_num):
         awesome_api_fetcher_list.append(AwesomeApiFetcher('fetcher_%d' % i, page_num_queue, content_queue))
-    logging.info('[01-c30] %d awesome api fetcher(s) created' % len(awesome_api_fetcher_list))
+    logger_c30.info('%d awesome api fetcher(s) created' % len(awesome_api_fetcher_list))
 
     # create parser
     record_queue = Queue()  # store parsed record
     parser = AwesomeApiRecordParser('parser_0', content_queue, record_queue, fetcher_total_num)
-    logging.info('[01-c30] awesome api record parser created')
+    logger_c30.info('awesome api record parser created')
 
     # start fetcher
     for fetcher in awesome_api_fetcher_list:
         fetcher.start()
-    logging.info('[01-c30] %d awesome api fetcher(s) started' % len(awesome_api_fetcher_list))
+    logger_c30.info('%d awesome api fetcher(s) started' % len(awesome_api_fetcher_list))
 
     # start parser
     parser.start()
-    logging.info('[01-c30] awesome api record parser started')
+    logger_c30.info('awesome api record parser started')
 
     # join fetcher and parser
     for fetcher in awesome_api_fetcher_list:
@@ -137,22 +139,22 @@ def run_c30_video_pipeline(time_label):
     parser.join()
 
     # finish multi thread fetching and parsing
-    logging.info('[01-c30] %d record(s) parsed' % record_queue.qsize())
+    logger_c30.info('%d record(s) parsed' % record_queue.qsize())
 
     # remove duplicate and record queue -> aid record dict
     aid_record_dict = {}
     while not record_queue.empty():
         record = record_queue.get()
         aid_record_dict[record.aid] = record
-    logging.info('[01-c30] %d record(s) left after remove duplication' % len(aid_record_dict))
+    logger_c30.info('%d record(s) left after remove duplication' % len(aid_record_dict))
 
     # get need insert aid list
     session = Session()
     need_insert_aid_list = get_need_insert_aid_list(time_label, True, session)
-    logging.info('[01-c30] %d aid(s) need insert for time label %s' % (len(need_insert_aid_list), time_label))
+    logger_c30.info('%d aid(s) need insert for time label %s' % (len(need_insert_aid_list), time_label))
 
     # insert records
-    logging.info('[01-c30] Now start inserting records...')
+    logger_c30.info('Now start inserting records...')
     # use sql directly, combine 1000 records into one sql to execute and commit
     # TODO debug table tdd_video_record_2, create table tdd_video_record_2 like tdd_video_record
     sql_prefix = 'insert into ' \
@@ -178,13 +180,13 @@ def run_c30_video_pipeline(time_label):
             session.commit()
             sql = sql_prefix
             if need_insert_and_succeed_count % log_gap == 0:
-                logging.info('[01-c30] %d inserted' % need_insert_and_succeed_count)
+                logger_c30.info('%d inserted' % need_insert_and_succeed_count)
     if sql != sql_prefix:
         sql = sql[:-2]  # remove ending comma and space
         session.execute(sql)
         session.commit()
-    logging.info('[01-c30] Finish inserting records! %d records added, %d aids left'
-                 % (need_insert_and_succeed_count, len(need_insert_but_record_not_found_aid_list)))
+    logger_c30.info('Finish inserting records! %d records added, %d aids left'
+                    % (need_insert_and_succeed_count, len(need_insert_but_record_not_found_aid_list)))
 
     # TODO next two module use sub thread to execute, using proxy pool to fetch api and update video info
 
@@ -194,11 +196,11 @@ def run_c30_video_pipeline(time_label):
     # - now video tid != 30
     # - now video code != 0
     # - ...
-    logging.info('[01-c30] Now start checking need add but not found aids...')
+    logger_c30.info('Now start checking need add but not found aids...')
     for aid in need_insert_but_record_not_found_aid_list:
         # TODO
         pass
-    logging.info('[01-c30] Finish checking need add but not found aids!')
+    logger_c30.info('Finish checking need add but not found aids!')
 
     # check no need insert records
     # if time label is 04:00, we need to add all video records into tdd_video_record table,
@@ -207,21 +209,22 @@ def run_c30_video_pipeline(time_label):
     # - some video moved into c30
     # - some video code changed to 0
     # - ...
-    logging.info('[01-c30] Now start checking no need insert records...')
+    logger_c30.info('Now start checking no need insert records...')
     no_need_insert_aid_list = list(set(aid_record_dict.keys()) - set(need_insert_aid_list))
-    logging.info('[01-c30] %d no need insert aid get' % len(no_need_insert_aid_list))
+    logger_c30.info('%d no need insert aid get' % len(no_need_insert_aid_list))
     for aid in no_need_insert_aid_list:
         # TODO
         pass
-    logging.info('[01-c30] Finish checking no need insert records!')
+    logger_c30.info('Finish checking no need insert records!')
 
     session.close()
-    logging.info('[01-c30] c30 video pipeline done')
+    logger_c30.info('c30 video pipeline done')
 
     return [record for record in aid_record_dict.values()]
 
 
 def run_c0_video_pipeline(time_label):
+    logger_c0 = logging.getLogger('51-c0')
     # TODO
     pass
 
@@ -229,7 +232,7 @@ def run_c0_video_pipeline(time_label):
 def run_hourly_video_record_add(time_task):
     time_label = time_task[-5:]  # current time, ex: 19:00
     # time_label = '04:00'  # DEBUG
-    logging.info('Now start hourly video record add, time label: %s..' % time_label)
+    logger.info('Now start hourly video record add, time label: %s..' % time_label)
 
     # bapi = BiliApi()
     # session = Session()
@@ -239,16 +242,16 @@ def run_hourly_video_record_add(time_task):
 
 
 def main():
-    logging.info('51: hourly video record add (new)')
+    logger.info('51: hourly video record add (new)')
 
     time_task = '%s:00' % get_ts_s_str()[:13]  # current time task, ex: 2013-01-31 19:00
-    logging.info('Now start, time task: %s' % time_task)
+    logger.info('Now start, time task: %s' % time_task)
     try:
         run_hourly_video_record_add(time_task)
     except Exception as e:
-        logging.critical(e)
+        logger.critical(e)
         sc_send('51: Critical exception occurred!', 'send time: %s, exception description: %s' % (get_ts_s_str(), e))
-    logging.info('Done! time task: %s' % time_task)
+    logger.info('Done! time task: %s' % time_task)
 
 
 if __name__ == '__main__':
