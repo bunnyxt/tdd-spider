@@ -44,22 +44,23 @@ class AwesomeApiFetcher(Thread):
         self.page_num_queue = page_num_queue
         self.content_queue = content_queue
         self.bapi = bapi if bapi is not None else BiliApi()
+        self.logger = logging.getLogger('AwesomeApiFetcher')
 
     def run(self):
-        logging.info('fetcher %s, start' % self.name)
+        self.logger.info('fetcher %s, start' % self.name)
         while not self.page_num_queue.empty():
             page_num = self.page_num_queue.get()
             page_obj = get_valid(self.bapi.get_archive_rank_by_partion, (30, page_num, 50),
                                  test_archive_rank_by_partion)
             added = get_ts_s()
             if page_obj is None:
-                logging.warning('fetcher %s, pn %d fail' % (self.name, page_num))
+                self.logger.warning('fetcher %s, pn %d fail' % (self.name, page_num))
                 self.page_num_queue.put(page_num)
             else:
-                logging.debug('fetcher %s, pn %d success' % (self.name, page_num))
+                self.logger.debug('fetcher %s, pn %d success' % (self.name, page_num))
                 self.content_queue.put({'added': added, 'content': page_obj})
         self.content_queue.put(EndOfFetcher())
-        logging.info('fetcher %s, end' % self.name)
+        self.logger.info('fetcher %s, end' % self.name)
 
 
 class AwesomeApiRecordParser(Thread):
@@ -69,15 +70,16 @@ class AwesomeApiRecordParser(Thread):
         self.content_queue = content_queue
         self.record_queue = record_queue
         self.eof_total_num = eof_total_num  # TODO use better way to stop thread
+        self.logger = logging.getLogger('AwesomeApiRecordParser')
 
     def run(self):
-        logging.info('parser %s, start' % self.name)
+        self.logger.info('parser %s, start' % self.name)
         eof_num = 0
         while eof_num < self.eof_total_num:
             content = self.content_queue.get()
             if isinstance(content, EndOfFetcher):
                 eof_num += 1
-                logging.info('parser %s, get %d eof' % (self.name, eof_num))
+                self.logger.info('parser %s, get %d eof' % (self.name, eof_num))
                 continue
             added = content['added']
             page_obj = content['content']
@@ -89,7 +91,7 @@ class AwesomeApiRecordParser(Thread):
                     arch_stat['favorite'], arch_stat['coin'], arch_stat['share'], arch_stat['like']
                 )
                 self.record_queue.put(record)
-        logging.info('parser %s, end' % self.name)
+        self.logger.info('parser %s, end' % self.name)
 
 
 def run_c30_video_pipeline(time_label):
