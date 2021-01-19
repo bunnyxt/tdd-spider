@@ -94,6 +94,47 @@ class AwesomeApiRecordParser(Thread):
         self.logger.info('parser %s, end' % self.name)
 
 
+class C30NeedAddButNotFoundAidsChecker(Thread):
+    def __init__(self, need_insert_but_record_not_found_aid_list):
+        super().__init__()
+        self.need_insert_but_record_not_found_aid_list = need_insert_but_record_not_found_aid_list
+        self.logger = logging.getLogger('C30NeedAddButNotFoundAidsChecker')
+
+    def run(self):
+        # check need insert but not found aid list
+        # these aids should have record in aid_record_dict, but not found at present
+        # possible reasons:
+        # - now video tid != 30
+        # - now video code != 0
+        # - ...
+        self.logger.info('Now start checking need add but not found aids...')
+        for aid in self.need_insert_but_record_not_found_aid_list:
+            # TODO
+            self.logger.warning('TODO: aid %d' % aid)
+        self.logger.info('Finish checking need add but not found aids!')
+
+
+class C30NoNeedInsertAidsChecker(Thread):
+    def __init__(self, no_need_insert_aid_list):
+        super().__init__()
+        self.no_need_insert_aid_list = no_need_insert_aid_list
+        self.logger = logging.getLogger('C30NoNeedInsertAidsChecker')
+
+    def run(self):
+        # check no need insert records
+        # if time label is 04:00, we need to add all video records into tdd_video_record table,
+        # therefore need_insert_aid_list contains all c30 aids in db, however, still not cover all records
+        # possible reasons:
+        # - some video moved into c30
+        # - some video code changed to 0
+        # - ...
+        self.logger.info('Now start checking no need insert records...')
+        for aid in self.no_need_insert_aid_list:
+            # TODO
+            self.logger.warning('TODO: aid %d' % aid)
+        self.logger.info('Finish checking no need insert records!')
+
+
 def run_c30_video_pipeline(time_label):
     logger_c30 = logging.getLogger('51-c30')
     logger_c30.info('c30 video pipeline start')
@@ -190,19 +231,16 @@ def run_c30_video_pipeline(time_label):
     logger_c30.info('Finish inserting records! %d records added, %d aids left'
                     % (need_insert_and_succeed_count, len(need_insert_but_record_not_found_aid_list)))
 
-    # TODO next two module use sub thread to execute, using proxy pool to fetch api and update video info
-
     # check need insert but not found aid list
     # these aids should have record in aid_record_dict, but not found at present
     # possible reasons:
     # - now video tid != 30
     # - now video code != 0
     # - ...
-    logger_c30.info('Now start checking need add but not found aids...')
-    for aid in need_insert_but_record_not_found_aid_list:
-        # TODO
-        pass
-    logger_c30.info('Finish checking need add but not found aids!')
+    logger_c30.info('%d c30 need add but not found aids got' % len(need_insert_but_record_not_found_aid_list))
+    logger_c30.info('Now start a branch thread for checking need add but not found aids...')
+    c30_need_add_but_not_found_aids_checker = C30NeedAddButNotFoundAidsChecker(need_insert_but_record_not_found_aid_list)
+    c30_need_add_but_not_found_aids_checker.start()
 
     # check no need insert records
     # if time label is 04:00, we need to add all video records into tdd_video_record table,
@@ -211,16 +249,14 @@ def run_c30_video_pipeline(time_label):
     # - some video moved into c30
     # - some video code changed to 0
     # - ...
-    logger_c30.info('Now start checking no need insert records...')
     no_need_insert_aid_list = list(set(aid_record_dict.keys()) - set(need_insert_aid_list))
-    logger_c30.info('%d no need insert aid get' % len(no_need_insert_aid_list))
-    for aid in no_need_insert_aid_list:
-        # TODO
-        pass
-    logger_c30.info('Finish checking no need insert records!')
+    logger_c30.info('%d c30 no need insert records got' % len(no_need_insert_aid_list))
+    logger_c30.info('Now start a branch thread for checking need no need insert aids...')
+    c30_no_need_insert_aids_checker = C30NoNeedInsertAidsChecker(no_need_insert_aid_list)
+    c30_no_need_insert_aids_checker.start()
 
     session.close()
-    logger_c30.info('c30 video pipeline done')
+    logger_c30.info('c30 video pipeline done! return %d records' % len(aid_record_dict))
 
     return [record for record in aid_record_dict.values()]
 
