@@ -298,7 +298,10 @@ def run_hourly_video_record_add(time_task):
 
     records = []
     for runner in data_acquisition_pipeline_runner_list:
-        records += runner.return_record_list
+        if runner.return_record_list:
+            records += runner.return_record_list
+        else:
+            logger.error('Fail to get valid return_record_list from pipeline runner %s' % runner)
 
     logger.info('Finish upstream data acquisition pipelines! %d records received' % len(records))
 
