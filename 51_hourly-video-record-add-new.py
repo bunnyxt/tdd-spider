@@ -135,136 +135,148 @@ class C30NoNeedInsertAidsChecker(Thread):
         self.logger.info('Finish checking no need insert records!')
 
 
-def run_c30_video_pipeline(time_label):
-    logger_c30 = logging.getLogger('51-c30')
-    logger_c30.info('c30 video pipeline start')
+class C30PipelineRunner(Thread):
+    def __init__(self, time_label):
+        super().__init__()
+        self.time_label = time_label
+        self.return_record_list = None
+        self.logger = logging.getLogger('C30PipelineRunner')
 
-    bapi = BiliApi()
+    def run(self):
+        self.logger.info('c30 video pipeline start')
 
-    # get page total
-    obj = get_valid(bapi.get_archive_rank_by_partion, (30, 1, 50), test_archive_rank_by_partion)
-    if obj is None:
-        raise RuntimeError('[01-c30] Fail to get page total via awesome api!')
-    page_total = math.ceil(obj['data']['page']['count'] / 50)
-    logger_c30.info('%d page(s) found' % page_total)
+        bapi = BiliApi()
 
-    # put page num into page_num_queue
-    page_num_queue = Queue()  # store pn for awesome api fetcher to consume
-    for pn in range(1, page_total + 1):
-        page_num_queue.put(pn)
-    logger_c30.info('%d page(s) put in page_num_queue' % page_num_queue.qsize())
+        # get page total
+        obj = get_valid(bapi.get_archive_rank_by_partion, (30, 1, 50), test_archive_rank_by_partion)
+        if obj is None:
+            raise RuntimeError('Fail to get page total via awesome api!')
+        page_total = math.ceil(obj['data']['page']['count'] / 50)
+        self.logger.info('%d page(s) found' % page_total)
 
-    # create fetcher
-    content_queue = Queue()  # store api returned object (json parsed) content for parser consume
-    fetcher_total_num = 5  # can be modified, default 5 is reasonable
-    awesome_api_fetcher_list = []
-    for i in range(fetcher_total_num):
-        awesome_api_fetcher_list.append(AwesomeApiFetcher('fetcher_%d' % i, page_num_queue, content_queue))
-    logger_c30.info('%d awesome api fetcher(s) created' % len(awesome_api_fetcher_list))
+        # put page num into page_num_queue
+        page_num_queue = Queue()  # store pn for awesome api fetcher to consume
+        for pn in range(1, page_total + 1):
+            page_num_queue.put(pn)
+        self.logger.info('%d page(s) put in page_num_queue' % page_num_queue.qsize())
 
-    # create parser
-    record_queue = Queue()  # store parsed record
-    parser = AwesomeApiRecordParser('parser_0', content_queue, record_queue, fetcher_total_num)
-    logger_c30.info('awesome api record parser created')
+        # create fetcher
+        content_queue = Queue()  # store api returned object (json parsed) content for parser consume
+        fetcher_total_num = 5  # can be modified, default 5 is reasonable
+        awesome_api_fetcher_list = []
+        for i in range(fetcher_total_num):
+            awesome_api_fetcher_list.append(AwesomeApiFetcher('fetcher_%d' % i, page_num_queue, content_queue))
+        self.logger.info('%d awesome api fetcher(s) created' % len(awesome_api_fetcher_list))
 
-    # start fetcher
-    for fetcher in awesome_api_fetcher_list:
-        fetcher.start()
-    logger_c30.info('%d awesome api fetcher(s) started' % len(awesome_api_fetcher_list))
+        # create parser
+        record_queue = Queue()  # store parsed record
+        parser = AwesomeApiRecordParser('parser_0', content_queue, record_queue, fetcher_total_num)
+        self.logger.info('awesome api record parser created')
 
-    # start parser
-    parser.start()
-    logger_c30.info('awesome api record parser started')
+        # start fetcher
+        for fetcher in awesome_api_fetcher_list:
+            fetcher.start()
+        self.logger.info('%d awesome api fetcher(s) started' % len(awesome_api_fetcher_list))
 
-    # join fetcher and parser
-    for fetcher in awesome_api_fetcher_list:
-        fetcher.join()
-    parser.join()
+        # start parser
+        parser.start()
+        self.logger.info('awesome api record parser started')
 
-    # finish multi thread fetching and parsing
-    logger_c30.info('%d record(s) parsed' % record_queue.qsize())
+        # join fetcher and parser
+        for fetcher in awesome_api_fetcher_list:
+            fetcher.join()
+        parser.join()
 
-    # remove duplicate and record queue -> aid record dict
-    aid_record_dict = {}
-    while not record_queue.empty():
-        record = record_queue.get()
-        aid_record_dict[record.aid] = record
-    logger_c30.info('%d record(s) left after remove duplication' % len(aid_record_dict))
+        # finish multi thread fetching and parsing
+        self.logger.info('%d record(s) parsed' % record_queue.qsize())
 
-    # get need insert aid list
-    session = Session()
-    need_insert_aid_list = get_need_insert_aid_list(time_label, True, session)
-    logger_c30.info('%d aid(s) need insert for time label %s' % (len(need_insert_aid_list), time_label))
+        # remove duplicate and record queue -> aid record dict
+        aid_record_dict = {}
+        while not record_queue.empty():
+            record = record_queue.get()
+            aid_record_dict[record.aid] = record
+        self.logger.info('%d record(s) left after remove duplication' % len(aid_record_dict))
 
-    # insert records
-    logger_c30.info('Now start inserting records...')
-    # use sql directly, combine 1000 records into one sql to execute and commit
-    # TODO debug table tdd_video_record_2, create table tdd_video_record_2 like tdd_video_record
-    sql_prefix = 'insert into ' \
-                 'tdd_video_record_2(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
-                 'values '
-    sql = sql_prefix
-    need_insert_and_succeed_count = 0
-    need_insert_but_record_not_found_aid_list = []
-    log_gap = 1000 * max(1, (len(need_insert_aid_list) // 1000 // 10))
-    for aid in need_insert_aid_list:
-        record = aid_record_dict.get(aid, None)
-        if not record:
-            need_insert_but_record_not_found_aid_list.append(aid)
-            continue
-        sql += '(%d, %d, %d, %d, %d, %d, %d, %d, %d), ' % (
-            record.added, record.aid,
-            record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like
-        )
-        need_insert_and_succeed_count += 1
-        if need_insert_and_succeed_count % 1000 == 0:
+        # get need insert aid list
+        session = Session()
+        need_insert_aid_list = get_need_insert_aid_list(self.time_label, True, session)
+        self.logger.info('%d aid(s) need insert for time label %s' % (len(need_insert_aid_list), self.time_label))
+
+        # insert records
+        self.logger.info('Now start inserting records...')
+        # use sql directly, combine 1000 records into one sql to execute and commit
+        # TODO debug table tdd_video_record_2, create table tdd_video_record_2 like tdd_video_record
+        sql_prefix = 'insert into ' \
+                     'tdd_video_record_2(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
+                     'values '
+        sql = sql_prefix
+        need_insert_and_succeed_count = 0
+        need_insert_but_record_not_found_aid_list = []
+        log_gap = 1000 * max(1, (len(need_insert_aid_list) // 1000 // 10))
+        for aid in need_insert_aid_list:
+            record = aid_record_dict.get(aid, None)
+            if not record:
+                need_insert_but_record_not_found_aid_list.append(aid)
+                continue
+            sql += '(%d, %d, %d, %d, %d, %d, %d, %d, %d), ' % (
+                record.added, record.aid,
+                record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like
+            )
+            need_insert_and_succeed_count += 1
+            if need_insert_and_succeed_count % 1000 == 0:
+                sql = sql[:-2]  # remove ending comma and space
+                session.execute(sql)
+                session.commit()
+                sql = sql_prefix
+                if need_insert_and_succeed_count % log_gap == 0:
+                    self.logger.info('%d inserted' % need_insert_and_succeed_count)
+        if sql != sql_prefix:
             sql = sql[:-2]  # remove ending comma and space
             session.execute(sql)
             session.commit()
-            sql = sql_prefix
-            if need_insert_and_succeed_count % log_gap == 0:
-                logger_c30.info('%d inserted' % need_insert_and_succeed_count)
-    if sql != sql_prefix:
-        sql = sql[:-2]  # remove ending comma and space
-        session.execute(sql)
-        session.commit()
-    logger_c30.info('Finish inserting records! %d records added, %d aids left'
-                    % (need_insert_and_succeed_count, len(need_insert_but_record_not_found_aid_list)))
+        self.logger.info('Finish inserting records! %d records added, %d aids left'
+                         % (need_insert_and_succeed_count, len(need_insert_but_record_not_found_aid_list)))
 
-    # check need insert but not found aid list
-    # these aids should have record in aid_record_dict, but not found at present
-    # possible reasons:
-    # - now video tid != 30
-    # - now video code != 0
-    # - ...
-    logger_c30.info('%d c30 need add but not found aids got' % len(need_insert_but_record_not_found_aid_list))
-    logger_c30.info('Now start a branch thread for checking need add but not found aids...')
-    c30_need_add_but_not_found_aids_checker = C30NeedAddButNotFoundAidsChecker(need_insert_but_record_not_found_aid_list)
-    c30_need_add_but_not_found_aids_checker.start()
+        # check need insert but not found aid list
+        # these aids should have record in aid_record_dict, but not found at present
+        # possible reasons:
+        # - now video tid != 30
+        # - now video code != 0
+        # - ...
+        self.logger.info('%d c30 need add but not found aids got' % len(need_insert_but_record_not_found_aid_list))
+        self.logger.info('Now start a branch thread for checking need add but not found aids...')
+        c30_need_add_but_not_found_aids_checker = C30NeedAddButNotFoundAidsChecker(need_insert_but_record_not_found_aid_list)
+        c30_need_add_but_not_found_aids_checker.start()
 
-    # check no need insert records
-    # if time label is 04:00, we need to add all video records into tdd_video_record table,
-    # therefore need_insert_aid_list contains all c30 aids in db, however, still not cover all records
-    # possible reasons:
-    # - some video moved into c30
-    # - some video code changed to 0
-    # - ...
-    no_need_insert_aid_list = list(set(aid_record_dict.keys()) - set(need_insert_aid_list))
-    logger_c30.info('%d c30 no need insert records got' % len(no_need_insert_aid_list))
-    logger_c30.info('Now start a branch thread for checking need no need insert aids...')
-    c30_no_need_insert_aids_checker = C30NoNeedInsertAidsChecker(no_need_insert_aid_list)
-    c30_no_need_insert_aids_checker.start()
+        # check no need insert records
+        # if time label is 04:00, we need to add all video records into tdd_video_record table,
+        # therefore need_insert_aid_list contains all c30 aids in db, however, still not cover all records
+        # possible reasons:
+        # - some video moved into c30
+        # - some video code changed to 0
+        # - ...
+        no_need_insert_aid_list = list(set(aid_record_dict.keys()) - set(need_insert_aid_list))
+        self.logger.info('%d c30 no need insert records got' % len(no_need_insert_aid_list))
+        self.logger.info('Now start a branch thread for checking need no need insert aids...')
+        c30_no_need_insert_aids_checker = C30NoNeedInsertAidsChecker(no_need_insert_aid_list)
+        c30_no_need_insert_aids_checker.start()
 
-    session.close()
-    logger_c30.info('c30 video pipeline done! return %d records' % len(aid_record_dict))
+        session.close()
+        self.logger.info('c30 video pipeline done! return %d records' % len(aid_record_dict))
 
-    return [record for record in aid_record_dict.values()]
+        self.return_record_list = [record for record in aid_record_dict.values()]
 
 
-def run_c0_video_pipeline(time_label):
-    logger_c0 = logging.getLogger('51-c0')
-    # TODO
-    pass
+class C0PipelineRunner(Thread):
+    def __init__(self, time_label):
+        super().__init__()
+        self.time_label = time_label
+        self.return_record_list = None
+        self.logger = logging.getLogger('C0PipelineRunner')
+
+    def run(self):
+        self.logger.info('c0 video pipeline start')
+        # TODO
 
 
 def run_hourly_video_record_add(time_task):
@@ -272,11 +284,23 @@ def run_hourly_video_record_add(time_task):
     # time_label = '04:00'  # DEBUG
     logger.info('Now start hourly video record add, time label: %s..' % time_label)
 
-    # bapi = BiliApi()
-    # session = Session()
+    # upstream data acquisition pipeline, c30 and c0 pipeline runner, init -> start -> join -> records
+    logger.info('Now start upstream data acquisition pipelines...')
 
-    run_c30_video_pipeline(time_label)  # TODO use new thread
-    run_c0_video_pipeline(time_label)  # TODO use new thread
+    data_acquisition_pipeline_runner_list = [
+        C30PipelineRunner(time_label),
+        C0PipelineRunner(time_label),
+    ]
+    for runner in data_acquisition_pipeline_runner_list:
+        runner.start()
+    for runner in data_acquisition_pipeline_runner_list:
+        runner.join()
+
+    records = []
+    for runner in data_acquisition_pipeline_runner_list:
+        records += runner.return_record_list
+
+    logger.info('Finish upstream data acquisition pipelines! %d records received' % len(records))
 
 
 def main():
