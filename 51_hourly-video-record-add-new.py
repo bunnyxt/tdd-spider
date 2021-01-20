@@ -3,9 +3,11 @@ from pybiliapi import BiliApi
 from db import Session, DBOperation
 from threading import Thread
 from queue import Queue
-from common import get_valid, test_archive_rank_by_partion
-from util import get_ts_s, get_ts_s_str
+from common import get_valid, test_archive_rank_by_partion, add_video_record_via_stat_api, update_video, \
+    InvalidObjCodeError, TddCommonError
+from util import get_ts_s, get_ts_s_str, a2b
 import math
+from conf import get_proxy_pool_url
 from serverchan import sc_send
 from collections import namedtuple
 import logging
@@ -261,10 +263,9 @@ class C30PipelineRunner(Thread):
         c30_no_need_insert_aids_checker = C30NoNeedInsertAidsChecker(no_need_insert_aid_list)
         c30_no_need_insert_aids_checker.start()
 
-        session.close()
         self.logger.info('c30 video pipeline done! return %d records' % len(aid_record_dict))
-
         self.return_record_list = [record for record in aid_record_dict.values()]
+        session.close()
 
 
 class C0PipelineRunner(Thread):
@@ -276,7 +277,54 @@ class C0PipelineRunner(Thread):
 
     def run(self):
         self.logger.info('c0 video pipeline start')
-        # TODO
+
+        # get need insert aid list
+        session = Session()
+        need_insert_aid_list = get_need_insert_aid_list(self.time_label, False, session)
+        self.logger.info('%d aid(s) need insert for time label %s' % (len(need_insert_aid_list), self.time_label))
+
+        # fetch and insert records
+        self.logger.info('Now start fetching and inserting records...')
+        bapi_with_proxy = BiliApi(proxy_pool_url=get_proxy_pool_url())
+        fail_aids = []
+        new_video_record_list = []
+        for idx, aid in enumerate(need_insert_aid_list, 1):
+            # add video record
+            try:
+                new_video_record = add_video_record_via_stat_api(aid, bapi_with_proxy, session)
+                new_video_record_list.append(new_video_record)
+                self.logger.debug('Add new record %s' % new_video_record)
+            except InvalidObjCodeError as e:
+                self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s', (aid, e))
+                try:
+                    tdd_video_logs = update_video(aid, bapi_with_proxy, session)
+                except TddCommonError as e2:
+                    self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+                except Exception as e2:
+                    self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+                else:
+                    for log in tdd_video_logs:
+                        self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
+                                         % (log.aid, log.attr, log.oldval, log.newval))
+                fail_aids.append(aid)
+            except TddCommonError as e:
+                self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s', (aid, e))
+                fail_aids.append(aid)
+            if idx % 10 == 0:
+                self.logger.info('%d / %d done' % (idx, len(need_insert_aid_list)))
+        self.logger.info('%d / %d done' % (len(need_insert_aid_list), len(need_insert_aid_list)))
+        self.logger.info('Finish fetching and inserting records! %d records added, %d aids fail'
+                         % (len(new_video_record_list), len(fail_aids)))
+        self.logger.warning('fail_aids: %r' % fail_aids)
+
+        record_list = [
+            # 'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'
+            Record(r.added, r.aid, a2b(r.aid), r.view, r.danmaku, r.reply, r.favorite, r.coin, r.share, r.like)
+            for r in new_video_record_list
+        ]
+        self.logger.info('c0 video pipeline done! return %d records' % len(record_list))
+        self.return_record_list = record_list
+        session.close()
 
 
 def run_hourly_video_record_add(time_task):
@@ -304,6 +352,8 @@ def run_hourly_video_record_add(time_task):
             logger.error('Fail to get valid return_record_list from pipeline runner %s' % runner)
 
     logger.info('Finish upstream data acquisition pipelines! %d records received' % len(records))
+
+    # downstream data analysis pipeline,
 
 
 def main():
