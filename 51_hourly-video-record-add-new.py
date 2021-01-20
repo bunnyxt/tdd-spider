@@ -257,11 +257,12 @@ class C30PipelineRunner(Thread):
         # - some video moved into c30
         # - some video code changed to 0
         # - ...
-        no_need_insert_aid_list = list(set(aid_record_dict.keys()) - set(need_insert_aid_list))
-        self.logger.info('%d c30 no need insert records got' % len(no_need_insert_aid_list))
-        self.logger.info('Now start a branch thread for checking need no need insert aids...')
-        c30_no_need_insert_aids_checker = C30NoNeedInsertAidsChecker(no_need_insert_aid_list)
-        c30_no_need_insert_aids_checker.start()
+        if self.time_label == '04:00':
+            no_need_insert_aid_list = list(set(aid_record_dict.keys()) - set(need_insert_aid_list))
+            self.logger.info('%d c30 no need insert records got' % len(no_need_insert_aid_list))
+            self.logger.info('Now start a branch thread for checking need no need insert aids...')
+            c30_no_need_insert_aids_checker = C30NoNeedInsertAidsChecker(no_need_insert_aid_list)
+            c30_no_need_insert_aids_checker.start()
 
         self.logger.info('c30 video pipeline done! return %d records' % len(aid_record_dict))
         self.return_record_list = [record for record in aid_record_dict.values()]
