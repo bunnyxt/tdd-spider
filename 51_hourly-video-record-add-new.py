@@ -114,7 +114,7 @@ class C30NeedAddButNotFoundAidsChecker(Thread):
         session = Session()
         bapi_with_proxy = BiliApi(get_proxy_pool_url())
         result_status_dict = defaultdict(list)
-        for idx, aid in enumerate(self.need_insert_but_record_not_found_aid_list):
+        for idx, aid in enumerate(self.need_insert_but_record_not_found_aid_list, 1):
             # try update video
             try:
                 tdd_video_logs = update_video(aid, bapi_with_proxy, session)
