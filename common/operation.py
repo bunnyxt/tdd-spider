@@ -290,6 +290,10 @@ def update_video(aid, bapi, session):
             if view_obj['data']['owner']['mid'] != old_obj.mid:
                 video_update_logs.append(TddVideoLog(added, aid, bvid, 'mid', old_obj.mid, view_obj['data']['owner']['mid']))
                 old_obj.mid = view_obj['data']['owner']['mid']
+            if 'attribute' in view_obj['data'].keys():
+                if view_obj['data']['attribute'] != old_obj.attribute:
+                    video_update_logs.append(TddVideoLog(added, aid, bvid, 'attribute', old_obj.attribute, view_obj['data']['attribute']))
+                    old_obj.attribute = view_obj['data']['attribute']
             # has staff
             new_hasstaff = 0
             if 'staff' in view_obj['data'].keys():
