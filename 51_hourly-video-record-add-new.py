@@ -4,8 +4,8 @@ from db import Session, DBOperation
 from threading import Thread
 from queue import Queue
 from common import get_valid, test_archive_rank_by_partion, test_video_view, \
-    add_video_record_via_stat_api, update_video, \
-    InvalidObjCodeError, TddCommonError
+    add_video_record_via_stat_api, update_video, add_video_via_bvid, \
+    InvalidObjCodeError, TddCommonError, AlreadyExistError
 from util import get_ts_s, get_ts_s_str, a2b
 import math
 from conf import get_proxy_pool_url
@@ -115,6 +115,7 @@ class C30NeedAddButNotFoundAidsChecker(Thread):
         bapi_with_proxy = BiliApi(get_proxy_pool_url())
         result_status_dict = defaultdict(list)
         for idx, aid in enumerate(self.need_insert_but_record_not_found_aid_list):
+            # try update video
             try:
                 tdd_video_logs = update_video(aid, bapi_with_proxy, session)
             except TddCommonError as e2:
@@ -171,10 +172,58 @@ class C30NoNeedInsertAidsChecker(Thread):
         # - some video code changed to 0
         # - ...
         self.logger.info('Now start checking no need insert records...')
-        for aid in self.no_need_insert_aid_list:
-            # TODO
-            self.logger.warning('TODO: aid %d' % aid)
-        self.logger.info('Finish checking no need insert records!')
+        session = Session()
+        bapi_with_proxy = BiliApi(get_proxy_pool_url())
+        result_status_dict = defaultdict(list)
+        for idx, aid in enumerate(self.no_need_insert_aid_list, 1):
+            # try add new video first
+            video_already_exist_flag = False
+            try:
+                new_video = add_video_via_bvid(a2b(aid), bapi_with_proxy, session)
+            except AlreadyExistError:
+                # video already exist, which is absolutely common
+                self.logger.debug('Video aid %d already exists' % aid)
+                video_already_exist_flag = True
+            except TddCommonError as e:
+                self.logger.warning('Fail to add video aid %d. Exception caught. Detail: %s' % (aid, e))
+            else:
+                self.logger.info('Add new video %s' % new_video)
+                result_status_dict['add_new_video_aids'].append(aid)
+
+            if video_already_exist_flag:
+                # try update video
+                try:
+                    tdd_video_logs = update_video(aid, bapi_with_proxy, session)
+                except TddCommonError as e2:
+                    self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+                    result_status_dict['fail_aids'].append(aid)
+                except Exception as e2:
+                    self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+                    result_status_dict['fail_aids'].append(aid)
+                else:
+                    # init change flags
+                    code_change_flag = False
+                    # check update logs
+                    for log in tdd_video_logs:
+                        if log.attr == 'code':
+                            code_change_flag = True
+                        self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
+                                         % (log.aid, log.attr, log.oldval, log.newval))
+                    # set result status
+                    # NOTE: here maybe code_change_aids and tid_change_aids both +1 aid
+                    if code_change_flag:
+                        result_status_dict['code_change_aids'].append(aid)
+                    else:
+                        self.logger.warning('No code change found for video aid %d, need further check' % aid)
+                        result_status_dict['no_change_found_aids'].append(aid)
+
+            if idx % 10 == 0:
+                self.logger.info('%d / %d done' % (idx, len(self.no_need_insert_aid_list)))
+        self.logger.info('%d / %d done' % (len(self.no_need_insert_aid_list), len(self.no_need_insert_aid_list)))
+        self.logger.info('Finish checking no need insert records! %s' %
+                         ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
+        self.logger.warning('fail_aids: %r' % result_status_dict['fail_aids'])
+        self.logger.warning('no_change_found_aids: %r' % result_status_dict['no_change_found_aids'])
 
 
 class C30PipelineRunner(Thread):
