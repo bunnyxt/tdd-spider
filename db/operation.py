@@ -112,8 +112,8 @@ class DBOperation:
     @classmethod
     def query_update_c30_aids(cls, freq, session):
         try:
-            result = session.query(TddVideo.aid).filter(TddVideo.tid == 30, TddVideo.code == 0,
-                                                        TddVideo.freq == freq).all()
+            result = session.query(TddVideo.aid).filter(
+                TddVideo.tid == 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.freq == freq).all()
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'freq': freq}), exc_info=True)
@@ -122,8 +122,8 @@ class DBOperation:
     @classmethod
     def query_update_c30_aids_all(cls, session):
         try:
-            result = session.query(TddVideo.aid).filter(TddVideo.tid == 30, TddVideo.code == 0,
-                                                        TddVideo.freq >= 0).all()
+            result = session.query(TddVideo.aid).filter(
+                TddVideo.tid == 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.freq >= 0).all()
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
@@ -132,8 +132,8 @@ class DBOperation:
     @classmethod
     def query_update_c0_aids(cls, freq, session):
         try:
-            result = session.query(TddVideo.aid).filter(TddVideo.tid != 30, TddVideo.code == 0,
-                                                        TddVideo.freq == freq).all()
+            result = session.query(TddVideo.aid).filter(
+                TddVideo.tid != 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.freq == freq).all()
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'freq': freq}), exc_info=True)
@@ -142,8 +142,8 @@ class DBOperation:
     @classmethod
     def query_update_c0_aids_all(cls, session):
         try:
-            result = session.query(TddVideo.aid).filter(TddVideo.tid != 30, TddVideo.code == 0,
-                                                        TddVideo.freq >= 0).all()
+            result = session.query(TddVideo.aid).filter(
+                TddVideo.tid != 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.freq >= 0).all()
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
@@ -201,11 +201,11 @@ class DBOperation:
     def query_active_video_aids(cls, is_tid_30, session):
         try:
             if is_tid_30:
-                result = session.query(TddVideo.aid).filter(TddVideo.tid == 30, TddVideo.code == 0,
-                                                            TddVideo.activity == 1).all()
+                result = session.query(TddVideo.aid).filter(
+                    TddVideo.tid == 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.activity == 1).all()
             else:
-                result = session.query(TddVideo.aid).filter(TddVideo.tid != 30, TddVideo.code == 0,
-                                                            TddVideo.activity == 1).all()
+                result = session.query(TddVideo.aid).filter(
+                    TddVideo.tid != 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.activity == 1).all()
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'is_tid_30': is_tid_30}), exc_info=True)
@@ -215,11 +215,11 @@ class DBOperation:
     def query_hot_video_aids(cls, is_tid_30, session):
         try:
             if is_tid_30:
-                result = session.query(TddVideo.aid).filter(TddVideo.tid == 30, TddVideo.code == 0,
-                                                            TddVideo.activity == 2).all()
+                result = session.query(TddVideo.aid).filter(
+                    TddVideo.tid == 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.activity == 2).all()
             else:
-                result = session.query(TddVideo.aid).filter(TddVideo.tid != 30, TddVideo.code == 0,
-                                                            TddVideo.activity == 2).all()
+                result = session.query(TddVideo.aid).filter(
+                    TddVideo.tid != 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.activity == 2).all()
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'is_tid_30': is_tid_30}), exc_info=True)
@@ -229,11 +229,11 @@ class DBOperation:
     def query_weekly_new_video_aids(cls, is_tid_30, session):
         try:
             if is_tid_30:
-                result = session.query(TddVideo.aid).filter(TddVideo.tid == 30, TddVideo.code == 0,
-                                                            TddVideo.recent == 1).all()
+                result = session.query(TddVideo.aid).filter(
+                    TddVideo.tid == 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.recent == 1).all()
             else:
-                result = session.query(TddVideo.aid).filter(TddVideo.tid != 30, TddVideo.code == 0,
-                                                            TddVideo.recent == 1).all()
+                result = session.query(TddVideo.aid).filter(
+                    TddVideo.tid != 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.recent == 1).all()
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'is_tid_30': is_tid_30}), exc_info=True)
@@ -243,11 +243,11 @@ class DBOperation:
     def query_daily_new_video_aids(cls, is_tid_30, session):
         try:
             if is_tid_30:
-                result = session.query(TddVideo.aid).filter(TddVideo.tid == 30, TddVideo.code == 0,
-                                                            TddVideo.recent == 2).all()
+                result = session.query(TddVideo.aid).filter(
+                    TddVideo.tid == 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.recent == 2).all()
             else:
-                result = session.query(TddVideo.aid).filter(TddVideo.tid != 30, TddVideo.code == 0,
-                                                            TddVideo.recent == 2).all()
+                result = session.query(TddVideo.aid).filter(
+                    TddVideo.tid != 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.recent == 2).all()
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'is_tid_30': is_tid_30}), exc_info=True)
@@ -324,9 +324,11 @@ class DBOperation:
     def query_all_update_video_aids(cls, is_tid_30, session):
         try:
             if is_tid_30:
-                result = session.query(TddVideo.aid).filter(TddVideo.tid == 30, TddVideo.code == 0).all()
+                result = session.query(TddVideo.aid).filter(
+                    TddVideo.tid == 30, TddVideo.code == 0, TddVideo.state == 0).all()
             else:
-                result = session.query(TddVideo.aid).filter(TddVideo.tid != 30, TddVideo.code == 0).all()
+                result = session.query(TddVideo.aid).filter(
+                    TddVideo.tid != 30, TddVideo.code == 0, TddVideo.state == 0).all()
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'is_tid_30': is_tid_30}), exc_info=True)
@@ -336,11 +338,11 @@ class DBOperation:
     def query_freq_update_video_aids(cls, freq, is_tid_30, session):
         try:
             if is_tid_30:
-                result = session.query(TddVideo.aid).filter(TddVideo.tid == 30, TddVideo.code == 0,
-                                                            TddVideo.freq == freq).all()
+                result = session.query(TddVideo.aid).filter(
+                    TddVideo.tid == 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.freq == freq).all()
             else:
-                result = session.query(TddVideo.aid).filter(TddVideo.tid != 30, TddVideo.code == 0,
-                                                            TddVideo.freq == freq).all()
+                result = session.query(TddVideo.aid).filter(
+                    TddVideo.tid != 30, TddVideo.code == 0, TddVideo.state == 0, TddVideo.freq == freq).all()
             return list(r[0] for r in result)
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {'freq': freq, 'is_tid_30': is_tid_30}), exc_info=True)
