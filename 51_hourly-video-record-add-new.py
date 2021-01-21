@@ -109,6 +109,7 @@ class C30NeedAddButNotFoundAidsChecker(Thread):
         # possible reasons:
         # - now video tid != 30
         # - now video code != 0
+        # - now video state = -4, forward = another video aid
         # - ...
         self.logger.info('Now start checking need add but not found aids...')
         session = Session()
@@ -333,6 +334,7 @@ class C30PipelineRunner(Thread):
         # possible reasons:
         # - now video tid != 30
         # - now video code != 0
+        # - now video state = -4, forward = another video aid
         # - ...
         self.logger.info('%d c30 need add but not found aids got' % len(need_insert_but_record_not_found_aid_list))
         self.logger.info('Now start a branch thread for checking need add but not found aids...')
