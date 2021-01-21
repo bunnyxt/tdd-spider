@@ -152,6 +152,8 @@ class C30NeedAddButNotFoundAidsChecker(Thread):
         session.close()
         self.logger.info('Finish checking need add but not found aids! %s' %
                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
+        self.logger.warning('fail_aids: %r' % result_status_dict['fail_aids'])
+        self.logger.warning('no_change_found_aids: %r' % result_status_dict['no_change_found_aids'])
 
 
 class C30NoNeedInsertAidsChecker(Thread):
