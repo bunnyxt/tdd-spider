@@ -303,11 +303,11 @@ def update_video(aid, bapi, session):
                     video_update_logs.append(TddVideoLog(added, aid, bvid, 'attribute', old_obj.attribute, view_obj['data']['attribute']))
                     old_obj.attribute = view_obj['data']['attribute']
             if view_obj['data']['state'] != old_obj.state:
-                video_update_logs.append(TddVideoLog(added, aid, bvid, 'state', old_obj.desc, view_obj['data']['state']))
+                video_update_logs.append(TddVideoLog(added, aid, bvid, 'state', old_obj.state, view_obj['data']['state']))
                 old_obj.state = view_obj['data']['state']
             if 'forward' in view_obj['data'].keys():
                 if view_obj['data']['forward'] != old_obj.forward:
-                    video_update_logs.append(TddVideoLog(added, aid, bvid, 'forward', old_obj.desc, view_obj['data']['forward']))
+                    video_update_logs.append(TddVideoLog(added, aid, bvid, 'forward', old_obj.forward, view_obj['data']['forward']))
                     old_obj.forward = view_obj['data']['forward']
             # has staff
             new_hasstaff = 0
@@ -422,11 +422,11 @@ def update_video_via_bvid(bvid, bapi, session):
                     video_update_logs.append(TddVideoLog(added, aid, bvid, 'attribute', old_obj.attribute, view_obj['data']['attribute']))
                     old_obj.attribute = view_obj['data']['attribute']
             if view_obj['data']['state'] != old_obj.state:
-                video_update_logs.append(TddVideoLog(added, aid, bvid, 'state', old_obj.desc, view_obj['data']['state']))
+                video_update_logs.append(TddVideoLog(added, aid, bvid, 'state', old_obj.state, view_obj['data']['state']))
                 old_obj.state = view_obj['data']['state']
             if 'forward' in view_obj['data'].keys():
                 if view_obj['data']['forward'] != old_obj.forward:
-                    video_update_logs.append(TddVideoLog(added, aid, bvid, 'forward', old_obj.desc, view_obj['data']['forward']))
+                    video_update_logs.append(TddVideoLog(added, aid, bvid, 'forward', old_obj.forward, view_obj['data']['forward']))
                     old_obj.forward = view_obj['data']['forward']
             # has staff
             new_hasstaff = 0
