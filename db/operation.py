@@ -349,6 +349,15 @@ class DBOperation:
             return None
 
     @classmethod
+    def query_403_video_aids(cls, session):
+        try:
+            result = session.query(TddVideo.aid).filter(TddVideo.code == -403).all()
+            return list(r[0] for r in result)
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
+            return None
+
+    @classmethod
     def query_video_pubdate_all(cls, session):
         try:
             result = session.query(TddVideo.aid, TddVideo.pubdate).all()
