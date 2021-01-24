@@ -48,7 +48,7 @@ python <script-name.py>
 由于绝大多数脚本为定时脚本，即会每隔一段时间（或者在某个预设的时间点）运行，因此脚本需要常驻后台一直运行。`Linux`下建议使用`nohup + &`实现后台运行，即：
 
 ```shell
-python -u <script-name.py> >/dev/null 2>&1 &
+nohup python -u <script-name.py> >/dev/null 2>&1 &
 ```
 
 说明：
