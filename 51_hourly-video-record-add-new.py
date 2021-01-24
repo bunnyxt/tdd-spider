@@ -171,12 +171,20 @@ class C30NoNeedInsertAidsChecker(Thread):
         # possible reasons:
         # - some video moved into c30
         # - some video code changed to 0
+        # - some video has -403 code, awesome api will also get these video, login session not required
         # - ...
         self.logger.info('Now start checking no need insert records...')
         session = Session()
         bapi_with_proxy = BiliApi(get_proxy_pool_url())
+        _403_aids = DBOperation.query_403_video_aids()
         result_status_dict = defaultdict(list)
         for idx, aid in enumerate(self.no_need_insert_aid_list, 1):
+            # check whether -403 video
+            if aid in _403_aids:
+                self.logger.info('-403 video aid %d detected, skip' % aid)
+                result_status_dict['-403_aids'].append(aid)
+                continue
+
             # try add new video first
             video_already_exist_flag = False
             try:
@@ -347,6 +355,7 @@ class C30PipelineRunner(Thread):
         # possible reasons:
         # - some video moved into c30
         # - some video code changed to 0
+        # - some video has -403 code, awesome api will also get these video, login session not required
         # - ...
         if self.time_label == '04:00':
             no_need_insert_aid_list = list(set(aid_record_dict.keys()) - set(need_insert_aid_list))
@@ -376,6 +385,7 @@ class C0PipelineRunner(Thread):
         self.logger.info('%d aid(s) need insert for time label %s' % (len(need_insert_aid_list), self.time_label))
 
         # fetch and insert records
+        # TODO use multi thread to accelerate
         self.logger.info('Now start fetching and inserting records...')
         bapi_with_proxy = BiliApi(proxy_pool_url=get_proxy_pool_url())
         fail_aids = []
