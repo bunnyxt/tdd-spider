@@ -6,8 +6,10 @@ from queue import Queue
 from common import get_valid, test_archive_rank_by_partion, test_video_view, test_video_stat, \
     add_video_record_via_stat_api, update_video, add_video_via_bvid, \
     InvalidObjCodeError, TddCommonError, AlreadyExistError
-from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record
+from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, str_to_ts_s
 import math
+import os
+import re
 from conf import get_proxy_pool_url
 from serverchan import sc_send
 from collections import namedtuple, defaultdict
@@ -479,6 +481,58 @@ class RecordsSaveToFileRunner(Thread):
                     self.logger.info('%d / %d done' % (idx, len(self.records)))
             self.logger.info('%d / %d done' % (len(self.records), len(self.records)))
         self.logger.info('Finish save %d records into file %s!' % (len(self.records), current_filename_path))
+
+
+class RecentRecordsAnalystRunner(Thread):
+    def __init__(self, records, time_task, data_folder='data/', recent_file_num=2):
+        super().__init__()
+        self.records = records
+        self.time_task = time_task
+        self.data_folder = data_folder.rstrip('/') + '/'
+        self.current_filename = '%s.csv' % self.time_task
+        self.recent_file_num = recent_file_num
+        self.logger = logging.getLogger('RecentRecordsAnalystRunner')
+
+    def run(self):
+        self.logger.info('Now start analysing recent records...')
+        # get recent records filenames
+        filenames = os.listdir(self.data_folder)
+        if self.current_filename in filenames:
+            filenames.remove(self.current_filename)
+        recent_records_filenames = sorted(
+            list(filter(lambda file: re.search(r'^\d{4}-\d{2}-\d{2} \d{2}:00\.csv$', file), filenames)),
+            key=lambda x: str_to_ts_s(x[:-4] + ':00')
+        )[-self.recent_file_num:]
+        # load records from recent files
+        self.logger.info('Will load records from recent %d files, filenames: %r' % (
+            self.recent_file_num, recent_records_filenames))
+        aid_recent_records_dict = defaultdict(list)
+        total_records = 0
+        for filename in recent_records_filenames:
+            file_records = 0
+            filename_path = self.data_folder + filename
+            with open(filename_path, 'r') as f:
+                f.readline()
+                for line in f:
+                    try:
+                        line_arr = line.rstrip('\n').split(',')
+                        # 'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'
+                        record = Record(line_arr[0], line_arr[1], line_arr[2], line_arr[3], line_arr[4], line_arr[5],
+                                        line_arr[6], line_arr[7], line_arr[8], line_arr[9])
+                        aid_recent_records_dict[record.aid].append(record)
+                        file_records += 1
+                    except Exception as e:
+                        self.logger.warning('Fail to parse line %s into record, exception occurred, detail: %s' % (
+                            line, e))
+                self.logger.info('%d records loaded from file %s' % (file_records, filename))
+                total_records += file_records
+        # add this round records
+        for record in self.records:
+            aid_recent_records_dict[record.aid].append(record)
+        aid_recent_records_dict = dict(aid_recent_records_dict)
+        self.logger.info('Total %d records in total %d aids from recent %d files loaded' % (
+            total_records, len(aid_recent_records_dict.keys()), self.recent_file_num))
+        # TODO implement old 08 here
 
 
 def run_hourly_video_record_add(time_task):
