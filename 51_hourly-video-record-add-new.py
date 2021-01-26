@@ -429,6 +429,31 @@ class C0PipelineRunner(Thread):
         session.close()
 
 
+class RecordsSaveToFileRunner(Thread):
+    def __init__(self, records, time_task):
+        super().__init__()
+        self.records = records
+        self.time_task = time_task
+        self.data_folder = 'data/'
+        self.current_filename = '%s.csv' % self.time_task
+        self.logger = logging.getLogger('RecordsSaveToFileRunner')
+
+    def run(self):
+        self.logger.info('Now start saving records to file...')
+        current_filename_path = self.data_folder + self.current_filename  # TODO maybe should set at another place?
+        self.logger.info('will save %d records into file %s' % (len(self.records), current_filename_path))
+        with open(current_filename_path, 'w') as f:
+            f.write('added,aid,bvid,view,danmaku,reply,favorite,coin,share,like\n')
+            for idx, record in enumerate(self.records, 1):
+                f.write('%d,%d,%s,%d,%d,%d,%d,%d,%d,%d\n' % (
+                    record.added, record.aid, record.bvid, record.view, record.danmaku, record.reply, record.favorite,
+                    record.coin, record.share, record.like))
+                if idx % 20000 == 0:
+                    self.logger.info('%d / %d done' % (idx, len(self.records)))
+            self.logger.info('%d / %d done' % (len(self.records), len(self.records)))
+        self.logger.info('Finish save %d records into file %s!' % (len(self.records), current_filename_path))
+
+
 def run_hourly_video_record_add(time_task):
     time_label = time_task[-5:]  # current time, ex: 19:00
     # time_label = '04:00'  # DEBUG
@@ -454,8 +479,20 @@ def run_hourly_video_record_add(time_task):
             logger.error('Fail to get valid return_record_list from pipeline runner %s' % runner)
 
     logger.info('Finish upstream data acquisition pipelines! %d records received' % len(records))
+    del data_acquisition_pipeline_runner_list  # release memory
 
-    # downstream data analysis pipeline,
+    # downstream data analysis pipeline
+    logger.info('Now start downstream data analysis pipelines...')
+    data_analysis_pipeline_runner_list = [
+        RecordsSaveToFileRunner(records, time_task),
+    ]
+    for runner in data_analysis_pipeline_runner_list:
+        runner.start()
+    for runner in data_analysis_pipeline_runner_list:
+        runner.join()
+
+    logger.info('Finish downstream data analysis pipelines!')
+    del data_analysis_pipeline_runner_list  # release memory
 
 
 def main():
