@@ -457,17 +457,17 @@ class C0PipelineRunner(Thread):
 
 
 class RecordsSaveToFileRunner(Thread):
-    def __init__(self, records, time_task):
+    def __init__(self, records, time_task, data_folder='data/'):
         super().__init__()
         self.records = records
         self.time_task = time_task
-        self.data_folder = 'data/'
+        self.data_folder = data_folder.rstrip('/') + '/'
         self.current_filename = '%s.csv' % self.time_task
         self.logger = logging.getLogger('RecordsSaveToFileRunner')
 
     def run(self):
         self.logger.info('Now start saving records to file...')
-        current_filename_path = self.data_folder + self.current_filename  # TODO maybe should set at another place?
+        current_filename_path = self.data_folder + self.current_filename
         self.logger.info('will save %d records into file %s' % (len(self.records), current_filename_path))
         with open(current_filename_path, 'w') as f:
             f.write('added,aid,bvid,view,danmaku,reply,favorite,coin,share,like\n')
