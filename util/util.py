@@ -2,7 +2,8 @@ import datetime
 import time
 import math
 
-__all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s', 'print_obj', 'b2a', 'a2b', 'get_week_day', 'zk_calc']
+__all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s', 'is_all_zero_record', 'print_obj',
+           'b2a', 'a2b', 'get_week_day', 'zk_calc']
 
 
 def get_ts_s():
@@ -19,6 +20,14 @@ def get_ts_s_str():
 
 def str_to_ts_s(s, mask='%Y-%m-%d %H:%M:%S'):
     return int(time.mktime(time.strptime(s, mask)))
+
+
+def is_all_zero_record(record):
+    attributes = ['view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like']
+    for attribute in attributes:
+        if record[attribute] > 0:
+            return False
+    return True
 
 
 def print_obj(obj):
