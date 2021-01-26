@@ -3,10 +3,10 @@ from pybiliapi import BiliApi
 from db import Session, DBOperation
 from threading import Thread
 from queue import Queue
-from common import get_valid, test_archive_rank_by_partion, test_video_view, \
+from common import get_valid, test_archive_rank_by_partion, test_video_view, test_video_stat, \
     add_video_record_via_stat_api, update_video, add_video_via_bvid, \
     InvalidObjCodeError, TddCommonError, AlreadyExistError
-from util import get_ts_s, get_ts_s_str, a2b
+from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record
 import math
 from conf import get_proxy_pool_url
 from serverchan import sc_send
@@ -296,6 +296,33 @@ class C30PipelineRunner(Thread):
             record = record_queue.get()
             aid_record_dict[record.aid] = record
         self.logger.info('%d record(s) left after remove duplication' % len(aid_record_dict))
+
+        # check all zero records
+        bapi_with_proxy = BiliApi(proxy_pool_url=get_proxy_pool_url())
+        for aid, record in aid_record_dict.items():
+            if is_all_zero_record(record):
+                self.logger.warning('All zero record of video aid %d detected! Try get video record again...' % aid)
+                # get stat_obj
+                stat_obj = get_valid(bapi_with_proxy.get_video_stat, (aid,), test_video_stat)
+                if stat_obj is None:
+                    self.logger.warning('Fail to get valid stat obj of video aid %d!' % aid)
+                    continue
+                if stat_obj['code'] != 0:
+                    self.logger.warning('Fail to get stat obj with code 0 of video aid %d! code %s detected' % (
+                        aid, stat_obj['code']))
+                    continue
+                # assemble new record
+                new_record = Record(
+                    get_ts_s(), aid, a2b(aid),
+                    -1 if stat_obj['data']['view'] == '--' else stat_obj['data']['view'], stat_obj['data']['danmaku'],
+                    stat_obj['data']['reply'], stat_obj['data']['favorite'], stat_obj['data']['coin'],
+                    stat_obj['data']['share'], stat_obj['data']['like']
+                )
+                if is_all_zero_record(new_record):
+                    self.logger.warning('Get all zero record of video aid %d again!' % aid)
+                    continue
+                aid_record_dict[aid] = new_record
+                self.logger.warning('Use new not all zero record %s instead.' % str(new_record))
 
         # get need insert aid list
         session = Session()
