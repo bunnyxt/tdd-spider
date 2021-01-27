@@ -4,8 +4,8 @@ import random
 
 
 class ApiFetcher(Fetcher):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, sleep_time=0, max_repeat=3):
+        super().__init__(sleep_time=sleep_time, max_repeat=max_repeat)
         self._ua_list = [
             # PC Browser
             # Google,win
