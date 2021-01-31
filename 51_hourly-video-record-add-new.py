@@ -517,8 +517,9 @@ class RecentRecordsAnalystRunner(Thread):
                     try:
                         line_arr = line.rstrip('\n').split(',')
                         # 'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'
-                        record = Record(line_arr[0], line_arr[1], line_arr[2], line_arr[3], line_arr[4], line_arr[5],
-                                        line_arr[6], line_arr[7], line_arr[8], line_arr[9])
+                        record = Record(int(line_arr[0]), int(line_arr[1]), line_arr[2],
+                                        int(line_arr[3]), int(line_arr[4]), int(line_arr[5]), int(line_arr[6]),
+                                        int(line_arr[7]), int(line_arr[8]), int(line_arr[9]))
                         aid_recent_records_dict[record.aid].append(record)
                         file_records += 1
                     except Exception as e:
