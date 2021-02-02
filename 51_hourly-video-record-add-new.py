@@ -489,6 +489,40 @@ class RecordsSaveToFileRunner(Thread):
         self.logger.info('Finish save %d records into file %s!' % (len(self.records), current_filename_path))
 
 
+class RecordsSaveToDbRunner(Thread):
+    def __init__(self, records):
+        super().__init__()
+        self.records = records
+        self.logger = logging.getLogger('RecordsSaveToDbRunner')
+
+    def run(self):
+        self.logger.info('Now start saving records to db...')
+        session = Session()
+        sql_prefix = 'insert into ' \
+                     'tdd_video_record_hourly(added, bvid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
+                     'values '
+        sql = sql_prefix
+        for idx, record in enumerate(self.records, 1):
+            sql += '(%d, "%s", %d, %d, %d, %d, %d, %d, %d), ' % (
+                record.added, record.bvid,
+                record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like
+            )
+            if idx % 1000 == 0:
+                sql = sql[:-2]  # remove ending comma and space
+                session.execute(sql)
+                session.commit()
+                sql = sql_prefix
+                if idx % 10000 == 0:
+                    self.logger.info('%d / %d done' % (idx, len(self.records)))
+        if sql != sql_prefix:
+            sql = sql[:-2]  # remove ending comma and space
+            session.execute(sql)
+            session.commit()
+        self.logger.info('%d / %d done' % (len(self.records), len(self.records)))
+        session.close()
+        self.logger.info('Finish save %d records into db!' % len(self.records))
+
+
 class RecentRecordsAnalystRunner(Thread):
     def __init__(self, records, time_task, data_folder='data/', recent_file_num=2):
         super().__init__()
@@ -892,9 +926,10 @@ def run_hourly_video_record_add(time_task):
     logger.info('Now start downstream data analysis pipelines...')
     data_analysis_pipeline_runner_list = [
         RecordsSaveToFileRunner(records, time_task),
+        RecordsSaveToDbRunner(records),
         RecentRecordsAnalystRunner(records, time_task),
         RecentActivityFreqUpdateRunner(time_label),
-        
+
     ]
     for runner in data_analysis_pipeline_runner_list:
         runner.start()
