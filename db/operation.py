@@ -389,3 +389,12 @@ class DBOperation:
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
             return None
+
+    @classmethod
+    def query_video_records_of_given_aid_added_before_given_ts(cls, aid, ts, session):
+        try:
+            result = session.query(TddVideo.aid).filter(TddVideo.aid == aid, TddVideo.added < ts).all()
+            return result
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {'aid': aid, 'ts': ts}), exc_info=True)
+            return None
