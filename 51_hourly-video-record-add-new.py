@@ -490,9 +490,10 @@ class RecordsSaveToFileRunner(Thread):
 
 
 class RecordsSaveToDbRunner(Thread):
-    def __init__(self, records):
+    def __init__(self, records, time_label):
         super().__init__()
         self.records = records
+        self.time_label = time_label
         self.logger = logging.getLogger('RecordsSaveToDbRunner')
 
     def run(self):
@@ -521,6 +522,29 @@ class RecordsSaveToDbRunner(Thread):
         self.logger.info('%d / %d done' % (len(self.records), len(self.records)))
         session.close()
         self.logger.info('Finish save %d records into db!' % len(self.records))
+
+        # TODO ugly design, should be separated into another class
+        if self.time_label == '23:00':
+            try:
+                session.execute('drop table if exists tdd_video_record_hourly_4')
+                self.logger.info('drop table tdd_video_record_hourly_4')
+
+                session.execute('rename table tdd_video_record_hourly_3 to tdd_video_record_hourly_4')
+                self.logger.info('rename table tdd_video_record_hourly_3 to tdd_video_record_hourly_4')
+
+                session.execute('rename table tdd_video_record_hourly_2 to tdd_video_record_hourly_3')
+                self.logger.info('rename table tdd_video_record_hourly_2 to tdd_video_record_hourly_3')
+
+                session.execute('rename table tdd_video_record_hourly to tdd_video_record_hourly_2')
+                self.logger.info('rename table tdd_video_record_hourly to tdd_video_record_hourly_2')
+
+                session.execute('create table tdd_video_record_hourly like tdd_video_record_hourly_2')
+                self.logger.info('create table tdd_video_record_hourly like tdd_video_record_hourly_2')
+            except Exception as e:
+                session.rollback()
+                self.logger.warning('Error occur when executing change tdd_video_record_hourly table. Detail: %s' % e)
+            else:
+                self.logger.info('Finish change tdd_video_record_hourly table!')
 
 
 class RecentRecordsAnalystRunner(Thread):
@@ -926,7 +950,7 @@ def run_hourly_video_record_add(time_task):
     logger.info('Now start downstream data analysis pipelines...')
     data_analysis_pipeline_runner_list = [
         RecordsSaveToFileRunner(records, time_task),
-        RecordsSaveToDbRunner(records),
+        RecordsSaveToDbRunner(records, time_label),
         RecentRecordsAnalystRunner(records, time_task),
         RecentActivityFreqUpdateRunner(time_label),
 
