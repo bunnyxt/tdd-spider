@@ -6,7 +6,7 @@ from queue import Queue
 from common import get_valid, test_archive_rank_by_partion, test_video_view, test_video_stat, \
     add_video_record_via_stat_api, update_video, add_video_via_bvid, \
     InvalidObjCodeError, TddCommonError, AlreadyExistError
-from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, str_to_ts_s
+from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, str_to_ts_s, ts_s_to_str
 import math
 import time
 import datetime
@@ -469,6 +469,7 @@ class RecordsSaveToFileRunner(Thread):
         super().__init__()
         self.records = records
         self.time_task = time_task
+        self.time_label =  time_task[-5:]
         self.data_folder = data_folder.rstrip('/') + '/'
         self.current_filename = '%s.csv' % self.time_task
         self.logger = logging.getLogger('RecordsSaveToFileRunner')
@@ -487,6 +488,35 @@ class RecordsSaveToFileRunner(Thread):
                     self.logger.info('%d / %d done' % (idx, len(self.records)))
             self.logger.info('%d / %d done' % (len(self.records), len(self.records)))
         self.logger.info('Finish save %d records into file %s!' % (len(self.records), current_filename_path))
+
+        # TODO ugly design, should be separated into another class
+        if self.time_label == '23:00':
+            try:
+                # get today filename prefix
+                day_prefix = ts_s_to_str(get_ts_s())[:10]
+                day_prefix_path = self.data_folder + day_prefix
+
+                # pack today file
+                self.logger.info('pack %s*.csv into %s.tar.gz' % (day_prefix_path, day_prefix_path))
+                pack_result = os.popen('mkdir %s && cp %s*.csv %s && tar -zcvf %s.tar.gz %s && rm -r %s' % (
+                    day_prefix_path, day_prefix_path, day_prefix_path, day_prefix_path, day_prefix_path, day_prefix_path
+                ))
+                for line in pack_result:
+                    self.logger.info(line.rstrip('\n'))
+
+                # get 3 day before filename prefix
+                day_prefix_3d_before = ts_s_to_str(get_ts_s() - 3 * 24 * 60 * 60)[:10]
+                day_prefix_3d_before_path = self.data_folder + day_prefix_3d_before
+
+                # remove 3 day before csv file
+                self.logger.info('remove %s*.csv' % day_prefix_3d_before_path)
+                pack_result = os.popen('rm %s*.csv' % day_prefix_3d_before_path)
+                for line in pack_result:
+                    self.logger.info(line.rstrip('\n'))
+            except Exception as e:
+                self.logger.error('Error occur when executing packing files shell scripts. Detail: %s' % e)
+            else:
+                self.logger.info('Finish execute packing files shell scripts!')
 
 
 class RecordsSaveToDbRunner(Thread):
@@ -542,7 +572,7 @@ class RecordsSaveToDbRunner(Thread):
                 self.logger.info('create table tdd_video_record_hourly like tdd_video_record_hourly_2')
             except Exception as e:
                 session.rollback()
-                self.logger.warning('Error occur when executing change tdd_video_record_hourly table. Detail: %s' % e)
+                self.logger.error('Error occur when executing change tdd_video_record_hourly table. Detail: %s' % e)
             else:
                 self.logger.info('Finish change tdd_video_record_hourly table!')
 
