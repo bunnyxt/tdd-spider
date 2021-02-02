@@ -8,6 +8,8 @@ from common import get_valid, test_archive_rank_by_partion, test_video_view, tes
     InvalidObjCodeError, TddCommonError, AlreadyExistError
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, str_to_ts_s
 import math
+import time
+import datetime
 import os
 import re
 from conf import get_proxy_pool_url
@@ -750,6 +752,115 @@ class RecentRecordsAnalystRunner(Thread):
                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
 
 
+class RecentActivityFreqUpdateRunner(Thread):
+    def __init__(self, time_label):
+        super().__init__()
+        self.time_label = time_label
+        self.logger = logging.getLogger('RecordsSaveToFileRunner')
+
+    def _update_recent(self, session):
+        self.logger.info('Now start update recent field...')
+        try:
+            now_ts = get_ts_s()
+            last_1d_ts = now_ts - 1 * 24 * 60 * 60
+            last_7d_ts = now_ts - 7 * 24 * 60 * 60
+            session.execute('update tdd_video set recent = 0 where added < %d' % last_7d_ts)
+            session.execute('update tdd_video set recent = 1 where added >= %d && added < %d' % (
+                last_7d_ts, last_1d_ts))
+            session.execute('update tdd_video set recent = 2 where added >= %d' % last_1d_ts)
+            session.commit()
+            self.logger.info('Finish update recent field!')
+        except Exception as e:
+            self.logger.info('Fail to update recent field. Exception caught. Detail: %s' % e)
+            session.rollback()
+
+    def _update_activity(self, session, active_threshold=1000, hot_threshold=5000):
+        self.logger.info('Now start update activity field...')
+        try:
+            this_week_ts_begin = int(time.mktime(time.strptime(str(datetime.date.today()), '%Y-%m-%d'))) + 4 * 60 * 60
+            this_week_ts_end = this_week_ts_begin + 30 * 60
+            this_week_results = session.execute(
+                'select r.`aid`, `view` from tdd_video_record r join tdd_video v on r.aid = v.aid ' +
+                'where r.added >= %d && r.added <= %d' % (this_week_ts_begin, this_week_ts_end))
+            this_week_records = {}
+            for result in this_week_results:
+                aid = result[0]
+                view = result[1]
+                if aid in this_week_records.keys():
+                    last_view = this_week_records[aid]
+                    if view > last_view:
+                        this_week_records[aid] = view
+                else:
+                    this_week_records[aid] = view
+
+            last_week_ts_begin = this_week_ts_begin - 7 * 24 * 60 * 60
+            last_week_ts_end = last_week_ts_begin + 30 * 60
+            last_week_results = session.execute(
+                'select r.`aid`, `view` from tdd_video_record r join tdd_video v on r.aid = v.aid ' +
+                'where r.added >= %d && r.added <= %d' % (last_week_ts_begin, last_week_ts_end))
+            last_week_records = {}
+            for result in last_week_results:
+                aid = result[0]
+                view = result[1]
+                if aid in last_week_records.keys():
+                    last_view = last_week_records[aid]
+                    if view < last_view:
+                        last_week_records[aid] = view
+                else:
+                    last_week_records[aid] = view
+
+            last_week_record_keys = last_week_records.keys()
+            diff_records = {}
+            for aid in this_week_records.keys():
+                if aid in last_week_record_keys:
+                    diff_records[aid] = this_week_records[aid] - last_week_records[aid]
+                else:
+                    diff_records[aid] = this_week_records[aid]
+
+            active_aids = []
+            hot_aids = []
+            for aid, view in diff_records.items():
+                if view >= hot_threshold:
+                    hot_aids.append(aid)
+                elif view >= active_threshold:
+                    active_aids.append(aid)
+
+            session.execute('update tdd_video set activity = 0')
+            for aid in active_aids:
+                session.execute('update tdd_video set activity = 1 where aid = %d' % aid)
+            for aid in hot_aids:
+                session.execute('update tdd_video set activity = 2 where aid = %d' % aid)
+            session.commit()
+
+            self.logger.info('Finish update activity field! %d active videos and %d hot videos set.' % (
+                len(active_aids), len(hot_aids)))
+        except Exception as e:
+            self.logger.info('Fail to update activity field. Exception caught. Detail: %s' % e)
+            session.rollback()
+
+    def _update_freq(self, session):
+        self.logger.info('Now start update freq field...')
+        try:
+            session.execute('update tdd_video set freq = 0')
+            session.execute('update tdd_video set freq = 1 where activity = 1')
+            session.execute('update tdd_video set freq = 2 where activity = 2 || recent = 1')
+            session.commit()
+            self.logger.info('Finish update freq field!')
+        except Exception as e:
+            self.logger.info('Fail to update freq field. Exception caught. Detail: %s' % e)
+            session.rollback()
+
+    def run(self):
+        self.logger.info('Now start updating recent, activity, freq fields of video...')
+        session = Session()
+        self._update_recent(session)
+        if self.time_label == '04:00':
+            self._update_activity(session)
+        self._update_freq(session)
+        session.close()
+        self.logger.info('Finish update recent, activity, freq fields of video!')
+
+
 def run_hourly_video_record_add(time_task):
     time_label = time_task[-5:]  # current time, ex: 19:00
     # time_label = '04:00'  # DEBUG
@@ -782,7 +893,8 @@ def run_hourly_video_record_add(time_task):
     data_analysis_pipeline_runner_list = [
         RecordsSaveToFileRunner(records, time_task),
         RecentRecordsAnalystRunner(records, time_task),
-
+        RecentActivityFreqUpdateRunner(time_label),
+        
     ]
     for runner in data_analysis_pipeline_runner_list:
         runner.start()
