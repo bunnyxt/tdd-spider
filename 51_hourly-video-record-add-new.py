@@ -1,6 +1,6 @@
 from logutils import logging_init
 from pybiliapi import BiliApi
-from db import Session, DBOperation
+from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from threading import Thread
 from queue import Queue
 from common import get_valid, test_archive_rank_by_partion, test_video_view, test_video_stat, \
@@ -17,6 +17,10 @@ import logging
 logger = logging.getLogger('51')
 
 Record = namedtuple('Record', ['added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
+RecordSpeed = namedtuple('RecordSpeed', [
+    'start_ts', 'end_ts', 'timespan', 'per_seconds', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
+RecordSpeedRatio = namedtuple('RecordSpeedRatio', [
+    'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like', 'inf_magic_num'])
 
 
 def get_need_insert_aid_list(time_label, is_tid_30, session):
@@ -493,16 +497,97 @@ class RecentRecordsAnalystRunner(Thread):
         self.recent_file_num = recent_file_num
         self.logger = logging.getLogger('RecentRecordsAnalystRunner')
 
+    def _calc_record_speed(self, record_start, record_end, per_seconds=3600):
+        # record_start and record_end should be namedtuple Record
+        timespan = record_end.added - record_start.added
+        if timespan == 0:
+            raise ZeroDivisionError('timespan between two records should not be zero')
+        return RecordSpeed(
+            start_ts=record_start.added,
+            end_ts=record_end.added,
+            timespan=timespan,
+            per_seconds=per_seconds,
+            view=(record_end.view - record_start.view) / timespan * per_seconds,
+            danmaku=(record_end.danmaku - record_start.danmaku) / timespan * per_seconds,
+            reply=(record_end.reply - record_start.reply) / timespan * per_seconds,
+            favorite=(record_end.favorite - record_start.favorite) / timespan * per_seconds,
+            coin=(record_end.coin - record_start.coin) / timespan * per_seconds,
+            share=(record_end.share - record_start.share) / timespan * per_seconds,
+            like=(record_end.like - record_start.like) / timespan * per_seconds
+        )
+
+    def _calc_record_speed_ratio(self, record_speed_start, record_speed_end, inf_magic_num=99999999):
+        # record_speed_start and record_speed_end should be namedtuple RecordSpeedRatio
+        return RecordSpeedRatio(
+            view=(record_speed_end.view - record_speed_start.view) / record_speed_start.view
+            if record_speed_start.view != 0 else inf_magic_num * 1
+            if (record_speed_end.view - record_speed_start.view) > 0 else -1,
+            danmaku=(record_speed_end.danmaku - record_speed_start.danmaku) / record_speed_start.danmaku
+            if record_speed_start.danmaku != 0 else inf_magic_num * 1
+            if (record_speed_end.danmaku - record_speed_start.danmaku) > 0 else -1,
+            reply=(record_speed_end.reply - record_speed_start.reply) / record_speed_start.reply
+            if record_speed_start.reply != 0 else inf_magic_num * 1
+            if (record_speed_end.reply - record_speed_start.reply) > 0 else -1,
+            favorite=(record_speed_end.favorite - record_speed_start.favorite) / record_speed_start.favorite
+            if record_speed_start.favorite != 0 else inf_magic_num * 1
+            if (record_speed_end.favorite - record_speed_start.favorite) > 0 else -1,
+            coin=(record_speed_end.coin - record_speed_start.coin) / record_speed_start.coin
+            if record_speed_start.coin != 0 else inf_magic_num * 1
+            if (record_speed_end.coin - record_speed_start.coin) > 0 else -1,
+            share=(record_speed_end.share - record_speed_start.share) / record_speed_start.share
+            if record_speed_start.share != 0 else inf_magic_num * 1
+            if (record_speed_end.share - record_speed_start.share) > 0 else -1,
+            like=(record_speed_end.like - record_speed_start.like) / record_speed_start.like
+            if record_speed_start.like != 0 else inf_magic_num * 1
+            if (record_speed_end.like - record_speed_start.like) > 0 else -1,
+            inf_magic_num=inf_magic_num
+        )
+
+    def _assemble_record_abnormal_change(self, added, aid, attr,
+                                         speed_now, speed_last, speed_now_incr_rate,
+                                         period_range, speed_period, speed_overall,
+                                         this_record, last_record, description):
+        change_obj = TddVideoRecordAbnormalChange()
+        change_obj.added = added
+        change_obj.aid = aid
+        change_obj.attr = attr
+        change_obj.speed_now = speed_now
+        change_obj.speed_last = speed_last
+        change_obj.speed_now_incr_rate = speed_now_incr_rate
+        change_obj.period_range = period_range
+        change_obj.speed_period = speed_period
+        change_obj.speed_overall = speed_overall
+        change_obj.this_added = this_record.added
+        change_obj.this_view = this_record.view
+        change_obj.this_danmaku = this_record.danmaku
+        change_obj.this_reply = this_record.reply
+        change_obj.this_favorite = this_record.favorite
+        change_obj.this_coin = this_record.coin
+        change_obj.this_share = this_record.share
+        change_obj.this_like = this_record.like
+        change_obj.last_added = last_record.added
+        change_obj.last_view = last_record.view
+        change_obj.last_danmaku = last_record.danmaku
+        change_obj.last_reply = last_record.reply
+        change_obj.last_favorite = last_record.favorite
+        change_obj.last_coin = last_record.coin
+        change_obj.last_share = last_record.share
+        change_obj.last_like = last_record.like
+        change_obj.description = description
+        return change_obj
+
     def run(self):
         self.logger.info('Now start analysing recent records...')
+
         # get recent records filenames
         filenames = os.listdir(self.data_folder)
         if self.current_filename in filenames:
-            filenames.remove(self.current_filename)
+            filenames.remove(self.current_filename)  # remove current filename to avoid duplicate
         recent_records_filenames = sorted(
             list(filter(lambda file: re.search(r'^\d{4}-\d{2}-\d{2} \d{2}:00\.csv$', file), filenames)),
             key=lambda x: str_to_ts_s(x[:-4] + ':00')
         )[-self.recent_file_num:]
+
         # load records from recent files
         self.logger.info('Will load records from recent %d files, filenames: %r' % (
             self.recent_file_num, recent_records_filenames))
@@ -527,13 +612,142 @@ class RecentRecordsAnalystRunner(Thread):
                             line, e))
                 self.logger.info('%d records loaded from file %s' % (file_records, filename))
                 total_records += file_records
+
         # add this round records
         for record in self.records:
             aid_recent_records_dict[record.aid].append(record)
         aid_recent_records_dict = dict(aid_recent_records_dict)
-        self.logger.info('Total %d records in total %d aids from recent %d files loaded' % (
+        self.logger.info('Total %d records of total %d aids from recent %d files loaded' % (
             total_records, len(aid_recent_records_dict.keys()), self.recent_file_num))
-        # TODO implement old 08 here
+
+        # get video aid pubdate dict, since the following check process requires
+        session = Session()
+        self.logger.info('Now get pubdate of all videos from db...')
+        aid_pubdate_list = DBOperation.query_video_pubdate_all(session)
+        if not aid_pubdate_list:
+            self.logger.error('Fail to get pubdate of all videos from db!')
+            return
+        aid_pubdate_dict = {}
+        for aid, pubdate in aid_pubdate_list:
+            if pubdate is None:
+                continue
+            aid_pubdate_dict[aid] = pubdate
+        del aid_pubdate_list
+        self.logger.info('Finish get valid pubdate from %d videos!' % len(aid_pubdate_dict))
+
+        # check recent records
+        self.logger.info('Now check recent records...')
+        result_status_dict = defaultdict(list)
+        for idx, (aid, records) in enumerate(aid_recent_records_dict.items(), 1):
+            # get pubdate from aid_pubdate_dict
+            pubdate = aid_pubdate_dict.get(aid, None)
+            if pubdate is None:
+                self.logger.warning('Fail to get pubdate of video aid %d, continue' % aid)
+                result_status_dict['no_valid_pubdate'].append(aid)
+                continue
+            pubdate_record = Record(pubdate, aid, a2b(aid), 0, 0, 0, 0, 0, 0, 0)
+
+            records.sort(key=lambda r: r.added)  # sort by added
+
+            # TODO should be refactored in the future to support more check logic
+            # ensure at least 3 records
+            if len(records) <= 2:
+                # very common and not harmful to system, set to debug level is enough
+                self.logger.debug('Records len of video aid %d less than 3, continue' % aid)
+                result_status_dict['records_len_less_than_3'].append(aid)
+                continue
+
+            # ensure no all zero record (except the first record of video, which may be all zero)
+            has_all_zero_record = False
+            for idx, record in records:
+                if is_all_zero_record(record):
+                    if idx == 0:
+                        # check if this is the first record of video
+                        if len(DBOperation.query_video_records_of_given_aid_added_before_given_ts(
+                                aid, record.added, session)) > 0:
+                            # has records of this video added before this record
+                            continue
+                    self.logger.warning('Abnormal all zero record %s of video aid %d detected, continue' % (
+                        str(record), aid))
+                    has_all_zero_record = True
+                    break
+            if has_all_zero_record:
+                result_status_dict['has_all_zero_record'].append(aid)
+                continue
+
+            # calc record speed
+            # actually we can just delete one of duplicate records (with same added) instead of continue and skip check
+            # however, here the adjacent timespan of records should be around 1 hour
+            # so here we think zero timespan is error and should skip
+            speed_now = speed_last = None
+            try:
+                speed_now = self._calc_record_speed(records[-2], records[-1])
+                speed_last = self._calc_record_speed(records[-3], records[-2])
+                speed_period = self._calc_record_speed(records[0], records[-1])
+                speed_overall = self._calc_record_speed(pubdate_record, records[-1])
+            except ZeroDivisionError:
+                self.logger.warning('Zero timespan between adjacent records of video aid %d detected, continue' % aid)
+                result_status_dict['zero_timespan_between_adjacent_records'].append(aid)
+                continue
+
+            # calc record speed ratio
+            speed_ratio = self._calc_record_speed_ratio(speed_last, speed_now)
+
+            record_abnormal_change_list = []
+
+            # check unexpected speed now value drop
+            # rule: speed_now.prop < -10
+            for idx, prop in enumerate(RecordSpeed._fields[4:], 4):
+                value = speed_now[idx]
+                if value < -10:
+                    change_obj = self._assemble_record_abnormal_change(
+                        added=records[-1].added, aid=aid, attr=prop,
+                        speed_now=speed_now[idx], speed_last=speed_last[idx], speed_now_incr_rate=speed_ratio[idx-4],
+                        period_range=speed_period.timespan, speed_period=speed_period[idx],
+                        speed_overall=speed_overall[idx],
+                        this_record=records[-1], last_record=records[-2],
+                        description='unexpected drop detected, speed now of prop %s is %.2f, < -10' % (prop, value)
+                    )
+                    self.logger.info('Found unexpected drop of video aid %d, description: %s' % (
+                        aid, change_obj.description))
+                    result_status_dict['unexpected_drop'].append(aid)
+                    record_abnormal_change_list.append(change_obj)
+
+            # check unexpected speed now value increase
+            # rule: speed_ratio.prop > 2 and speed_now.prop > 50
+            for idx, prop in enumerate(RecordSpeedRatio._fields[:7]):
+                value = speed_ratio[idx]
+                if value > 2 and speed_now[idx+4] > 50:
+                    change_obj = self._assemble_record_abnormal_change(
+                        added=records[-1].added, aid=aid, attr=prop,
+                        speed_now=speed_now[idx+4], speed_last=speed_last[idx+4], speed_now_incr_rate=speed_ratio[idx],
+                        period_range=speed_period.timespan, speed_period=speed_period[idx+4],
+                        speed_overall=speed_overall[idx+4],
+                        this_record=records[-1], last_record=records[-2],
+                        description='unexpected increase detected, speed now of prop %s is %s, > -200%%' % (
+                            prop, '%.2f' % value if abs(value) is not 99999999 else '%sinf' % '-' if value < 0 else '')
+                    )
+                    self.logger.info('Found unexpected increase of video aid %d, description: %s' % (
+                        aid, change_obj.description))
+                    result_status_dict['unexpected_increase'].append(aid)
+                    record_abnormal_change_list.append(change_obj)
+
+            # commit changes
+            try:
+                for change_obj in record_abnormal_change_list:
+                    session.add(change_obj)
+                    session.commit()
+            except Exception as e:
+                self.logger.error('Fail to add abnormal change of video aid %d to db. Exception caught. Detail: %s' % (
+                    aid, e))
+
+            if idx % 10000 == 0:
+                self.logger.info('%d / %d done' % (idx, len(aid_recent_records_dict)))
+        self.logger.info('%d / %d done' % (len(aid_recent_records_dict), len(aid_recent_records_dict)))
+
+        session.close()
+        self.logger.info('Finish analysing recent records! %s' %
+                         ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
 
 
 def run_hourly_video_record_add(time_task):
@@ -567,6 +781,8 @@ def run_hourly_video_record_add(time_task):
     logger.info('Now start downstream data analysis pipelines...')
     data_analysis_pipeline_runner_list = [
         RecordsSaveToFileRunner(records, time_task),
+        RecentRecordsAnalystRunner(records, time_task),
+
     ]
     for runner in data_analysis_pipeline_runner_list:
         runner.start()
