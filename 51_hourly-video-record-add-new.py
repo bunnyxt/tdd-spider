@@ -695,9 +695,9 @@ class RecentRecordsAnalystRunner(Thread):
 
             # ensure no all zero record (except the first record of video, which may be all zero)
             has_all_zero_record = False
-            for idx, record in records:
+            for idx2, record in records:
                 if is_all_zero_record(record):
-                    if idx == 0:
+                    if idx2 == 0:
                         # check if this is the first record of video
                         if len(DBOperation.query_video_records_of_given_aid_added_before_given_ts(
                                 aid, record.added, session)) > 0:
@@ -733,14 +733,14 @@ class RecentRecordsAnalystRunner(Thread):
 
             # check unexpected speed now value drop
             # rule: speed_now.prop < -10
-            for idx, prop in enumerate(RecordSpeed._fields[4:], 4):
-                value = speed_now[idx]
+            for idx2, prop in enumerate(RecordSpeed._fields[4:], 4):
+                value = speed_now[idx2]
                 if value < -10:
                     change_obj = self._assemble_record_abnormal_change(
                         added=records[-1].added, aid=aid, attr=prop,
-                        speed_now=speed_now[idx], speed_last=speed_last[idx], speed_now_incr_rate=speed_ratio[idx-4],
-                        period_range=speed_period.timespan, speed_period=speed_period[idx],
-                        speed_overall=speed_overall[idx],
+                        speed_now=speed_now[idx2], speed_last=speed_last[idx2], speed_now_incr_rate=speed_ratio[idx2-4],
+                        period_range=speed_period.timespan, speed_period=speed_period[idx2],
+                        speed_overall=speed_overall[idx2],
                         this_record=records[-1], last_record=records[-2],
                         description='unexpected drop detected, speed now of prop %s is %.2f, < -10' % (prop, value)
                     )
@@ -751,14 +751,14 @@ class RecentRecordsAnalystRunner(Thread):
 
             # check unexpected speed now value increase
             # rule: speed_ratio.prop > 2 and speed_now.prop > 50
-            for idx, prop in enumerate(RecordSpeedRatio._fields[:7]):
-                value = speed_ratio[idx]
-                if value > 2 and speed_now[idx+4] > 50:
+            for idx2, prop in enumerate(RecordSpeedRatio._fields[:7]):
+                value = speed_ratio[idx2]
+                if value > 2 and speed_now[idx2+4] > 50:
                     change_obj = self._assemble_record_abnormal_change(
                         added=records[-1].added, aid=aid, attr=prop,
-                        speed_now=speed_now[idx+4], speed_last=speed_last[idx+4], speed_now_incr_rate=speed_ratio[idx],
-                        period_range=speed_period.timespan, speed_period=speed_period[idx+4],
-                        speed_overall=speed_overall[idx+4],
+                        speed_now=speed_now[idx2+4], speed_last=speed_last[idx2+4], speed_now_incr_rate=speed_ratio[idx2],
+                        period_range=speed_period.timespan, speed_period=speed_period[idx2+4],
+                        speed_overall=speed_overall[idx2+4],
                         this_record=records[-1], last_record=records[-2],
                         description='unexpected increase detected, speed now of prop %s is %s, > -200%%' % (
                             prop, '%.2f' % value if abs(value) is not 99999999 else '%sinf' % '-' if value < 0 else '')
