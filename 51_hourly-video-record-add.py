@@ -329,7 +329,8 @@ def hour(time_label):
     with open(data_folder + filename, 'w') as f:
         f.write('aid,added,view,danmaku,reply,favorite,coin,share,like\n')
         idx = 0
-        for record in new_video_record_list:
+        for i in range(len(new_video_record_list)):
+            record = new_video_record_list[i]
             f.write('%d,%d,%d,%d,%d,%d,%d,%d,%d\n'
                     % (record.aid, record.added, record.view, record.danmaku,
                        record.reply, record.favorite, record.coin, record.share, record.like))
