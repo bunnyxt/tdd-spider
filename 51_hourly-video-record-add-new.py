@@ -500,9 +500,11 @@ class RecordsSaveToFileRunner(Thread):
 
                 # pack today file
                 self.logger.info('pack %s*.csv into %s.tar.gz' % (day_prefix_path, day_prefix_path))
-                pack_result = os.popen('mkdir %s && cp %s*.csv %s && tar -zcvf %s.tar.gz %s && rm -r %s' % (
-                    day_prefix_path, day_prefix_path, day_prefix_path, day_prefix_path, day_prefix_path, day_prefix_path
-                ))
+                pack_result = os.popen(
+                    'cd %s && mkdir %s && cp %s*.csv %s && tar -zcvf %s.tar.gz %s && rm -r %s && cd ..' % (
+                        self.data_folder, day_prefix, day_prefix, day_prefix, day_prefix, day_prefix, day_prefix
+                    )
+                )
                 for line in pack_result:
                     self.logger.info(line.rstrip('\n'))
 
