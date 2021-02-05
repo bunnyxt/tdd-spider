@@ -993,13 +993,12 @@ class RankWeeklyUpdateRunner(Thread):
                     continue
 
                 # get base record
-                base_record = bvid_base_record_dict.get(
-                    bvid, Record(None, record.aid, record.bvid, 0, 0, 0, 0, 0, 0, 0))
-                if base_record.added is None:
+                base_record = bvid_base_record_dict.get(bvid, None)
+                if base_record is None:
                     # fail to get base record, check pubdate
                     if pubdate >= base_records_begin_ts:
                         # new video, published in this week, set base_record.added to pubdate
-                        base_record.added = pubdate
+                        base_record = Record(pubdate, record.aid, record.bvid, 0, 0, 0, 0, 0, 0, 0)
                     else:
                         # old video, published before this week, should have base record, so here mush be an error
                         self.logger.warning('Fail to get base record of old video bvid %s, continue' % bvid)
