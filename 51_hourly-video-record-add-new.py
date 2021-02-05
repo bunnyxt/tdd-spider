@@ -348,10 +348,9 @@ class C30PipelineRunner(Thread):
                      'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
                      'values '
         sql = sql_prefix
-        need_insert_and_succeed_count = 0
         need_insert_but_record_not_found_aid_list = []
         log_gap = 1000 * max(1, (len(need_insert_aid_list) // 1000 // 10))
-        for aid in need_insert_aid_list:
+        for idx, aid in enumerate(need_insert_aid_list, 1):
             record = aid_record_dict.get(aid, None)
             if not record:
                 need_insert_but_record_not_found_aid_list.append(aid)
@@ -360,20 +359,20 @@ class C30PipelineRunner(Thread):
                 record.added, record.aid,
                 record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like
             )
-            need_insert_and_succeed_count += 1
-            if need_insert_and_succeed_count % 1000 == 0:
+            if idx % 1000 == 0:
                 sql = sql[:-2]  # remove ending comma and space
                 session.execute(sql)
                 session.commit()
                 sql = sql_prefix
-                if need_insert_and_succeed_count % log_gap == 0:
-                    self.logger.info('%d inserted' % need_insert_and_succeed_count)
+                if idx % log_gap == 0:
+                    self.logger.info('%d / %d done' % (idx, len(need_insert_aid_list)))
         if sql != sql_prefix:
             sql = sql[:-2]  # remove ending comma and space
             session.execute(sql)
             session.commit()
-        self.logger.info('Finish inserting records! %d records added, %d aids left'
-                         % (need_insert_and_succeed_count, len(need_insert_but_record_not_found_aid_list)))
+        self.logger.info('%d / %d done' % (len(need_insert_aid_list), len(need_insert_aid_list)))
+        self.logger.info('Finish inserting records! %d records added, %d aids left' % (
+            len(need_insert_aid_list), len(need_insert_but_record_not_found_aid_list)))
 
         # check need insert but not found aid list
         # these aids should have record in aid_record_dict, but not found at present
