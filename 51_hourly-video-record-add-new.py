@@ -1038,6 +1038,9 @@ class RankWeeklyUpdateRunner(Thread):
         video_increment_list.reverse()
         self.logger.info('Finish sort video increment list!')
 
+        # select top 10000
+        video_increment_top_list = video_increment_list[:10000]
+
         # update sql
         self.logger.info('Now execute update sql...')
         try:
@@ -1050,7 +1053,7 @@ class RankWeeklyUpdateRunner(Thread):
             session.execute(create_tmp_table_sql)
             self.logger.info(create_tmp_table_sql)
 
-            for rank, c in enumerate(video_increment_list[:10000], 1):
+            for rank, c in enumerate(video_increment_top_list, 1):
                 sql = 'insert into tdd_video_record_rank_weekly_current_tmp values(' \
                       '"%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
                       (c[0], c[1], c[2],
@@ -1087,7 +1090,7 @@ class RankWeeklyUpdateRunner(Thread):
             17: 'point',
         }
         for prop_idx, prop in color_dict.items():
-            prop_list = sorted(list(map(lambda x: x[prop_idx], video_increment_list[:10000])))
+            prop_list = sorted(list(map(lambda x: x[prop_idx], video_increment_top_list)))
             # a
             value = float(prop_list[5000])
             session.execute('update tdd_video_record_rank_weekly_current_color set a = %f ' % value +
@@ -1136,7 +1139,7 @@ class RankWeeklyUpdateRunner(Thread):
 
                 # archive increments, just like add current increments, just add 1 more column called arch_id
                 self.logger.info('Now archiving increments...')
-                for rank, c in enumerate(video_increment_list[:10000], 1):
+                for rank, c in enumerate(video_increment_top_list, 1):
                     sql = 'insert into tdd_video_record_rank_weekly_archive values(' \
                           '%d, "%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
                           (arch_id, c[0], c[1], c[2],
