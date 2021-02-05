@@ -1183,6 +1183,8 @@ class RankWeeklyUpdateRunner(Thread):
                 session.execute(rename_tmp_table_sql)
                 self.logger.info(rename_tmp_table_sql)
                 self.logger.info('Finish update base!')
+            except Exception as e:
+                session.rollback()
                 self.logger.warning(
                     'Fail to archive this week data and start a new week. Exception caught. Detail: %s' % e)
             else:
@@ -1194,7 +1196,7 @@ class RankWeeklyUpdateRunner(Thread):
 
 def run_hourly_video_record_add(time_task):
     time_label = time_task[-5:]  # current time, ex: 19:00
-    time_label = '04:00'  # DEBUG
+    # time_label = '04:00'  # DEBUG
     logger.info('Now start hourly video record add, time label: %s..' % time_label)
 
     # upstream data acquisition pipeline, c30 and c0 pipeline runner, init -> start -> join -> records
