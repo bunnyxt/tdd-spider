@@ -846,7 +846,7 @@ class RecentActivityFreqUpdateRunner(Thread):
     def __init__(self, time_label):
         super().__init__()
         self.time_label = time_label
-        self.logger = logging.getLogger('RecordsSaveToFileRunner')
+        self.logger = logging.getLogger('RecentActivityFreqUpdateRunner')
 
     def _update_recent(self, session):
         self.logger.info('Now start update recent field...')
