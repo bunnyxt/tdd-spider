@@ -1087,7 +1087,7 @@ class RankWeeklyUpdateRunner(Thread):
             17: 'point',
         }
         for prop_idx, prop in color_dict.items():
-            prop_list = sorted(list(map(lambda x: x[prop_idx], video_increment_list)))
+            prop_list = sorted(list(map(lambda x: x[prop_idx], video_increment_list[:10000])))
             # a
             value = float(prop_list[5000])
             session.execute('update tdd_video_record_rank_weekly_current_color set a = %f ' % value +
