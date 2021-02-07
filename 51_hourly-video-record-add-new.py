@@ -134,26 +134,26 @@ class C30NeedAddButNotFoundAidsChecker(Thread):
                 self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
                 result_status_dict['fail_aids'].append(aid)
             else:
-                # init change flags
-                code_change_flag = False
-                tid_change_flag = False
                 # check update logs
                 for log in tdd_video_logs:
-                    if log.attr == 'code':
-                        code_change_flag = True
-                    if log.attr == 'tid':
-                        tid_change_flag = True
                     self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
                                      % (log.aid, log.attr, log.oldval, log.newval))
                 # set result status
                 # NOTE: here maybe code_change_aids and tid_change_aids both +1 aid
-                if code_change_flag:
+                tdd_video_logs_attr_list = [ log.attr for log in tdd_video_logs]
+                expected_change_found = False
+                if 'code' in tdd_video_logs_attr_list:
                     result_status_dict['code_change_aids'].append(aid)
-                if tid_change_flag:
+                    expected_change_found = True
+                if 'tid' in tdd_video_logs_attr_list:
                     result_status_dict['tid_change_aids'].append(aid)
-                if not code_change_flag and not code_change_flag:
-                    self.logger.warning('No code or tid change found for video aid %d, need further check' % aid)
-                    result_status_dict['no_change_found_aids'].append(aid)
+                    expected_change_found = True
+                if 'state' in tdd_video_logs_attr_list and 'forward' in tdd_video_logs_attr_list:
+                    result_status_dict['state_and_forward_change_aids'].append(aid)
+                    expected_change_found = True
+                if not expected_change_found:
+                    self.logger.warning('No expected change (code / tid / state & forward) found for video aid %d, need further check' % aid)
+                    result_status_dict['no_expected_change_found_aids'].append(aid)
             finally:
                 if idx % 10 == 0:
                     self.logger.info('%d / %d done' % (idx, len(self.need_insert_but_record_not_found_aid_list)))
@@ -1199,7 +1199,6 @@ class RankWeeklyUpdateRunner(Thread):
 
 def run_hourly_video_record_add(time_task):
     time_label = time_task[-5:]  # current time, ex: 19:00
-    # time_label = '04:00'  # DEBUG
     logger.info('Now start hourly video record add, time label: %s..' % time_label)
 
     # upstream data acquisition pipeline, c30 and c0 pipeline runner, init -> start -> join -> records
