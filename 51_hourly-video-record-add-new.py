@@ -972,6 +972,8 @@ class RankWeeklyUpdateRunner(Thread):
         self.logger.info('Now start updating rank weekly...')
         session = Session()
 
+        # TODO check why the following two db query need at least 1 min to finish and optimize it
+
         # get record base dict
         # bvid -> added, view, danmaku, reply, favorite, coin, share, like
         bvid_base_record_dict = DBOperation.query_video_record_rank_weekly_base_dict(session)
