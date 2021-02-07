@@ -184,7 +184,7 @@ class C30NoNeedInsertAidsChecker(Thread):
         self.logger.info('Now start checking no need insert records...')
         session = Session()
         bapi_with_proxy = BiliApi(get_proxy_pool_url())
-        _403_aids = DBOperation.query_403_video_aids()
+        _403_aids = DBOperation.query_403_video_aids(session)
         result_status_dict = defaultdict(list)
         for idx, aid in enumerate(self.no_need_insert_aid_list, 1):
             # check whether -403 video
