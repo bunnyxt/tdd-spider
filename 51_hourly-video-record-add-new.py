@@ -757,7 +757,7 @@ class RecentRecordsAnalystRunner(Thread):
 
             # ensure no all zero record (except the first record of video, which may be all zero)
             has_all_zero_record = False
-            for idx2, record in records:
+            for idx2, record in enumerate(records):
                 if is_all_zero_record(record):
                     if idx2 == 0:
                         # check if this is the first record of video
