@@ -740,11 +740,8 @@ class RecentRecordsAnalystRunner(Thread):
                 result_status_dict['no_valid_pubdate'].append(aid)
                 continue
             pubdate_record = Record(pubdate, aid, a2b(aid), 0, 0, 0, 0, 0, 0, 0)
-            self.logger.info('TMP DEBUG pubdate_record created')
-            self.logger.info('TMP DEBUG records: %r' % records)
 
             records.sort(key=lambda r: r.added)  # sort by added
-            self.logger.info('TMP DEBUG sorted records: %r' % records)
 
             # TODO should be refactored in the future to support more check logic
             # ensure at least 3 records
@@ -753,7 +750,6 @@ class RecentRecordsAnalystRunner(Thread):
                 self.logger.debug('Records len of video aid %d less than 3, continue' % aid)
                 result_status_dict['records_len_less_than_3'].append(aid)
                 continue
-            self.logger.info('TMP DEBUG at least 3 records ensured')
 
             # ensure no all zero record (except the first record of video, which may be all zero)
             has_all_zero_record = False
@@ -772,7 +768,6 @@ class RecentRecordsAnalystRunner(Thread):
             if has_all_zero_record:
                 result_status_dict['has_all_zero_record'].append(aid)
                 continue
-            self.logger.info('TMP DEBUG no all zero record ensured')
 
             # calc record speed
             # actually we can just delete one of duplicate records (with same added) instead of continue and skip check
@@ -788,11 +783,9 @@ class RecentRecordsAnalystRunner(Thread):
                 self.logger.warning('Zero timespan between adjacent records of video aid %d detected, continue' % aid)
                 result_status_dict['zero_timespan_between_adjacent_records'].append(aid)
                 continue
-            self.logger.info('TMP DEBUG speed_now and speed_last created')
 
             # calc record speed ratio
             speed_ratio = self._calc_record_speed_ratio(speed_last, speed_now)
-            self.logger.info('TMP DEBUG speed_ratio created')
 
             record_abnormal_change_list = []
 
@@ -813,7 +806,6 @@ class RecentRecordsAnalystRunner(Thread):
                         aid, change_obj.description))
                     result_status_dict['unexpected_drop'].append(aid)
                     record_abnormal_change_list.append(change_obj)
-            self.logger.info('TMP DEBUG unexpected speed now value drop checked')
 
             # check unexpected speed now value increase
             # rule: speed_ratio.prop > 2 and speed_now.prop > 50
@@ -833,7 +825,6 @@ class RecentRecordsAnalystRunner(Thread):
                         aid, change_obj.description))
                     result_status_dict['unexpected_increase'].append(aid)
                     record_abnormal_change_list.append(change_obj)
-            self.logger.info('TMP DEBUG unexpected speed now value increase checked')
 
             # commit changes
             try:
@@ -843,7 +834,6 @@ class RecentRecordsAnalystRunner(Thread):
             except Exception as e:
                 self.logger.error('Fail to add abnormal change of video aid %d to db. Exception caught. Detail: %s' % (
                     aid, e))
-            self.logger.info('TMP DEBUG changes committed')
 
             if idx % 10000 == 0:
                 self.logger.info('%d / %d done' % (idx, len(aid_recent_records_dict)))
