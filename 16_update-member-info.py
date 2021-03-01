@@ -5,6 +5,7 @@ from common import update_member, TddCommonError
 from serverchan import sc_send
 from util import get_ts_s, ts_s_to_str
 from conf import get_proxy_pool_url
+from collections import Counter
 import logging
 logger = logging.getLogger('16')
 
@@ -27,6 +28,8 @@ def update_member_info():
     change_count = 0
     change_log_count = 0
 
+    new_name_counter = Counter()  # TMP ---- to prevent 'ENA' event ----
+
     for i, mid in enumerate(mids, 1):
         try:
             tdd_member_logs = update_member(mid, bapi_with_proxy, session)
@@ -44,6 +47,16 @@ def update_member_info():
             for log in tdd_member_logs:
                 logger.info('%d, %s, %s, %s' % (log.mid, log.attr, log.oldval, log.newval))
                 change_log_count += 1
+                # TMP ---- to prevent 'ENA' event ---- begin
+                if log.attr == 'name':
+                    new_name_counter[log.newval] += 1
+                    if new_name_counter[log.newval] >= 3:
+                        error_msg = 'New name of %s appeared %d times, maybe proxy error! current mid: %d, progress: %d / %d' % (
+                            log.newval, new_name_counter[log.newval], mid, i, len(mids)
+                        )
+                        sc_send('16 ERROR OCCURRED', error_msg)
+                        raise RuntimeError(error_msg)
+                # TMP ---- to prevent 'ENA' event ---- end
             logger.debug('Finish update member info mid %d' % mid)
         finally:
             if i % 1000 == 0:
