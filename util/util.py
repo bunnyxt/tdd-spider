@@ -76,14 +76,18 @@ def zk_calc(view, danmaku, reply, favorite, page=1):
         xiub = 50
     else:
         xiub = round(favorite / view * 250, 2)
-        if xiub > 50 or xiub < 0:
+        if favorite < 0:  # 负收藏以绝对值计算修正B，不受50上限和10反馈影响
+            xiub = abs(xiub)
+        elif xiub > 50 or xiub < 0:
             xiub = 50
 
     bofang_ori = bofang
     if xiub < 10:
         bofang = bofang * xiub * 0.1
 
-    if bofang_ori + favorite + danmaku * 10 + reply * 20 == 0:
+    if danmaku < 0 or reply < 0:  # 负弹幕/评论按照0计算修正A
+        xiua = 0
+    elif bofang_ori + favorite + danmaku * 10 + reply * 20 == 0:
         xiua = 1
     else:
         xiua = round(
