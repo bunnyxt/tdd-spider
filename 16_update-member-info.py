@@ -50,7 +50,7 @@ def update_member_info():
                 # TMP ---- to prevent 'ENA' event ---- begin
                 if log.attr == 'name':
                     new_name_counter[log.newval] += 1
-                    if new_name_counter[log.newval] >= 3:
+                    if new_name_counter[log.newval] >= 3 and log.newval != '账号已注销':
                         error_msg = 'New name of %s appeared %d times, maybe proxy error! current mid: %d, progress: %d / %d' % (
                             log.newval, new_name_counter[log.newval], mid, i, len(mids)
                         )
