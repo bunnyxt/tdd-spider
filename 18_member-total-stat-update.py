@@ -3,10 +3,11 @@ from logutils import logging_init
 from db import Session, TddMemberTotalStatRecord
 from util import get_ts_s, ts_s_to_str
 from serverchan import sc_send
+logger = logging.getLogger('18')
 
 
 def member_total_stat_update():
-    logging.info('Now start member total stat update...')
+    logger.info('Now start member total stat update...')
 
     session = Session()
 
@@ -20,7 +21,7 @@ def member_total_stat_update():
         result = session.execute(sql)
         result = [[r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]] for r in result]
         result_len = len(result)
-        logging.info('%d result got' % result_len)
+        logger.info('%d result got' % result_len)
 
         mid_dict = {}
         for r in result:
@@ -43,7 +44,7 @@ def member_total_stat_update():
             count += 1
             if count % 100 == 0:
                 session.commit()
-                logging.info('%d / %d added' % (count, mid_dict_len))
+                logger.info('%d / %d added' % (count, mid_dict_len))
 
         finish_ts = get_ts_s()
 
@@ -56,18 +57,18 @@ def member_total_stat_update():
             'mid dict len: %d\n\n' % mid_dict_len + \
             'by.bunnyxt, %s' % ts_s_to_str(get_ts_s())
 
-        logging.info('Finish member total stat update!')
+        logger.info('Finish member total stat update!')
 
-        logging.info(summary)
+        logger.info(summary)
 
         # send sc
         sc_result = sc_send('Finish member total stat update!', summary)
         if sc_result['errno'] == 0:
-            logging.info('Sc summary sent successfully.')
+            logger.info('Sc summary sent successfully.')
         else:
-            logging.warning('Sc summary sent wrong. sc_result = %s.' % sc_result)
+            logger.warning('Sc summary sent wrong. sc_result = %s.' % sc_result)
     except Exception as e:
-        logging.exception(e)
+        logger.exception(e)
 
     session.close()
 
