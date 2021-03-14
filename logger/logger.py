@@ -73,28 +73,6 @@ LOG_CONFIG_DICT = {
             'backupCount': 30,
             'filters': ['warning_plus_filter']
         },
-        'file_info_13': {
-            'level': 'INFO',
-            'formatter': 'simple',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(LOG_DIR, '13_info.log'),
-            'when': "d",
-            'interval': 1,
-            'encoding': 'utf8',
-            'backupCount': 30,
-            'filters': ['info_plus_filter']
-        },
-        'file_warning_13': {
-            'level': 'WARNING',
-            'formatter': 'simple',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(LOG_DIR, '13_warning.log'),
-            'when': "d",
-            'interval': 1,
-            'encoding': 'utf8',
-            'backupCount': 30,
-            'filters': ['warning_plus_filter']
-        },
         'file_info_14': {
             'level': 'INFO',
             'formatter': 'simple',
@@ -299,10 +277,6 @@ LOG_CONFIG_DICT = {
             'handlers': ['console_info', 'file_info_12', 'file_warning_12'],
             'level': 'INFO'
         },
-        'logger_13': {
-            'handlers': ['console_info', 'file_info_13', 'file_warning_13'],
-            'level': 'INFO'
-        },
         'logger_14': {
             'handlers': ['console_info', 'file_info_14', 'file_warning_14'],
             'level': 'INFO'
@@ -327,10 +301,6 @@ LOG_CONFIG_DICT = {
             'handlers': ['console_info', 'file_info_19', 'file_warning_19'],
             'level': 'INFO'
         },
-        'logger_31': {
-            'handlers': ['console_info', 'file_info_31', 'file_warning_31'],
-            'level': 'INFO'
-        },
         'logger_51': {
             'handlers': ['console_info', 'file_info_51', 'file_warning_51'],
             'level': 'INFO'
@@ -353,7 +323,6 @@ LOG_CONFIG_DICT = {
 logging.config.dictConfig(LOG_CONFIG_DICT)
 
 logger_12 = logging.getLogger('logger_12')
-logger_13 = logging.getLogger('logger_13')
 logger_14 = logging.getLogger('logger_14')
 logger_15 = logging.getLogger('logger_15')
 logger_16 = logging.getLogger('logger_16')
