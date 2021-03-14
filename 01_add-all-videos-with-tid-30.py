@@ -1,9 +1,11 @@
-import logging
 from common import add_video_via_bvid, add_video_record_via_awesome_stat
 from common.error import TddCommonError, AlreadyExistError
 from common.iteration import iter_get_archive_rank_by_partion
 from pybiliapi import BiliApi
 from db import Session
+from logutils import logging_init
+import logging
+logger = logging.getLogger('01')
 
 
 def iter_func(iter_item, context, **iter_context):
@@ -15,11 +17,11 @@ def iter_func(iter_item, context, **iter_context):
     try:
         new_video = add_video_via_bvid(bvid, bapi, session)
     except AlreadyExistError as e:
-        logging.debug(e)
+        logger.debug(e)
     except TddCommonError as e:
-        logging.warning(e)
+        logger.warning(e)
     else:
-        logging.info('Add new video %s' % new_video)
+        logger.info('Add new video %s' % new_video)
 
         # add stat record, which comes from awesome api
         if 'stat' in iter_item.keys():
@@ -27,11 +29,11 @@ def iter_func(iter_item, context, **iter_context):
             try:
                 new_video_record = add_video_record_via_awesome_stat(iter_context['added'], stat, session)
             except TddCommonError as e:
-                logging.warning(e)
+                logger.warning(e)
             else:
-                logging.info('Add new video record %s' % new_video_record)
+                logger.info('Add new video record %s' % new_video_record)
         else:
-            logging.warning('Fail to get stat info of video with bvid %s from awesome api' % bvid)
+            logger.warning('Fail to get stat info of video with bvid %s from awesome api' % bvid)
 
 
 def main():
@@ -49,5 +51,5 @@ def main():
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO, format='[%(asctime)s][%(name)s][%(levelname)s]: %(message)s')
+    logging_init(file_prefix='01')
     main()
