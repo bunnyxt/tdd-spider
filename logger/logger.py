@@ -2,9 +2,9 @@ import logging
 import logging.config
 import os
 
-__all__ = ['BASE_DIR', 'LOG_DIR', 
+__all__ = ['BASE_DIR', 'LOG_DIR',
            'logger_12', 'logger_13', 'logger_14', 'logger_15', 'logger_16', 'logger_17', 'logger_18', 'logger_19',
-           'logger_31', 'logger_51', 'logger_71', 'logger_72', 'logger_db']
+           'logger_51', 'logger_71', 'logger_72', 'logger_db']
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 LOG_DIR = os.path.join(BASE_DIR, 'log')
@@ -227,28 +227,6 @@ LOG_CONFIG_DICT = {
             'backupCount': 30,
             'filters': ['warning_plus_filter']
         },
-        'file_info_31': {
-            'level': 'INFO',
-            'formatter': 'simple',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(LOG_DIR, '31_info.log'),
-            'when': "d",
-            'interval': 1,
-            'encoding': 'utf8',
-            'backupCount': 30,
-            'filters': ['info_plus_filter']
-        },
-        'file_warning_31': {
-            'level': 'WARNING',
-            'formatter': 'simple',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(LOG_DIR, '31_warning.log'),
-            'when': "d",
-            'interval': 1,
-            'encoding': 'utf8',
-            'backupCount': 30,
-            'filters': ['warning_plus_filter']
-        },
         'file_info_51': {
             'level': 'INFO',
             'formatter': 'simple',
@@ -382,7 +360,6 @@ logger_16 = logging.getLogger('logger_16')
 logger_17 = logging.getLogger('logger_17')
 logger_18 = logging.getLogger('logger_18')
 logger_19 = logging.getLogger('logger_19')
-logger_31 = logging.getLogger('logger_31')
 logger_51 = logging.getLogger('logger_51')
 logger_71 = logging.getLogger('logger_71')
 logger_72 = logging.getLogger('logger_72')
