@@ -3,7 +3,7 @@ import logging.config
 import os
 
 __all__ = ['BASE_DIR', 'LOG_DIR',
-           'logger_12', 'logger_14', 'logger_19',
+           'logger_12', 'logger_14',
            'logger_51', 'logger_71', 'logger_72', 'logger_db']
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -95,28 +95,6 @@ LOG_CONFIG_DICT = {
             'backupCount': 30,
             'filters': ['warning_plus_filter']
         },
-        'file_info_19': {
-            'level': 'INFO',
-            'formatter': 'simple',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(LOG_DIR, '19_info.log'),
-            'when': "d",
-            'interval': 1,
-            'encoding': 'utf8',
-            'backupCount': 30,
-            'filters': ['info_plus_filter']
-        },
-        'file_warning_19': {
-            'level': 'WARNING',
-            'formatter': 'simple',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(LOG_DIR, '19_warning.log'),
-            'when': "d",
-            'interval': 1,
-            'encoding': 'utf8',
-            'backupCount': 30,
-            'filters': ['warning_plus_filter']
-        },
         'file_info_51': {
             'level': 'INFO',
             'formatter': 'simple',
@@ -193,10 +171,6 @@ LOG_CONFIG_DICT = {
             'handlers': ['console_info', 'file_info_14', 'file_warning_14'],
             'level': 'INFO'
         },
-        'logger_19': {
-            'handlers': ['console_info', 'file_info_19', 'file_warning_19'],
-            'level': 'INFO'
-        },
         'logger_51': {
             'handlers': ['console_info', 'file_info_51', 'file_warning_51'],
             'level': 'INFO'
@@ -220,7 +194,6 @@ logging.config.dictConfig(LOG_CONFIG_DICT)
 
 logger_12 = logging.getLogger('logger_12')
 logger_14 = logging.getLogger('logger_14')
-logger_19 = logging.getLogger('logger_19')
 logger_51 = logging.getLogger('logger_51')
 logger_71 = logging.getLogger('logger_71')
 logger_72 = logging.getLogger('logger_72')
