@@ -1308,5 +1308,5 @@ def main():
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix='51_new')
+    logging_init(file_prefix='51')
     main()
