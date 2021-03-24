@@ -1,6 +1,7 @@
-from logger import logger_db
 from .models import TddVideo, TddMember, TddVideoStaff, TddTaskVisitVideoRecord
 from sqlalchemy import text
+import logging
+logger_db = logging.getLogger('db')
 
 __all__ = ['DBOperation']
 
