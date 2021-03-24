@@ -4,7 +4,7 @@ import os
 
 __all__ = ['BASE_DIR', 'LOG_DIR',
            'logger_14',
-           'logger_71', 'logger_72', 'logger_db']
+           'logger_71', 'logger_72']
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 LOG_DIR = os.path.join(BASE_DIR, 'log')
@@ -95,28 +95,6 @@ LOG_CONFIG_DICT = {
             'backupCount': 30,
             'filters': ['info_plus_filter']
         },
-        'file_info_db': {
-            'level': 'INFO',
-            'formatter': 'simple',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(LOG_DIR, 'db_info.log'),
-            'when': "d",
-            'interval': 1,
-            'encoding': 'utf8',
-            'backupCount': 30,
-            'filters': ['info_plus_filter']
-        },
-        'file_warning_db': {
-            'level': 'WARNING',
-            'formatter': 'simple',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(LOG_DIR, 'db_warning.log'),
-            'when': "d",
-            'interval': 1,
-            'encoding': 'utf8',
-            'backupCount': 30,
-            'filters': ['warning_plus_filter']
-        }
     },
     'loggers': {
         'logger_14': {
@@ -131,10 +109,6 @@ LOG_CONFIG_DICT = {
             'handlers': ['console_info', 'file_info_72'],
             'level': 'INFO'
         },
-        'logger_db': {
-            'handlers': ['console_info', 'file_info_db', 'file_warning_db'],
-            'level': 'INFO'
-        }
     }
 }
 
@@ -143,4 +117,3 @@ logging.config.dictConfig(LOG_CONFIG_DICT)
 logger_14 = logging.getLogger('logger_14')
 logger_71 = logging.getLogger('logger_71')
 logger_72 = logging.getLogger('logger_72')
-logger_db = logging.getLogger('logger_db')
