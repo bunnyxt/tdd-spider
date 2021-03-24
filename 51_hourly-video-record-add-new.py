@@ -1114,7 +1114,6 @@ class RankWeeklyUpdateRunner(Thread):
         self.logger.info('Finish update color!')
 
         if self.time_label == '03:00' and get_week_day() == 5:
-            # TODO test validity
             self.logger.info('Now archive this week data and start a new week...')
             try:
                 # calc archive overview
@@ -1178,6 +1177,54 @@ class RankWeeklyUpdateRunner(Thread):
                                        'select * from tdd_video_record_hourly where added >= %d' % hour_start_ts
                 session.execute(create_tmp_table_sql)  # create table from tdd_video_record_hourly
                 self.logger.info(create_tmp_table_sql)
+
+                # WARNING some c0 videos not have records since this is 03:00 round, not 04:00, which includes all
+                # so we need to add c0
+                # of cause, some c30 videos maybe not have their records this round due to some error
+                # but we do not consider it here, since in 04:00 this will also happen
+                # we will handle it at another place
+                result = session.execute('select aid from tdd_video where tid != 30 and code = 0 and state = 0')
+                all_c0_video_aid_list = [r[0] for r in result]
+                result = session.execute('select bvid from tdd_video_record_rank_weekly_base_tmp')
+                all_video_aid_in_base_tmp_list = [b2a(r[0]) for r in result]
+                no_base_c0_video_aid_list = list(set(all_c0_video_aid_list) - set(all_video_aid_in_base_tmp_list))
+                self.logger.info('%d no base c0 video found, now add base record for them...'
+                                 % len(no_base_c0_video_aid_list))
+                bapi_with_proxy = BiliApi(proxy_pool_url=get_proxy_pool_url())
+                fail_aids = []
+                success_aids = []
+                for idx, aid in enumerate(no_base_c0_video_aid_list, 1):
+                    # get stat_obj
+                    stat_obj = get_valid(bapi_with_proxy.get_video_stat, (aid,), test_video_stat)
+                    if stat_obj is None:
+                        self.logger.warning('Fail to get valid stat obj of video aid %d!' % aid)
+                        fail_aids.append(aid)
+                        continue
+                    if stat_obj['code'] != 0:
+                        self.logger.warning('Fail to get stat obj with code 0 of video aid %d! code %s detected' % (
+                            aid, stat_obj['code']))
+                        fail_aids.append(aid)
+                        continue
+                    # add record to base
+                    add_record_to_base_sql = 'insert into tdd_video_record_rank_weekly_base_tmp values ' + \
+                                             '(%d, %s, %d, %d, %d, %d, %d, %d, %d)' \
+                                             % (get_ts_s(), a2b(aid),
+                                                -1 if stat_obj['data']['view'] == '--' else stat_obj['data']['view'],
+                                                stat_obj['data']['danmaku'], stat_obj['data']['reply'],
+                                                stat_obj['data']['favorite'], stat_obj['data']['coin'],
+                                                stat_obj['data']['share'], stat_obj['data']['like'])
+                    session.execute(add_record_to_base_sql)
+                    success_aids.append(aid)
+                    if idx % 10 == 0:
+                        self.logger.info('%d / %d done' % (idx, len(no_base_c0_video_aid_list)))
+                        session.commit()
+                self.logger.info('%d / %d done' % (len(no_base_c0_video_aid_list), len(no_base_c0_video_aid_list)))
+                session.commit()
+                self.logger.info('Finish adding no base c0 video base records! %d records added, %d aids fail'
+                                 % (len(success_aids), len(fail_aids)))
+                self.logger.warning('fail_aids: %r' % fail_aids)
+                sc_send('NEW_FEATURE_RUNNING_FEEDBACK_ADD_C0_BASE', '%d c0 no base videos, %d added, %d aids fail, fail aids: %s'
+                        % (len(no_base_c0_video_aid_list), len(success_aids), len(fail_aids), str(fail_aids)))
 
                 drop_old_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base'
                 session.execute(drop_old_table_sql)
