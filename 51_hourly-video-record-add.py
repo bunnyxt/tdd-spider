@@ -1295,7 +1295,7 @@ def run_hourly_video_record_add(time_task):
 
 
 def main():
-    logger.info('51: hourly video record add (new)')
+    logger.info('51: hourly video record add')
 
     time_task = '%s:00' % get_ts_s_str()[:13]  # current time task, ex: 2013-01-31 19:00
     logger.info('Now start, time task: %s' % time_task)
