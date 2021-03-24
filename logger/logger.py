@@ -119,10 +119,6 @@ LOG_CONFIG_DICT = {
         }
     },
     'loggers': {
-        'logger_12': {
-            'handlers': ['console_info', 'file_info_12', 'file_warning_12'],
-            'level': 'INFO'
-        },
         'logger_14': {
             'handlers': ['console_info', 'file_info_14', 'file_warning_14'],
             'level': 'INFO'
