@@ -1209,7 +1209,7 @@ class RankWeeklyUpdateRunner(Thread):
                             continue
                         # add record to base
                         add_record_to_base_sql = 'insert into tdd_video_record_rank_weekly_base_tmp values ' + \
-                                                 '(%d, %s, %d, %d, %d, %d, %d, %d, %d)' \
+                                                 '(%d, \'%s\', %d, %d, %d, %d, %d, %d, %d)' \
                                                  % (get_ts_s(), a2b(aid),
                                                     -1 if stat_obj['data']['view'] == '--' else stat_obj['data']['view'],
                                                     stat_obj['data']['danmaku'], stat_obj['data']['reply'],
