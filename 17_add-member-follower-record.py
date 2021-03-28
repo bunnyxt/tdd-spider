@@ -2,6 +2,7 @@ from spider import WebSpider
 from spider.custom import ApiFetcher, TddMemberFollowerRecordParser, DbSaver, LocalProxieser
 from db import DBOperation, Session
 from util import get_ts_s, ts_s_to_str
+from serverchan import sc_send
 from logutils import logging_init
 import logging
 logger = logging.getLogger('17')
@@ -89,6 +90,19 @@ def add_member_follower_record():
     logger.info('start time %s' % ts_s_to_str(start_ts))
     logger.info('end time %s' % ts_s_to_str(end_ts))
     logger.info('timespan %d min' % ((end_ts - start_ts) // 60))
+
+    # send sc
+    sc_result = sc_send(
+        'Finish add member follower record!',
+        'mids len: %d' % len(mids) + '\n\n' +
+        'start time %s' % ts_s_to_str(start_ts) + '\n\n' +
+        'end time %s' % ts_s_to_str(end_ts) + '\n\n' +
+        'timespan %d min' % ((end_ts - start_ts) // 60)
+    )
+    if sc_result['errno'] == 0:
+        logger.info('Sc summary sent: succeed!')
+    else:
+        logger.warning('Sc summary sent: failed! sc_result = %s.' % sc_result)
 
 
 def main():
