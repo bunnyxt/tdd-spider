@@ -372,14 +372,9 @@ class DBOperation:
         try:
             result = session.execute('select * from tdd_video_record_rank_weekly_base')
             d = {}
-            # DEBUG idx
-            idx = 0  # DEBUG idx
             for r in result:
                 # bvid -> added, view, danmaku, reply, favorite, coin, share, like
                 d[r[1]] = (r[0], r[2], r[3], r[4], r[5], r[6], r[7], r[8])
-                idx += 1  # DEBUG idx
-                if idx % 1000 == 0:  # DEBUG idx
-                    logger_db.warning('assemble idx %d' % idx)  # DEBUG idx
             return d
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
