@@ -3,7 +3,7 @@ from pybiliapi import BiliApi
 from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from threading import Thread
 from queue import Queue
-from common import get_valid, test_archive_rank_by_partion, test_video_view, test_video_stat, \
+from common import get_valid, test_archive_rank_by_partion, test_video_stat, \
     add_video_record_via_stat_api, update_video, add_video_via_bvid, \
     InvalidObjCodeError, TddCommonError, AlreadyExistError
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day
@@ -18,7 +18,8 @@ from collections import namedtuple, defaultdict
 import logging
 logger = logging.getLogger('51')
 
-Record = namedtuple('Record', ['added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
+Record = namedtuple('Record', [
+    'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
 RecordSpeed = namedtuple('RecordSpeed', [
     'start_ts', 'end_ts', 'timespan', 'per_seconds', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
 RecordSpeedRatio = namedtuple('RecordSpeedRatio', [
@@ -340,10 +341,6 @@ class C30PipelineRunner(Thread):
         # insert records
         self.logger.info('Now start inserting records...')
         # use sql directly, combine 1000 records into one sql to execute and commit
-        # TODO debug table tdd_video_record_2, create table tdd_video_record_2 like tdd_video_record
-        # sql_prefix = 'insert into ' \
-        #              'tdd_video_record_2(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
-        #              'values '
         sql_prefix = 'insert into ' \
                      'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
                      'values '
