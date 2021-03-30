@@ -14,14 +14,21 @@ def add_new_video_with_tid_30():
     start_ts = get_ts_s()  # get start ts
 
     session = Session()
-    bapi_with_proxy = BiliApi(get_proxy_pool_url())
+
+    bapi = BiliApi()
+    # check whether awesome api is accessible (no 412) via local ip
+    test_page_obj = get_valid(bapi.get_archive_rank_by_partion, (30, 1, 50), test_archive_rank_by_partion)
+    if test_page_obj is None:
+        # use bapi with proxy pool
+        bapi = BiliApi(get_proxy_pool_url())
+        logger.warning('Fail to get valid test page obj, use bapi with proxy pool.')
 
     # add add video
     page_num = 1
     added_bvid_count = 0
     while page_num <= 3:  # check latest 3 page
         # get page_obj via awesome api
-        page_obj = get_valid(bapi_with_proxy.get_archive_rank_by_partion, (30, page_num, 50), test_archive_rank_by_partion)
+        page_obj = get_valid(bapi.get_archive_rank_by_partion, (30, page_num, 50), test_archive_rank_by_partion)
         if page_obj is None:
             logger.warning('Fail to get valid obj with page_num %d, continue to next page' % page_num)
             page_num += 1
@@ -31,7 +38,7 @@ def add_new_video_with_tid_30():
                 bvid = arch['bvid'][2:]  # remove BV prefix
                 # add video
                 try:
-                    new_video = add_video_via_bvid(bvid, bapi_with_proxy, session)
+                    new_video = add_video_via_bvid(bvid, bapi, session)
                 except AlreadyExistError as e:
                     # video already added, completely common
                     # logger.debug('AlreadyExistError detected when add video bvid %s! Detail: %s' % (bvid, e))
