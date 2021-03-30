@@ -38,6 +38,8 @@ def add_new_video_with_tid_30():
                     pass
                 except TddCommonError as e:
                     logger.warning('TddCommonError detected when add video bvid %s! Detail: %s' % (bvid, e))
+                except Exception as e:
+                    logger.warning('Exception caught when add video bvid %s! Detail: %s' % (bvid, e))
                 else:
                     added_bvid_count += 1
                     logger.info('Add new video %s' % new_video)
