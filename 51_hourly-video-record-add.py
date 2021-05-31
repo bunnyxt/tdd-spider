@@ -839,7 +839,7 @@ class RecentRecordsAnalystRunner(Thread):
                         period_range=speed_period.timespan, speed_period=speed_period[idx2+4],
                         speed_overall=speed_overall[idx2+4],
                         this_record=records[-1], last_record=records[-2],
-                        description='unexpected increase detected, speed now of prop %s is %s, > -200%%' % (
+                        description='unexpected increase detected, speed now of prop %s is %s, > 200%%' % (
                             prop, '%.2f' % value if abs(value) is not 99999999 else '%sinf' % '-' if value < 0 else '')
                     )
                     self.logger.info('Found unexpected increase of video aid %d, description: %s' % (
