@@ -381,6 +381,19 @@ class DBOperation:
             return None
 
     @classmethod
+    def query_video_record_rank_monthly_base_dict(cls, session):
+        try:
+            result = session.execute('select * from tdd_video_record_rank_monthly_base')
+            d = {}
+            for r in result:
+                # bvid -> added, view, danmaku, reply, favorite, coin, share, like
+                d[r[1]] = (r[0], r[2], r[3], r[4], r[5], r[6], r[7], r[8])
+            return d
+        except Exception as e:
+            logger_db.error('Exception: %s, params: %s' % (e, {}), exc_info=True)
+            return None
+
+    @classmethod
     def query_video_videos_pubdate_dict(cls, session):
         try:
             result = session.execute('select bvid, videos, pubdate from tdd_video')

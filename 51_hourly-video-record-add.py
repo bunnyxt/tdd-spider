@@ -1265,6 +1265,263 @@ class RankWeeklyUpdateRunner(Thread):
         self.logger.info('Finish update rank weekly!')
 
 
+class RankMonthlyUpdateRunner(Thread):
+    def __init__(self, records, time_task):
+        super().__init__()
+        self.records = records
+        self.time_task = time_task
+        self.time_label = time_task[-5:]
+        self.day_num = time_task[8:10]  # ADD
+        self.logger = logging.getLogger('RankMonthlyUpdateRunner')  # change
+
+    def run(self):
+        self.logger.info('Now start updating rank monthly...')  # change
+        session = Session()
+
+        # TODO check why the following two db query need at least 1 min to finish and optimize it
+
+        # get record base dict
+        # bvid -> added, view, danmaku, reply, favorite, coin, share, like
+        bvid_base_record_dict = DBOperation.query_video_record_rank_monthly_base_dict(session)  # CHANGE
+        # change format to Record namedtuple
+        for bvid, record in bvid_base_record_dict.items():
+            bvid_base_record_dict[bvid] = Record(
+                record[0], b2a(bvid), bvid, record[1], record[2], record[3], record[4], record[5], record[6], record[7])
+        self.logger.info('bvid_base_record_dict with %d records got from db' % len(bvid_base_record_dict))
+
+        # get videos (page), pubdate dict
+        # bvid -> videos, pubdate, maybe have None
+        bvid_videos_pubdate_dict = DBOperation.query_video_videos_pubdate_dict(session)
+        self.logger.info('bvid_videos_pubdate_dict with %d videos got from db' % len(bvid_videos_pubdate_dict))
+
+        # make current issue list
+        self.logger.info('Now create video increment list...')
+        video_increment_list = []
+        base_records_begin_ts = min(map(lambda r: r.added, bvid_base_record_dict.values()))
+        for idx, record in enumerate(self.records, 1):
+            bvid = record.bvid
+            try:
+                # get videos (page) and pubdate
+                page, pubdate = bvid_videos_pubdate_dict.get(bvid, (None, None))
+                if pubdate is None or page is None or page < 1:
+                    self.logger.warning('Invalid pubdate %s or page %s of video bvid %s detected, continue' % (
+                        str(pubdate), str(page), bvid))
+                    continue
+
+                # get base record
+                base_record = bvid_base_record_dict.get(bvid, None)
+                if base_record is None:
+                    # fail to get base record, check pubdate
+                    if pubdate >= base_records_begin_ts:
+                        # new video, published in this month, set base_record.added to pubdate  # CHANGE
+                        base_record = Record(pubdate, record.aid, record.bvid, 0, 0, 0, 0, 0, 0, 0)
+                    else:
+                        # old video, published before this month, should have base record, so here mush be an error  # CHANGE
+                        self.logger.warning('Fail to get base record of old video bvid %s, continue' % bvid)
+                        # TODO need to insert the nearest into base
+                        continue
+
+                # calc delta
+                d_view = record.view - base_record.view  # maybe occur -1?
+                d_danmaku = record.danmaku - base_record.danmaku
+                d_reply = record.reply - base_record.reply
+                d_favorite = record.favorite - base_record.favorite
+                d_coin = record.coin - base_record.coin
+                d_share = record.share - base_record.share
+                d_like = record.like - base_record.like
+
+                # calc point
+                point, xiua, xiub = zk_calc(d_view, d_danmaku, d_reply, d_favorite, page=page)
+
+                # append to video increment list
+                video_increment_list.append((
+                    bvid, base_record.added, record.added,
+                    record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like,
+                    d_view, d_danmaku, d_reply, d_favorite, d_coin, d_share, d_like,
+                    point, xiua, xiub))
+            except Exception as e:
+                self.logger.warning('Fail to create increment of video bvid %s. Exception caught. Detail: %s' % (
+                    bvid, e))
+            finally:
+                if idx % 10000 == 0:
+                    self.logger.info('%d / %d done' % (idx, len(self.records)))
+        self.logger.info('%d / %d done' % (len(self.records), len(self.records)))
+        self.logger.info('Finish create video increment list with %d increments!' % len(video_increment_list))
+
+        # sort via point
+        video_increment_list.sort(key=lambda x: (x[17], x[10]))  # TODO if point equals?
+        video_increment_list.reverse()
+        self.logger.info('Finish sort video increment list!')
+
+        # select top 10000
+        video_increment_top_list = video_increment_list[:10000]
+
+        # update sql
+        self.logger.info('Now execute update sql...')
+        try:
+            drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_monthly_current_tmp'  # CHANGE
+            session.execute(drop_tmp_table_sql)
+            self.logger.info(drop_tmp_table_sql)
+
+            create_tmp_table_sql = 'create table tdd_video_record_rank_monthly_current_tmp ' + \
+                                   'like tdd_video_record_rank_monthly_current'  # CHANGE
+            session.execute(create_tmp_table_sql)
+            self.logger.info(create_tmp_table_sql)
+
+            for rank, c in enumerate(video_increment_top_list, 1):
+                sql = 'insert into tdd_video_record_rank_monthly_current_tmp values(' \
+                      '"%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
+                      (c[0], c[1], c[2],
+                       c[3], c[4], c[5], c[6], c[7], c[8], c[9],
+                       c[10], c[11], c[12], c[13], c[14], c[15], c[16],
+                       c[17], c[18], c[19],
+                       rank)  # CHANGE
+                session.execute(sql)
+            session.commit()
+            self.logger.info('Top 10000 increments added to tdd_video_record_rank_monthly_current_tmp!')  # CHANGE
+
+            drop_old_table_sql = 'drop table if exists tdd_video_record_rank_monthly_current'  # CHANGE
+            session.execute(drop_old_table_sql)
+            self.logger.info(drop_old_table_sql)
+
+            rename_tmp_table_sql = 'rename table tdd_video_record_rank_monthly_current_tmp to ' + \
+                                   'tdd_video_record_rank_monthly_current'  # CHANGE
+            session.execute(rename_tmp_table_sql)
+            self.logger.info(rename_tmp_table_sql)
+        except Exception as e:
+            self.logger.error('Fail to execute update sql! Exception caught. Detail: %s' % e)
+            session.rollback()
+        self.logger.info('Finish execute update sql!')
+
+        self.logger.info('Now update color...')
+        color_dict = {
+            10: 'incr_view',
+            11: 'incr_danmaku',
+            12: 'incr_reply',
+            13: 'incr_favorite',
+            14: 'incr_coin',
+            15: 'incr_share',
+            16: 'incr_like',
+            17: 'point',
+        }
+        for prop_idx, prop in color_dict.items():
+            prop_list = sorted(list(map(lambda x: x[prop_idx], video_increment_top_list)))
+            # a
+            value = float(prop_list[5000])
+            session.execute('update tdd_video_record_rank_monthly_current_color set a = %f ' % value +
+                            'where property = "%s"' % prop)  # CHANGE
+            # b
+            value = float(prop_list[9000])
+            session.execute('update tdd_video_record_rank_monthly_current_color set b = %f ' % value +
+                            'where property = "%s"' % prop)  # CHANGE
+            # c
+            value = float(prop_list[9900])
+            session.execute('update tdd_video_record_rank_monthly_current_color set c = %f ' % value +
+                            'where property = "%s"' % prop)  # CHANGE
+            session.commit()
+            # d
+            value = float(prop_list[9990])
+            session.execute('update tdd_video_record_rank_monthly_current_color set d = %f ' % value +
+                            'where property = "%s"' % prop)  # CHANGE
+            session.commit()
+        self.logger.info('Finish update color!')
+
+        if self.time_label == '04:00' and self.day_num == '01':  # CHANGE
+            self.logger.info('Now archive this month data and start a new month...')  # CHANGE
+            try:
+                # calc archive overview
+                ts_str = ts_s_to_str(get_ts_s())
+                end_ts = str_to_ts_s(ts_str[:11] + '04:00:00')  # CHANGE
+                # CHANGE
+                # get last month day 01 time 04:00:00
+                this_year_num = int(ts_str[:4])
+                this_month_num = int(ts_str[5:7])
+                if this_month_num == 0:
+                    last_year_num = this_year_num - 1
+                    last_month_num = 12
+                else:
+                    last_year_num = this_year_num
+                    last_month_num = this_month_num - 1
+                last_month_str = str(last_month_num) if last_month_num > 9 else '0' + str(last_month_num)
+                start_ts_s = str(last_year_num) + '-' + last_month_str + '-01 04:00:00'
+                start_ts = ts_s_to_str(start_ts_s)
+                arch_name = 'M' + ts_str[:4] + ts_str[5:7] + ts_str[8:10]
+                session.execute(
+                    'insert into tdd_video_record_rank_monthly_archive_overview (`name`, start_ts, end_ts) ' +
+                    'values ("%s", %d, %d)' % (arch_name, start_ts, end_ts))  # CHANGE
+                session.commit()
+                self.logger.info('Archive overview saved to db! name: %s, start_ts: %d (%s), end_ts: %d (%s)' % (
+                    arch_name, start_ts, ts_s_to_str(start_ts), end_ts, ts_s_to_str(end_ts)
+                ))
+
+                # get arch id
+                result = session.execute('select `id` from tdd_video_record_rank_monthly_archive_overview ' +
+                                         'where `name` = "%s"' % arch_name)  # CHANGE
+                arch_id = 0
+                for r in result:
+                    arch_id = int(r[0])
+                self.logger.info('Archive arch id is %d.' % arch_id)
+
+                # archive increments, just like add current increments, just add 1 more column called arch_id
+                self.logger.info('Now archiving increments...')
+                for rank, c in enumerate(video_increment_top_list, 1):
+                    sql = 'insert into tdd_video_record_rank_monthly_archive values(' \
+                          '%d, "%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
+                          (arch_id, c[0], c[1], c[2],
+                           c[3], c[4], c[5], c[6], c[7], c[8], c[9],
+                           c[10], c[11], c[12], c[13], c[14], c[15], c[16],
+                           c[17], c[18], c[19],
+                           rank)  # CHANGE
+                    session.execute(sql)
+                session.commit()
+                self.logger.info('Finish archive current top 10000 increments!')
+
+                # archive color
+                self.logger.info('Now archiving color...')
+                result = session.execute('select * from tdd_video_record_rank_monthly_current_color')  # CHANGE
+                for r in result:
+                    prop = str(r[0])
+                    a = float(r[1])
+                    b = float(r[2])
+                    c = float(r[3])
+                    d = float(r[4])
+                    session.execute('insert into tdd_video_record_rank_monthly_archive_color values(' +
+                                    '%d, "%s", %f, %f, %f, %f)' % (arch_id, prop, a, b, c, d))  # CHANGE
+                session.commit()
+                self.logger.info('Finish archive color!')
+
+                # update base
+                self.logger.info('Now updating base...')
+                drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_monthly_base_tmp'  # CHANGE
+                session.execute(drop_tmp_table_sql)
+                self.logger.info(drop_tmp_table_sql)
+
+                hour_start_ts = str_to_ts_s(ts_s_to_str(get_ts_s())[:11] + '04:00:00')  # CHANGE
+                create_tmp_table_sql = 'create table tdd_video_record_rank_monthly_base_tmp ' + \
+                                       'select * from tdd_video_record_hourly where added >= %d' % hour_start_ts  # CHANGE
+                session.execute(create_tmp_table_sql)  # create table from tdd_video_record_hourly
+                self.logger.info(create_tmp_table_sql)
+
+                drop_old_table_sql = 'drop table if exists tdd_video_record_rank_monthly_base'  # CHANGE
+                session.execute(drop_old_table_sql)
+                self.logger.info(drop_old_table_sql)
+
+                rename_tmp_table_sql = 'rename table tdd_video_record_rank_monthly_base_tmp to ' + \
+                                       'tdd_video_record_rank_monthly_base'  # CHANGE
+                session.execute(rename_tmp_table_sql)
+                self.logger.info(rename_tmp_table_sql)
+                self.logger.info('Finish update base!')
+            except Exception as e:
+                session.rollback()
+                self.logger.warning(
+                    'Fail to archive this month data and start a new month. Exception caught. Detail: %s' % e)  # CHANGE
+            else:
+                self.logger.info('Finish archive this month data and start a new month!')  # CHANGE
+
+        session.close()
+        self.logger.info('Finish update rank monthly!')  # CHANGE
+
+
 def run_hourly_video_record_add(time_task):
     time_label = time_task[-5:]  # current time, ex: 19:00
     logger.info('Now start hourly video record add, time label: %s..' % time_label)
@@ -1299,6 +1556,7 @@ def run_hourly_video_record_add(time_task):
         RecentRecordsAnalystRunner(records, time_task),
         RecentActivityFreqUpdateRunner(time_label),
         RankWeeklyUpdateRunner(records, time_task),
+        RankMonthlyUpdateRunner(records, time_task),
     ]
     for runner in data_analysis_pipeline_runner_list:
         runner.start()
