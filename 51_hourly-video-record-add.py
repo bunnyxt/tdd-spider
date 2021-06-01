@@ -1443,8 +1443,8 @@ class RankMonthlyUpdateRunner(Thread):
                     last_year_num = this_year_num
                     last_month_num = this_month_num - 1
                 last_month_str = str(last_month_num) if last_month_num > 9 else '0' + str(last_month_num)
-                start_ts_s = str(last_year_num) + '-' + last_month_str + '-01 04:00:00'
-                start_ts = ts_s_to_str(start_ts_s)
+                start_ts_str = str(last_year_num) + '-' + last_month_str + '-01 04:00:00'
+                start_ts = str_to_ts_s(start_ts_str)
                 arch_name = 'M' + ts_str[:4] + ts_str[5:7] + ts_str[8:10]
                 session.execute(
                     'insert into tdd_video_record_rank_monthly_archive_overview (`name`, start_ts, end_ts) ' +
