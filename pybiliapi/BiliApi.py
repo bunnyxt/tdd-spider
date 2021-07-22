@@ -18,7 +18,7 @@ class BiliApi:
             # using ProxyPool, https://github.com/Python3WebSpider/ProxyPool
             self.use_proxy = True
             self.proxy_pool_url = proxy_pool_url
-            self.max_proxy_trial = 50
+            self.max_proxy_trial = 20
             self.timeout = 2  # may have risk of missing valid proxy, but reduce seeking proxy time!
             self.retries = 1
             # check proxy pool url
