@@ -14,7 +14,7 @@ import os
 import re
 from conf import get_proxy_pool_url
 from serverchan import sc_send
-from collections import namedtuple, defaultdict
+from collections import namedtuple, defaultdict, Counter
 import logging
 logger = logging.getLogger('51')
 
@@ -1544,6 +1544,28 @@ def run_hourly_video_record_add(time_task):
             records += runner.return_record_list
         else:
             logger.error('Fail to get valid return_record_list from pipeline runner %s' % runner)
+
+    # remove duplicate records
+    logger.info('Now check duplicate records...')
+    duplicate_records_item_list = list(
+        filter(lambda item: item[1] > 1, Counter(map(lambda record: record.bvid, records)).items())
+    )  # bvid -> count of records of video with this bvid
+    if len(duplicate_records_item_list) == 0:
+        logger.info('No duplicate records detected!')
+    else:
+        logger.warning('Duplicate records detected! %d videos with %d records in total!' % (
+            len(duplicate_records_item_list), sum(map(lambda item: item[1], duplicate_records_item_list))
+        ))
+        removed_records_count = 0
+        for bvid, count in duplicate_records_item_list:
+            logger.warning('Video bvid %s have total %d records!' % (bvid, count))
+            for record in sorted(
+                    filter(lambda record: record.bvid == bvid, records),  # records from video with the same bvid
+                    key=lambda record: record.added  # sorted by added, asc
+            )[1:]:  # remain the first one, i.e. the earliest record
+                records.remove(record)
+                removed_records_count += 1
+        logger.warning('Finish remove duplicate records! Total %d duplicate records removed!' % removed_records_count)
 
     logger.info('Finish upstream data acquisition pipelines! %d records received' % len(records))
     del data_acquisition_pipeline_runner_list  # release memory
