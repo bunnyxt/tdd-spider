@@ -471,6 +471,12 @@ def update_video_via_bvid(bvid, bapi, session):
                     video_update_logs.append(TddVideoLog(added, aid, bvid, 'staff', 'mid: %d; title: %s'
                                                          % (old_staff.mid, old_staff.title), None))
 
+            # update tags string
+            new_tags = get_tags_str_via_bvid(bvid, bapi)
+            if new_tags != old_obj.tags:
+                video_update_logs.append(TddVideoLog(added, aid, bvid, 'tags', old_obj.tags, new_tags))
+                old_obj.tags = new_tags
+
             session.commit()  # commit changes
     except Exception as e:
         print(e)
