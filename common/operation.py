@@ -473,7 +473,9 @@ def update_video_via_bvid(bvid, bapi, session):
 
             # update tags string
             new_tags = get_tags_str_via_bvid(bvid, bapi)
-            if new_tags != old_obj.tags:
+            new_tags_sorted = ';'.join(sorted(new_tags.split(';')))
+            old_tags_sorted = ';'.join(sorted(old_obj.tags.split(';')))
+            if new_tags_sorted != old_tags_sorted:
                 video_update_logs.append(TddVideoLog(added, aid, bvid, 'tags', old_obj.tags, new_tags))
                 old_obj.tags = new_tags
 
