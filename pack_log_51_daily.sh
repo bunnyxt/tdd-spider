@@ -3,6 +3,10 @@
 date_str=$(date +"%Y%m%d")  # default use today, format: 20220331
 if [[ $# -gt 0 ]]; then
   date_str="${1}"  # can manually set date_str
+  if [[ ! "${date_str}" =~ ^[0-9]{8}$ ]]; then
+    echo "Fail to parse date string ${date_str}! It should be 8 digit number (ex. 20220331). exit"
+    exit 1
+  fi
 fi
 log_folder='log'  # log files location
 logs_candidate="51_${date_str}??00_*.log"  # globbing format
