@@ -124,6 +124,7 @@ class C30NeedAddButNotFoundAidsChecker(Thread):
         session = Session()
         bapi_with_proxy = BiliApi(get_proxy_pool_url())
         result_status_dict = defaultdict(list)
+        self.logger.error('%s' % self.need_insert_but_record_not_found_aid_list)  # TMP
         for idx, aid in enumerate(self.need_insert_but_record_not_found_aid_list, 1):
             # try update video
             try:
@@ -154,6 +155,13 @@ class C30NeedAddButNotFoundAidsChecker(Thread):
                     expected_change_found = True
                 if not expected_change_found:
                     self.logger.warning('No expected change (code / tid / state & forward) found for video aid %d, need further check' % aid)
+                    # TMP START
+                    try:
+                        new_video_record = add_video_record_via_stat_api(aid, bapi_with_proxy, session)
+                        self.logger.warning('TMP add affected video record %s' % new_video_record)
+                    except Exception as e3:
+                        self.logger.warning('TMP Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e3))
+                    # TMP END
                     result_status_dict['no_expected_change_found_aids'].append(aid)
             finally:
                 if idx % 10 == 0:
