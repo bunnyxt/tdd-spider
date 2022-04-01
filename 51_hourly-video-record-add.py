@@ -455,7 +455,7 @@ class C0PipelineRunner(Thread):
                 new_video_record_list.append(new_video_record)
                 self.logger.debug('Add new record %s' % new_video_record)
             except InvalidObjCodeError as e:
-                self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s', (aid, e))
+                self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e))
                 try:
                     tdd_video_logs = update_video(aid, bapi_with_proxy, session)
                 except TddCommonError as e2:
@@ -468,7 +468,7 @@ class C0PipelineRunner(Thread):
                                          % (log.aid, log.attr, log.oldval, log.newval))
                 fail_aids.append(aid)
             except TddCommonError as e:
-                self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s', (aid, e))
+                self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e))
                 fail_aids.append(aid)
             if idx % 10 == 0:
                 self.logger.info('%d / %d done' % (idx, len(need_insert_aid_list)))
