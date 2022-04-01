@@ -1611,5 +1611,7 @@ def main():
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix='51')
+    # current time task, only number, ex: 201301311900
+    time_task_simple = ('%s:00' % get_ts_s_str()[:13]).replace('-', '').replace(' ', '').replace(':', '')
+    logging_init(file_prefix='51_%s' % time_task_simple)
     main()
