@@ -125,49 +125,50 @@ class C30NeedAddButNotFoundAidsChecker(Thread):
         bapi_with_proxy = BiliApi(get_proxy_pool_url())
         result_status_dict = defaultdict(list)
         self.logger.error('%s' % self.need_insert_but_record_not_found_aid_list)  # TMP
-        for idx, aid in enumerate(self.need_insert_but_record_not_found_aid_list, 1):
-            # try update video
-            try:
-                tdd_video_logs = update_video(aid, bapi_with_proxy, session)
-            except TddCommonError as e2:
-                self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-                result_status_dict['fail_aids'].append(aid)
-            except Exception as e2:
-                self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-                result_status_dict['fail_aids'].append(aid)
-            else:
-                # check update logs
-                for log in tdd_video_logs:
-                    self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
-                                     % (log.aid, log.attr, log.oldval, log.newval))
-                # set result status
-                # NOTE: here maybe code_change_aids and tid_change_aids both +1 aid
-                tdd_video_logs_attr_list = [ log.attr for log in tdd_video_logs]
-                expected_change_found = False
-                if 'code' in tdd_video_logs_attr_list:
-                    result_status_dict['code_change_aids'].append(aid)
-                    expected_change_found = True
-                if 'tid' in tdd_video_logs_attr_list:
-                    result_status_dict['tid_change_aids'].append(aid)
-                    expected_change_found = True
-                if 'state' in tdd_video_logs_attr_list and 'forward' in tdd_video_logs_attr_list:
-                    result_status_dict['state_and_forward_change_aids'].append(aid)
-                    expected_change_found = True
-                if not expected_change_found:
-                    self.logger.warning('No expected change (code / tid / state & forward) found for video aid %d, need further check' % aid)
-                    # TMP START
-                    try:
-                        new_video_record = add_video_record_via_stat_api(aid, bapi_with_proxy, session)
-                        self.logger.warning('TMP add affected video record %s' % new_video_record)
-                    except Exception as e3:
-                        self.logger.warning('TMP Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e3))
-                    # TMP END
-                    result_status_dict['no_expected_change_found_aids'].append(aid)
-            finally:
-                if idx % 10 == 0:
-                    self.logger.info('%d / %d done' % (idx, len(self.need_insert_but_record_not_found_aid_list)))
-        self.logger.info('%d / %d done' % (len(self.need_insert_but_record_not_found_aid_list),
-                                           len(self.need_insert_but_record_not_found_aid_list)))
+        self.logger.error('TMP stop add affected video record')
+        # for idx, aid in enumerate(self.need_insert_but_record_not_found_aid_list, 1):
+        #     # try update video
+        #     try:
+        #         tdd_video_logs = update_video(aid, bapi_with_proxy, session)
+        #     except TddCommonError as e2:
+        #         self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+        #         result_status_dict['fail_aids'].append(aid)
+        #     except Exception as e2:
+        #         self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+        #         result_status_dict['fail_aids'].append(aid)
+        #     else:
+        #         # check update logs
+        #         for log in tdd_video_logs:
+        #             self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
+        #                              % (log.aid, log.attr, log.oldval, log.newval))
+        #         # set result status
+        #         # NOTE: here maybe code_change_aids and tid_change_aids both +1 aid
+        #         tdd_video_logs_attr_list = [ log.attr for log in tdd_video_logs]
+        #         expected_change_found = False
+        #         if 'code' in tdd_video_logs_attr_list:
+        #             result_status_dict['code_change_aids'].append(aid)
+        #             expected_change_found = True
+        #         if 'tid' in tdd_video_logs_attr_list:
+        #             result_status_dict['tid_change_aids'].append(aid)
+        #             expected_change_found = True
+        #         if 'state' in tdd_video_logs_attr_list and 'forward' in tdd_video_logs_attr_list:
+        #             result_status_dict['state_and_forward_change_aids'].append(aid)
+        #             expected_change_found = True
+        #         if not expected_change_found:
+        #             self.logger.warning('No expected change (code / tid / state & forward) found for video aid %d, need further check' % aid)
+        #             # TMP START
+        #             try:
+        #                 new_video_record = add_video_record_via_stat_api(aid, bapi_with_proxy, session)
+        #                 self.logger.warning('TMP add affected video record %s' % new_video_record)
+        #             except Exception as e3:
+        #                 self.logger.warning('TMP Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e3))
+        #             # TMP END
+        #             result_status_dict['no_expected_change_found_aids'].append(aid)
+        #     finally:
+        #         if idx % 10 == 0:
+        #             self.logger.info('%d / %d done' % (idx, len(self.need_insert_but_record_not_found_aid_list)))
+        # self.logger.info('%d / %d done' % (len(self.need_insert_but_record_not_found_aid_list),
+        #                                    len(self.need_insert_but_record_not_found_aid_list)))
         session.close()
         self.logger.info('Finish checking need add but not found aids! %s' %
                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
