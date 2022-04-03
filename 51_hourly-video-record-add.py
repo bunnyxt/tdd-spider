@@ -124,8 +124,11 @@ class C30NeedAddButNotFoundAidsChecker(Thread):
         session = Session()
         bapi_with_proxy = BiliApi(get_proxy_pool_url())
         result_status_dict = defaultdict(list)
-        self.logger.error('%s' % self.need_insert_but_record_not_found_aid_list)  # TMP
-        self.logger.error('TMP stop add affected video record')
+        # self.logger.error('%s' % self.need_insert_but_record_not_found_aid_list)  # TMP
+        self.logger.error('TMP stop add affected video record, count: %d' % len(
+            self.need_insert_but_record_not_found_aid_list))  # TMP
+        sc_send('affected video found', 'send time: %s, count: %d' % (
+            get_ts_s_str(), len(self.need_insert_but_record_not_found_aid_list)))  # TMP
         # for idx, aid in enumerate(self.need_insert_but_record_not_found_aid_list, 1):
         #     # try update video
         #     try:
