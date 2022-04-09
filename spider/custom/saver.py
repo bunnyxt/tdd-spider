@@ -27,3 +27,22 @@ class DbSaver(Saver):
 
     def __del__(self):
         self._session.close()
+
+
+class DbListSaver(Saver):
+    def __init__(self, get_session):
+        Saver.__init__(self)
+        self._session = get_session()
+
+    def item_save(self, priority: int, url: str, keys: dict, deep: int, item: dict):
+        try:
+            for single_item in item:
+                self._session.add(single_item)
+                self._session.commit()
+        except Exception as e:
+            self._session.rollback()
+            raise e
+        return 1, None
+
+    def __del__(self):
+        self._session.close()
