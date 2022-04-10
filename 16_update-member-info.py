@@ -3,7 +3,7 @@ from db import DBOperation, Session
 from util import get_ts_s, ts_s_to_str
 from conf import get_kdl_order_id, get_kdl_apikey
 from spider import WebSpider
-from spider.custom import ApiFetcher, JsonParserWithCodeZeroChecker, UpdateMemberInfoSaver, KdlProxieser
+from spider.custom import ApiFetcher, JsonParser, UpdateMemberInfoSaver, KdlProxieser
 import logging
 logger = logging.getLogger('16')
 
@@ -25,7 +25,7 @@ def update_member_info():
 
     # create web spider
     web_spider = WebSpider(fetcher=ApiFetcher(),
-                           parser=(JsonParserWithCodeZeroChecker()),
+                           parser=(JsonParser()),
                            saver=UpdateMemberInfoSaver(get_session=Session),
                            proxieser=KdlProxieser(
                                order_id=get_kdl_order_id(),
@@ -33,7 +33,7 @@ def update_member_info():
                                sleep_time=5,
                                proxy_num=2,
                            ),
-                           queue_parse_size=100, queue_proxies_size=10, queue_save_size=10)
+                           queue_parse_size=100, queue_proxies_size=10, queue_save_size=100)
 
     # init add urls
     for url in left_url_list:
