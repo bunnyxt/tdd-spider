@@ -517,6 +517,7 @@ def add_member(mid, bapi, session, test_exist=True):
         new_member.name = member_obj['data']['name']
         new_member.face = member_obj['data']['face']
         new_member.sign = member_obj['data']['sign']
+        new_member.code = 0
     else:
         # member_obj code != 0
         raise InvalidObjCodeError(obj_name='member', code=member_obj['code'])
