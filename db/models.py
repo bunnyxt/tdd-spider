@@ -58,6 +58,7 @@ class TddMember(Base):
     name = Column(String(100), nullable=False)
     face = Column(String(200), nullable=False)
     sign = Column(String(500), nullable=False, default='')  #
+    code = Column(Integer, nullable=False, default=0)  # TODO how to enable nullable=False and have default value
     video_count = Column(Integer, nullable=False, default=0)
     last_video = Column(BigInteger)  # fk
     last_total_stat = Column(BigInteger)  # fk
