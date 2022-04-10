@@ -512,6 +512,7 @@ def add_member(mid, bapi, session, test_exist=True):
 
     # set attr from member_obj
     if member_obj['code'] == 0:
+        # of course we only add member with code = 0
         new_member.sex = member_obj['data']['sex']
         new_member.name = member_obj['data']['name']
         new_member.face = member_obj['data']['face']
@@ -544,14 +545,19 @@ def update_member(mid, bapi, session):
 
     # check following attr
     try:
-        if member_obj['code'] == 0:
+        if member_obj['code'] != 0:
+            # code maybe -404
+            if member_obj['code'] != old_obj.code:
+                member_update_logs.append(TddMemberLog(added, mid, 'code', old_obj.code, member_obj['code']))
+                old_obj.code = member_obj['code']
+        else:
             if member_obj['data']['sex'] != old_obj.sex:
                 member_update_logs.append(TddMemberLog(added, mid, 'sex', old_obj.sex, member_obj['data']['sex']))
                 old_obj.sex = member_obj['data']['sex']
             if member_obj['data']['name'] != old_obj.name:
                 member_update_logs.append(TddMemberLog(added, mid, 'name', old_obj.name, member_obj['data']['name']))
                 old_obj.name = member_obj['data']['name']
-            if member_obj['data']['face'][-44:] != old_obj.face[-44:]:  # remove prefix, just compare last 44 character
+            if member_obj['data']['face'][-44:] != old_obj.face[-44:]:  # remove prefix, just compare last 44 characters
                 member_update_logs.append(TddMemberLog(added, mid, 'face', old_obj.face, member_obj['data']['face']))
                 old_obj.face = member_obj['data']['face']
             if member_obj['data']['sign'] != old_obj.sign:
