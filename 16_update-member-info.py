@@ -41,7 +41,7 @@ def update_member_info():
 
     # launch web spider
     logger.info('spyder start, urls total len %d' % len(left_url_list))
-    web_spider.start_working(fetcher_num=10)
+    web_spider.start_working(fetcher_num=20)
     web_spider.wait_for_finished()
 
     # get fail urls
