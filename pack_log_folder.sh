@@ -12,6 +12,3 @@ echo "Finish pack log folder into ${file_name} file!"
 
 rm -r log_tmp
 echo "Finish remove log_tmp folder!"
-
-mv ${file_name} /var/www/res/tdd/log_pack/
-echo "File moved to res folder!"
