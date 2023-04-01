@@ -590,6 +590,7 @@ def add_staff(added, aid, mid, title, session, test_exist=True):
     # set attr
     new_staff.added = added
     new_staff.aid = aid
+    new_staff.bvid = a2b(aid)
     new_staff.mid = mid
     new_staff.title = title
 
