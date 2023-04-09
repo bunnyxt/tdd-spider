@@ -17,7 +17,7 @@ def update_video_info():
     bapi_with_proxy = BiliApi(get_proxy_pool_url())
 
     all_bvids = DBOperation.query_all_video_bvids(session)
-    logger.info('%d all bvids got' % len(all_bvids))
+    logger.info('Total %d videos got' % len(all_bvids))
 
     # add latest 5000 bvids first
     bvids = all_bvids[-5000:]
@@ -28,7 +28,7 @@ def update_video_info():
         if i % 7 == week_day:
             bvids.append(bvid)
 
-    logger.info('will update %d videos info' % len(bvids))
+    logger.info('Will update %d videos info' % len(bvids))
 
     total_count = len(bvids)
     tdd_common_error_count = 0
