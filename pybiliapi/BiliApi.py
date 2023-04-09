@@ -75,7 +75,6 @@ class BiliApi:
             r'Mozilla/5.0 (Linux; U; Android 2.3.7; en-us; Nexus One Build/FRF91) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1'
         ]
 
-
     def _get_random_ua(self):
         return random.choice(self._ua_list)
 
@@ -162,7 +161,7 @@ class BiliApi:
         return self._url_request('GET', 'http://api.bilibili.com/x/player/pagelist?aid={0}'.format(aid))
 
     def get_video_stat(self, aid):
-        return self._url_request('GET', 'http://api.bilibili.com/x/web-interface/archive/stat?aid={0}'.format(aid))
+        return self._url_request('GET', 'http://api.bilibili.com/archive_stat/stat?aid={0}'.format(aid))
 
     def get_video_stat_cfw(self, aid):
         return self._url_request('GET', get_video_stat_cfw_url() + '?aid={0}'.format(aid))
