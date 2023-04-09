@@ -2,7 +2,8 @@ import datetime
 import time
 import math
 
-__all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s', 'is_all_zero_record', 'print_obj',
+__all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s',
+           'is_all_zero_record', 'print_obj', 'null_or_str',
            'b2a', 'a2b', 'get_week_day', 'zk_calc']
 
 
@@ -33,6 +34,13 @@ def is_all_zero_record(record):
 def print_obj(obj):
     for key in dir(obj):
         print(key, obj.__getattribute__(key))
+
+
+def null_or_str(value):
+    """
+    convert value to string via `str(value)`, if value is None, return 'null'
+    """
+    return 'null' if value is None else str(value)
 
 
 # ref: https://www.zhihu.com/question/381784377/answer/1099438784
