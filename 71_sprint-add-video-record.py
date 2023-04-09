@@ -28,6 +28,7 @@ def add_video_record():
             coin = stat['data']['coin']
             share = stat['data']['share']
             like = stat['data']['like']
+            # TODO: add 5 new fields
             sql = 'insert into tdd_sprint_video_record ' \
                   '(added, aid, `view`, danmaku, reply, favorite, coin, `share`, `like`) ' \
                   'values ' \

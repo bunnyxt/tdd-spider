@@ -101,8 +101,12 @@ class TddVideoRecord(Base):
     coin = Column(Integer, nullable=False)
     share = Column(Integer, nullable=False)
     like = Column(Integer, nullable=False)
-
-    # UNIQUE KEY `added_aid_UNIQUE` (`added`,`aid`)
+    # 5 new fields, could be None
+    dislike = Column(Integer, default=None)
+    now_rank = Column(Integer, default=None)
+    his_rank = Column(Integer, default=None)
+    vt = Column(BigInteger, default=None)
+    vv = Column(BigInteger, default=None)
 
     # Foreign key here?
 

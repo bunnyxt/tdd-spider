@@ -226,6 +226,11 @@ def add_new_video_record_via_awesome_api(aids, time_label):
                         new_video_record.coin = stat['coin']
                         new_video_record.share = stat['share']
                         new_video_record.like = stat['like']
+                        new_video_record.dislike = stat.get('dislike', None)
+                        new_video_record.now_rank = stat.get('now_rank', None)
+                        new_video_record.his_rank = stat.get('his_rank', None)
+                        new_video_record.vt = stat.get('vt', None)
+                        new_video_record.vv = stat.get('vv', None)
 
                         # add to db
                         DBOperation.add(new_video_record, session)

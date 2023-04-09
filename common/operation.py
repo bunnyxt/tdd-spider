@@ -639,6 +639,11 @@ def add_video_record_via_awesome_stat(added, stat, session):
         new_video_record.coin = stat['coin']
         new_video_record.share = stat['share']
         new_video_record.like = stat['like']
+        new_video_record.dislike = stat.get('dislike', None)
+        new_video_record.now_rank = stat.get('now_rank', None)
+        new_video_record.his_rank = stat.get('his_rank', None)
+        new_video_record.vt = stat.get('vt', None)
+        new_video_record.vv = stat.get('vv', None)
     except Exception:
         raise InvalidParamError({'stat', stat})
 
@@ -670,6 +675,11 @@ def add_video_record_via_stat_api(aid, bapi, session):
         new_video_record.coin = stat_obj['data']['coin']
         new_video_record.share = stat_obj['data']['share']
         new_video_record.like = stat_obj['data']['like']
+        new_video_record.dislike = stat_obj['data'].get('dislike', None)
+        new_video_record.now_rank = stat_obj['data'].get('now_rank', None)
+        new_video_record.his_rank = stat_obj['data'].get('his_rank', None)
+        new_video_record.vt = stat_obj['data'].get('vt', None)
+        new_video_record.vv = stat_obj['data'].get('vv', None)
     else:
         # stat code != 0
         raise InvalidObjCodeError(obj_name='stat', code=stat_obj['code'])
@@ -702,6 +712,11 @@ def add_video_record_via_stat_api_cfw(aid, bapi, session):
         new_video_record.coin = stat_obj['data']['coin']
         new_video_record.share = stat_obj['data']['share']
         new_video_record.like = stat_obj['data']['like']
+        new_video_record.dislike = stat_obj['data'].get('dislike', None)
+        new_video_record.now_rank = stat_obj['data'].get('now_rank', None)
+        new_video_record.his_rank = stat_obj['data'].get('his_rank', None)
+        new_video_record.vt = stat_obj['data'].get('vt', None)
+        new_video_record.vv = stat_obj['data'].get('vv', None)
     else:
         # stat code != 0
         raise InvalidObjCodeError(obj_name='stat', code=stat_obj['code'])
