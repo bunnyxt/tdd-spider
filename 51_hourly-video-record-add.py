@@ -1014,6 +1014,7 @@ class RecentActivityFreqUpdateRunner(Thread):
         self.logger.info('Finish update recent, activity, freq fields of video!')
 
 
+# TODO: update after all-video hourly task fixed
 class RankWeeklyUpdateRunner(Thread):
     def __init__(self, records, time_task):
         super().__init__()
@@ -1305,6 +1306,7 @@ class RankWeeklyUpdateRunner(Thread):
         self.logger.info('Finish update rank weekly!')
 
 
+# TODO: update after all-video hourly task fixed
 class RankMonthlyUpdateRunner(Thread):
     def __init__(self, records, time_task):
         super().__init__()
@@ -1617,8 +1619,8 @@ def run_hourly_video_record_add(time_task):
         RecordsSaveToDbRunner(records, time_label),
         RecentRecordsAnalystRunner(records, time_task),
         RecentActivityFreqUpdateRunner(time_label),
-        RankWeeklyUpdateRunner(records, time_task),
-        RankMonthlyUpdateRunner(records, time_task),
+        # RankWeeklyUpdateRunner(records, time_task),
+        # RankMonthlyUpdateRunner(records, time_task),
     ]
     for runner in data_analysis_pipeline_runner_list:
         runner.start()
