@@ -6,7 +6,8 @@ from queue import Queue
 from common import get_valid, test_archive_rank_by_partion, test_video_stat, \
     add_video_record_via_stat_api, update_video, add_video_via_bvid, \
     InvalidObjCodeError, TddCommonError, AlreadyExistError
-from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day
+from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
+    str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day
 import math
 import time
 import datetime
@@ -18,8 +19,12 @@ from collections import namedtuple, defaultdict, Counter
 import logging
 logger = logging.getLogger('51')
 
+# TODO: remove old record
 Record = namedtuple('Record', [
     'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
+RecordNew = namedtuple('RecordNew', [
+    'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like',
+    'dislike', 'now_rank', 'his_rank', 'vt', 'vv'])
 RecordSpeed = namedtuple('RecordSpeed', [
     'start_ts', 'end_ts', 'timespan', 'per_seconds', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
 RecordSpeedRatio = namedtuple('RecordSpeedRatio', [
@@ -97,10 +102,18 @@ class AwesomeApiRecordParser(Thread):
             page_obj = content['content']
             for arch in page_obj['data']['archives']:
                 arch_stat = arch['stat']
-                record = Record(
+                # TODO: remove old record
+                # record = Record(
+                #     added, arch['aid'], arch['bvid'].lstrip('BV'),
+                #     -1 if arch_stat['view'] == '--' else arch_stat['view'], arch_stat['danmaku'], arch_stat['reply'],
+                #     arch_stat['favorite'], arch_stat['coin'], arch_stat['share'], arch_stat['like']
+                # )
+                record = RecordNew(
                     added, arch['aid'], arch['bvid'].lstrip('BV'),
                     -1 if arch_stat['view'] == '--' else arch_stat['view'], arch_stat['danmaku'], arch_stat['reply'],
-                    arch_stat['favorite'], arch_stat['coin'], arch_stat['share'], arch_stat['like']
+                    arch_stat['favorite'], arch_stat['coin'], arch_stat['share'], arch_stat['like'],
+                    arch_stat.get('dislike', None), arch_stat.get('now_rank', None), arch_stat.get('his_rank', None),
+                    arch_stat.get('vt', None), arch_stat.get('vv', None)
                 )
                 self.record_queue.put(record)
         self.logger.info('parser %s, end' % self.name)
@@ -377,8 +390,13 @@ class C30PipelineRunner(Thread):
         # insert records
         self.logger.info('Now start inserting records...')
         # use sql directly, combine 1000 records into one sql to execute and commit
+        # TODO: remove old record
+        # sql_prefix = 'insert into ' \
+        #              'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
+        #              'values '
         sql_prefix = 'insert into ' \
-                     'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
+                     'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`, ' \
+                     'dislike, now_rank, his_rank, vt, vv) ' \
                      'values '
         sql = sql_prefix
         need_insert_but_record_not_found_aid_list = []
@@ -388,9 +406,16 @@ class C30PipelineRunner(Thread):
             if not record:
                 need_insert_but_record_not_found_aid_list.append(aid)
                 continue
-            sql += '(%d, %d, %d, %d, %d, %d, %d, %d, %d), ' % (
+            # TODO: remove old record
+            # sql += '(%d, %d, %d, %d, %d, %d, %d, %d, %d), ' % (
+            #     record.added, record.aid,
+            #     record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like
+            # )
+            sql += '(%d, %d, %d, %d, %d, %d, %d, %d, %d, %s, %s, %s, %s, %s), ' % (
                 record.added, record.aid,
-                record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like
+                record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like,
+                null_or_str(record.dislike), null_or_str(record.now_rank), null_or_str(record.his_rank),
+                null_or_str(record.vt), null_or_str(record.vv)
             )
             if idx % 1000 == 0:
                 sql = sql[:-2]  # remove ending comma and space
@@ -499,6 +524,7 @@ class C0PipelineRunner(Thread):
         session.close()
 
 
+# TODO: change to record new
 class RecordsSaveToFileRunner(Thread):
     def __init__(self, records, time_task, data_folder='data/'):
         super().__init__()
@@ -556,6 +582,7 @@ class RecordsSaveToFileRunner(Thread):
                 self.logger.info('Finish execute packing files shell scripts!')
 
 
+# TODO: change to record new
 class RecordsSaveToDbRunner(Thread):
     def __init__(self, records, time_label):
         super().__init__()
@@ -614,6 +641,7 @@ class RecordsSaveToDbRunner(Thread):
                 self.logger.info('Finish change tdd_video_record_hourly table!')
 
 
+# TODO: change to record new
 class RecentRecordsAnalystRunner(Thread):
     def __init__(self, records, time_task, data_folder='data/', recent_file_num=2):
         super().__init__()
