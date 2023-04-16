@@ -1,5 +1,6 @@
 import requests
 import json
+import time
 import random
 from collections import namedtuple
 from pathlib import Path
@@ -20,9 +21,11 @@ __all__ = ['Service', 'RequestMode', 'VideoStat']
 
 class Service:
 
-    def __init__(self, headers: dict = None):
+    def __init__(self, headers: dict = None, retry: int = 3, timeout: float = 5.0):
         # set default config
-        self.headers = headers if headers is not None else {}
+        self._headers = headers if headers is not None else {}
+        self._retry = retry
+        self._timeout = timeout
 
         # load endpoints
         try:
@@ -81,32 +84,65 @@ class Service:
             r'Mozilla/5.0 (Linux; U; Android 2.3.7; en-us; Nexus One Build/FRF91) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1'
         ]
 
-    def _get(self, url: str, params: dict = None, headers: dict = None) -> Optional[dict]:
+    def _get(
+            self, url: str, params: dict = None, headers: dict = None,
+            retry: int = None, timeout: float = None
+    ) -> Optional[dict]:
         # assemble headers
         if headers is None:
-            headers = self.headers
+            headers = self._headers
         else:
-            headers = {**self.headers, **headers}
+            headers = {**self._headers, **headers}
         # add User-Agent if not exists
         if 'User-Agent' not in headers:
             headers['User-Agent'] = random.choice(self._ua_list)
 
-        # go request
-        # TODO: add retry
-        r = requests.get(url, params=params, headers=headers)
-        if r.status_code != 200:
-            logger.debug(f'Fail to get response with status code {r.status_code}. url: {url}, params: {params}')
-            return None
+        # config
+        retry = retry if retry is not None else self._retry
+        timeout = timeout if timeout is not None else self._timeout
 
-        # parse response
-        try:
-            return r.json()
-        except json.JSONDecodeError:
-            logger.debug(f'Fail to decode response to json. Response: {r.text}, url: {url}, params: {params}')
-            return None
+        # go request
+        response = None
+        for trial in range(1, retry + 1):
+            # colddown for retry
+            if trial > 1:
+                # factor range 0.75 ~ 1.25
+                time.sleep((trial - 1) * (random.random() * 0.5 + 0.75))
+
+            # try to get response
+            try:
+                r = requests.get(url, params=params, headers=headers, timeout=timeout)
+            except requests.exceptions.RequestException as e:
+                logger.debug(
+                    f'Fail to get response. '
+                    f'url: {url}, params: {params}, trial: {trial}, error: {e}'
+                )
+                continue
+
+            # check status code
+            if r.status_code != 200:
+                logger.debug(
+                    f'Fail to get response with status code {r.status_code}. '
+                    f'url: {url}, params: {params}, trial: {trial}'
+                )
+                continue
+
+            # parse response
+            try:
+                response = r.json()
+                break
+            except json.JSONDecodeError:
+                logger.debug(
+                    f'Fail to decode response to json. '
+                    f'Response: {r.text}, url: {url}, params: {params}, trial: {trial}'
+                )
+                continue
+        return response
 
     def get_video_stat(
-            self, params: dict = None, headers: dict = None, mode: RequestMode = 'direct'
+            self, params: dict = None, headers: dict = None,
+            retry: int = None, timeout: float = None,
+            mode: RequestMode = 'direct'
     ) -> Optional[VideoStat]:
         """
         params: { aid: int }
@@ -127,7 +163,7 @@ class Service:
             exit(1)
 
         # get response
-        response = self._get(url, params=params, headers=headers)
+        response = self._get(url, params=params, headers=headers, retry=retry, timeout=timeout)
         if response is None:
             logger.warning(f'Fail to get video stat. Params: {params}')
             return None
