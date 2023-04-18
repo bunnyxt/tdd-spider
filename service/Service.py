@@ -22,13 +22,14 @@ __all__ = ['Service', 'RequestMode', 'VideoStat']
 class Service:
 
     def __init__(
-            self, headers: dict = None, retry: int = 3, timeout: float = 5.0,
+            self, headers: dict = None, retry: int = 3, timeout: float = 5.0, colddown_factor: float = 1.0,
             mode: RequestMode = 'direct', get_proxy_url: Callable = None
     ):
         # set default config
         self._headers = headers if headers is not None else {}
         self._retry = retry
         self._timeout = timeout
+        self._colddown_factor = colddown_factor
         self._mode = mode
         self._get_proxy_url = get_proxy_url
 
@@ -91,7 +92,7 @@ class Service:
 
     def _get(
             self, url: str, params: dict = None, headers: dict = None,
-            retry: int = None, timeout: float = None,
+            retry: int = None, timeout: float = None, colddown_factor: float = None,
             get_proxy_url: Callable = None
     ) -> Optional[dict]:
         # assemble headers
@@ -106,14 +107,15 @@ class Service:
         # config
         retry = retry if retry is not None else self._retry
         timeout = timeout if timeout is not None else self._timeout
+        colddown_factor = colddown_factor if colddown_factor is not None else self._colddown_factor
 
         # go request
         response = None
         for trial in range(1, retry + 1):
             # colddown for retry
             if trial > 1:
-                # factor range 0.75 ~ 1.25
-                time.sleep((trial - 1) * (random.random() * 0.5 + 0.75))
+                # fluctuation range 0.75 ~ 1.25
+                time.sleep((trial - 1) * (random.random() * 0.5 + 0.75) * colddown_factor)
 
             # get proxy
             proxies = None
@@ -155,7 +157,7 @@ class Service:
 
     def get_video_stat(
             self, params: dict = None, headers: dict = None,
-            retry: int = None, timeout: float = None,
+            retry: int = None, timeout: float = None, colddown_factor: float = None,
             mode: RequestMode = None, get_proxy_url: Callable = None
     ) -> Optional[VideoStat]:
         """
@@ -184,7 +186,8 @@ class Service:
             exit(1)
 
         # get response
-        response = self._get(url, params=params, headers=headers, retry=retry, timeout=timeout,
+        response = self._get(url, params=params, headers=headers,
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
                              get_proxy_url=get_proxy_url if mode == 'proxy' else None)
         if response is None:
             logger.warning(f'Fail to get video stat. Params: {params}')
