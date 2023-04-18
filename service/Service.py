@@ -4,7 +4,7 @@ import time
 import random
 from collections import namedtuple
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 import logging
 
 logger = logging.getLogger('Service')
@@ -21,11 +21,16 @@ __all__ = ['Service', 'RequestMode', 'VideoStat']
 
 class Service:
 
-    def __init__(self, headers: dict = None, retry: int = 3, timeout: float = 5.0):
+    def __init__(
+            self, headers: dict = None, retry: int = 3, timeout: float = 5.0,
+            mode: RequestMode = 'direct', get_proxy_url: Callable = None
+    ):
         # set default config
         self._headers = headers if headers is not None else {}
         self._retry = retry
         self._timeout = timeout
+        self._mode = mode
+        self._get_proxy_url = get_proxy_url
 
         # load endpoints
         try:
@@ -86,7 +91,8 @@ class Service:
 
     def _get(
             self, url: str, params: dict = None, headers: dict = None,
-            retry: int = None, timeout: float = None
+            retry: int = None, timeout: float = None,
+            get_proxy_url: Callable = None
     ) -> Optional[dict]:
         # assemble headers
         if headers is None:
@@ -109,9 +115,17 @@ class Service:
                 # factor range 0.75 ~ 1.25
                 time.sleep((trial - 1) * (random.random() * 0.5 + 0.75))
 
+            # get proxy
+            proxies = None
+            if get_proxy_url is not None:
+                proxy_url = get_proxy_url()
+                proxies = {
+                    'http': proxy_url,
+                }
+
             # try to get response
             try:
-                r = requests.get(url, params=params, headers=headers, timeout=timeout)
+                r = requests.get(url, params=params, headers=headers, timeout=timeout, proxies=proxies)
             except requests.exceptions.RequestException as e:
                 logger.debug(
                     f'Fail to get response. '
@@ -142,15 +156,22 @@ class Service:
     def get_video_stat(
             self, params: dict = None, headers: dict = None,
             retry: int = None, timeout: float = None,
-            mode: RequestMode = 'direct'
+            mode: RequestMode = None, get_proxy_url: Callable = None
     ) -> Optional[VideoStat]:
         """
         params: { aid: int }
-        mode: 'direct' | 'worker'
+        mode: 'direct' | 'worker' | 'proxy'
         """
+        # config mode and get_proxy_url
+        mode = mode if mode is not None else self._mode
+        get_proxy_url = get_proxy_url if get_proxy_url is not None else self._get_proxy_url
+
         # validate params
-        if mode not in ['direct', 'worker']:
+        if mode not in ['direct', 'worker', 'proxy']:
             logger.critical(f'Invalid request mode: {mode}.')
+            exit(1)
+        if mode == 'proxy' and get_proxy_url is None:
+            logger.critical('Proxy mode requires get_proxy_url function.')
             exit(1)
 
         # get endpoint url
@@ -163,7 +184,8 @@ class Service:
             exit(1)
 
         # get response
-        response = self._get(url, params=params, headers=headers, retry=retry, timeout=timeout)
+        response = self._get(url, params=params, headers=headers, retry=retry, timeout=timeout,
+                             get_proxy_url=get_proxy_url if mode == 'proxy' else None)
         if response is None:
             logger.warning(f'Fail to get video stat. Params: {params}')
             return None
