@@ -1,4 +1,15 @@
-__all__ = ['TddCommonError', 'AlreadyExistError', 'NotExistError', 'InvalidObjError', 'InvalidObjCodeError', 'InvalidParamError']
+__all__ = ['TddError',
+           'TddCommonError', 'AlreadyExistError', 'NotExistError', 'InvalidObjError', 'InvalidObjCodeError',
+           'InvalidParamError']
+
+
+class TddError(Exception):
+
+    def __init__(self):
+        super().__init__(self)
+
+    def __str__(self):
+        return '<TddError>'
 
 
 class TddCommonError(Exception):
