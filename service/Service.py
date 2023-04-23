@@ -5,6 +5,7 @@ import random
 from collections import namedtuple
 from pathlib import Path
 from typing import Optional, Callable
+from common.error import TddError
 import logging
 
 logger = logging.getLogger('Service')
@@ -16,7 +17,56 @@ VideoStat = namedtuple('VideoStat',
                        ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
                         'dislike', 'vt', 'vv'])
 
-__all__ = ['Service', 'RequestMode', 'VideoStat']
+__all__ = ['Service',
+           'ServiceError', 'ResponseError', 'ValidationError', 'FormatError', 'CodeError',
+           'RequestMode', 'VideoStat']
+
+
+class ServiceError(TddError):
+    def __init__(self):
+        super().__init__()
+
+    def __str__(self):
+        return '<ServiceError>'
+
+
+class ResponseError(ServiceError):
+    def __init__(self, target: str, params: dict):
+        super().__init__()
+        self.target = target
+        self.params = params
+
+    def __str__(self):
+        return f'<ResponseError(target={self.target},params={self.params})>'
+
+
+class ValidationError(ServiceError):
+    def __init__(self, target: str, params: dict, response: dict):
+        super().__init__()
+        self.target = target
+        self.params = params
+        self.response = response
+
+    def __str__(self):
+        return f'<ValidationError(target={self.target},params={self.params},response={self.response})>'
+
+
+class FormatError(ValidationError):
+    def __init__(self, target: str, params: dict, response: dict, message: str):
+        super().__init__(target, params, response)
+        self.message = message
+
+    def __str__(self):
+        return f'<FormatError(target={self.target},params={self.params},response={self.response},message={self.message})>'
+
+
+class CodeError(ValidationError):
+    def __init__(self, target: str, params: dict, response: dict, code: int):
+        super().__init__(target, params, response)
+        self.code = code
+
+    def __str__(self):
+        return f'<CodeError(target={self.target},params={self.params},response={self.response},code={self.code})>'
 
 
 class Service:
@@ -159,7 +209,7 @@ class Service:
             self, params: dict = None, headers: dict = None,
             retry: int = None, timeout: float = None, colddown_factor: float = None,
             mode: RequestMode = None, get_proxy_url: Callable = None
-    ) -> Optional[VideoStat]:
+    ) -> VideoStat:
         """
         params: { aid: int }
         mode: 'direct' | 'worker' | 'proxy'
@@ -190,32 +240,25 @@ class Service:
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor,
                              get_proxy_url=get_proxy_url if mode == 'proxy' else None)
         if response is None:
-            logger.warning(f'Fail to get video stat. Params: {params}')
-            return None
+            raise ResponseError('video_stat', params)
 
         # validate format
 
         # response should contain keys
-        for key in ['code', 'message', 'ttl']:
+        for key in ['code', 'message']:
             if key not in response.keys():
-                logger.warning(
-                    f'Invalid video stat response format. '
-                    f'Response should contain key {key}. Response: {response}')
-                return None
-        # response code should be 0 and response data should be a dict
-        if response['code'] != 0 or type(response['data']) != dict:
-            logger.warning(
-                f'Invalid video stat response format. '
-                f'Response code should be 0 and should contain dict data. Response: {response}')
-            return None
+                raise FormatError('video_stat', params, response, f'Response should contain key {key}.')
+        # response code should be 0
+        if response['code'] != 0:
+            raise CodeError('video_stat', params, response, response['code'])
+        # response data should be a dict
+        if type(response['data']) != dict:
+            raise FormatError('video_stat', params, response, 'Response data should be a dict.')
         # data should contain keys
         for key in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
                     'dislike', 'vt', 'vv']:
             if key not in response['data'].keys():
-                logger.warning(
-                    f'Invalid video stat response format. '
-                    f'Response data should contain key {key}. Response: {response}')
-                return None
+                raise FormatError('video_stat', params, response, f'Response data should contain key {key}.')
 
         # assemble data
         return VideoStat(
