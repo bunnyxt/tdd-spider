@@ -16,6 +16,10 @@ import re
 from conf import get_proxy_pool_url
 from serverchan import sc_send
 from collections import namedtuple, defaultdict, Counter
+from common import TddError
+from service import Service, CodeError
+# from proxypool import get_proxy_url
+from task import add_video_record
 import logging
 logger = logging.getLogger('51')
 
@@ -483,15 +487,19 @@ class C0PipelineRunner(Thread):
         # TODO use multi thread to accelerate
         self.logger.info('Now start fetching and inserting records...')
         bapi_with_proxy = BiliApi(proxy_pool_url=get_proxy_pool_url())
+        service = Service(mode='worker')
         fail_aids = []
         new_video_record_list = []
         for idx, aid in enumerate(need_insert_aid_list, 1):
             # add video record
             try:
-                new_video_record = add_video_record_via_stat_api(aid, bapi_with_proxy, session)
+                # new_video_record = add_video_record_via_stat_api(aid, bapi_with_proxy, session)
+                new_video_record = add_video_record(aid, service, session)
                 new_video_record_list.append(new_video_record)
                 self.logger.debug('Add new record %s' % new_video_record)
-            except InvalidObjCodeError as e:
+            # except InvalidObjCodeError as e:
+            except CodeError as e:
+                # TODO: migrate to update_view in service
                 self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e))
                 try:
                     tdd_video_logs = update_video(aid, bapi_with_proxy, session)
@@ -504,7 +512,7 @@ class C0PipelineRunner(Thread):
                         self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
                                          % (log.aid, log.attr, log.oldval, log.newval))
                 fail_aids.append(aid)
-            except TddCommonError as e:
+            except TddError as e:
                 self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e))
                 fail_aids.append(aid)
             if idx % 10 == 0:
@@ -517,6 +525,10 @@ class C0PipelineRunner(Thread):
         record_list = [
             # 'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'
             Record(r.added, r.aid, a2b(r.aid), r.view, r.danmaku, r.reply, r.favorite, r.coin, r.share, r.like)
+            # TODO: use following record new
+            # RecordNew(
+            #     r.added, r.aid, a2b(r.aid), r.view, r.danmaku, r.reply, r.favorite, r.coin, r.share, r.like,
+            #     r.dislike, r.now_rank, r.his_rank, r.vt, r.vv)
             for r in new_video_record_list
         ]
         self.logger.info('c0 video pipeline done! return %d records' % len(record_list))
