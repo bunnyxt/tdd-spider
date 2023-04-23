@@ -2,6 +2,7 @@ import urllib3
 import json
 from conf import get_sckey
 import logging
+
 logger = logging.getLogger('serverchan')
 
 __all__ = ['sc_send']
@@ -20,7 +21,7 @@ def sc_send(text, desp=None):
     try:
         sckey = get_sckey()
         url = 'http://sc.ftqq.com/%s.send' % sckey
-        response = http.request('GET', url, fields=message)
+        response = http.request('POST', url, body=json.dumps(message), headers={'Content-Type': 'application/json'})
         if response.status == 200:
             html = response.data.decode()
             sc_response = json.loads(html)
