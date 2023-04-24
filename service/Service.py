@@ -26,10 +26,14 @@ VideoViewStat = namedtuple('VideoViewStat',
                            ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank',
                             'like', 'dislike'])
 VideoViewStaffItem = namedtuple('VideoViewStaffItem', ['mid', 'title', 'name', 'face'])
+MemberSpace = namedtuple('MemberSpace', ['mid', 'name', 'sex', 'face', 'sign'])
 
 __all__ = ['Service',
            'ServiceError', 'ResponseError', 'ValidationError', 'FormatError', 'CodeError',
-           'RequestMode', 'VideoStat', 'VideoView', 'VideoViewOwner', 'VideoViewStat', 'VideoViewStaffItem']
+           'RequestMode',
+           'VideoStat',
+           'VideoView', 'VideoViewOwner', 'VideoViewStat', 'VideoViewStaffItem',
+           'MemberSpace']
 
 
 class ServiceError(TddError):
@@ -351,7 +355,7 @@ class Service:
         # response data stat should be a dict
         if type(response['data']['stat']) != dict:
             raise FormatError('video_view', params, response, 'Response data stat should be a dict.')
-        # data owner should contain keys
+        # data stat should contain keys
         for key in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
                     'dislike']:
             if key not in response['data']['stat'].keys():
@@ -367,7 +371,8 @@ class Service:
                 # staff item should contain keys
                 for key in ['mid', 'title', 'name', 'face']:
                     if key not in staff_item.keys():
-                        raise FormatError('video_view', params, response, f'Response data staff item should contain key {key}.')
+                        raise FormatError('video_view', params, response,
+                                          f'Response data staff item should contain key {key}.')
 
         # assemble data
         staff = None
@@ -415,4 +420,67 @@ class Service:
             attribute=response['data'].get('attribute', None),
             forward=response['data'].get('forward', None),
             staff=staff
+        )
+
+    def get_member_space(
+            self, params: dict = None, headers: dict = None,
+            retry: int = None, timeout: float = None, colddown_factor: float = None,
+            mode: RequestMode = None, get_proxy_url: Callable = None
+    ) -> MemberSpace:
+        """
+        params: { mid: int }
+        mode: 'direct' | 'worker' | 'proxy'
+        """
+        # config mode and get_proxy_url
+        mode = mode if mode is not None else self._mode
+        get_proxy_url = get_proxy_url if get_proxy_url is not None else self._get_proxy_url
+
+        # validate params
+        if mode not in ['direct', 'worker', 'proxy']:
+            logger.critical(f'Invalid request mode: {mode}.')
+            exit(1)
+        if mode == 'proxy' and get_proxy_url is None:
+            logger.critical('Proxy mode requires get_proxy_url function.')
+            exit(1)
+
+        # get endpoint url
+        try:
+            url = self.endpoints['get_member_space']['direct']
+            if mode == 'worker':
+                url = random.choice(self.endpoints['get_member_space']['workers'])
+        except KeyError:
+            logger.critical('Endpoint "get_member_space" not found.')
+            exit(1)
+
+        # get response
+        response = self._get(url, params=params, headers=headers,
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
+                             get_proxy_url=get_proxy_url if mode == 'proxy' else None)
+        if response is None:
+            raise ResponseError('member_space', params)
+
+        # validate format
+
+        # response should contain keys
+        for key in ['code', 'message', 'ttl']:
+            if key not in response.keys():
+                raise FormatError('member_space', params, response, f'Response should contain key {key}.')
+        # response code should be 0
+        if response['code'] != 0:
+            raise CodeError('member_space', params, response, response['code'])
+        # response data should be a dict
+        if type(response['data']) != dict:
+            raise FormatError('member_space', params, response, 'Response data should be a dict.')
+        # data should contain keys
+        for key in ['mid', 'name', 'sex', 'face', 'sign']:
+            if key not in response['data'].keys():
+                raise FormatError('member_space', params, response, f'Response data should contain key {key}.')
+
+        # assemble data
+        return MemberSpace(
+            mid=response['data']['mid'],
+            name=response['data']['name'],
+            sex=response['data']['sex'],
+            face=response['data']['face'],
+            sign=response['data']['sign']
         )
