@@ -16,10 +16,20 @@ RequestMode = str
 VideoStat = namedtuple('VideoStat',
                        ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
                         'dislike', 'vt', 'vv'])
+VideoView = namedtuple('VideoView',
+                       ['bvid', 'aid', 'videos', 'tid', 'tname', 'copyright', 'pic', 'title', 'pubdate', 'ctime',
+                        'desc', 'state', 'duration', 'owner', 'stat',
+                        # optional
+                        'attribute', 'forward', 'staff'])
+VideoViewOwner = namedtuple('VideoViewOwner', ['mid', 'name', 'face'])
+VideoViewStat = namedtuple('VideoViewStat',
+                           ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank',
+                            'like', 'dislike'])
+VideoViewStaffItem = namedtuple('VideoViewStaffItem', ['mid', 'title', 'name', 'face'])
 
 __all__ = ['Service',
            'ServiceError', 'ResponseError', 'ValidationError', 'FormatError', 'CodeError',
-           'RequestMode', 'VideoStat']
+           'RequestMode', 'VideoStat', 'VideoView', 'VideoViewOwner', 'VideoViewStat', 'VideoViewStaffItem']
 
 
 class ServiceError(TddError):
@@ -275,4 +285,134 @@ class Service:
             dislike=response['data']['dislike'],
             vt=response['data']['vt'],
             vv=response['data']['vv']
+        )
+
+    def get_video_view(
+            self, params: dict = None, headers: dict = None,
+            retry: int = None, timeout: float = None, colddown_factor: float = None,
+            mode: RequestMode = None, get_proxy_url: Callable = None
+    ) -> VideoView:
+        """
+        params: { aid: int }
+        mode: 'direct' | 'worker' | 'proxy'
+        """
+        # config mode and get_proxy_url
+        mode = mode if mode is not None else self._mode
+        get_proxy_url = get_proxy_url if get_proxy_url is not None else self._get_proxy_url
+
+        # validate params
+        if mode not in ['direct', 'worker', 'proxy']:
+            logger.critical(f'Invalid request mode: {mode}.')
+            exit(1)
+        if mode == 'proxy' and get_proxy_url is None:
+            logger.critical('Proxy mode requires get_proxy_url function.')
+            exit(1)
+
+        # get endpoint url
+        try:
+            url = self.endpoints['get_video_view']['direct']
+            if mode == 'worker':
+                url = random.choice(self.endpoints['get_video_view']['workers'])
+        except KeyError:
+            logger.critical('Endpoint "get_video_view" not found.')
+            exit(1)
+
+        # get response
+        response = self._get(url, params=params, headers=headers,
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
+                             get_proxy_url=get_proxy_url if mode == 'proxy' else None)
+        if response is None:
+            raise ResponseError('video_view', params)
+
+        # validate format
+
+        # response should contain keys
+        for key in ['code', 'message', 'ttl']:
+            if key not in response.keys():
+                raise FormatError('video_view', params, response, f'Response should contain key {key}.')
+        # response code should be 0
+        if response['code'] != 0:
+            raise CodeError('video_view', params, response, response['code'])
+        # response data should be a dict
+        if type(response['data']) != dict:
+            raise FormatError('video_view', params, response, 'Response data should be a dict.')
+        # data should contain keys
+        for key in ['bvid', 'aid', 'videos', 'tid', 'tname', 'copyright', 'pic', 'title', 'pubdate', 'ctime', 'desc',
+                    'state', 'duration', 'owner', 'stat']:
+            if key not in response['data'].keys():
+                raise FormatError('video_view', params, response, f'Response data should contain key {key}.')
+        # response data owner should be a dict
+        if type(response['data']['owner']) != dict:
+            raise FormatError('video_view', params, response, 'Response data owner should be a dict.')
+        # data owner should contain keys
+        for key in ['mid', 'name', 'face']:
+            if key not in response['data']['owner'].keys():
+                raise FormatError('video_view', params, response, f'Response data owner should contain key {key}.')
+        # response data stat should be a dict
+        if type(response['data']['stat']) != dict:
+            raise FormatError('video_view', params, response, 'Response data stat should be a dict.')
+        # data owner should contain keys
+        for key in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
+                    'dislike']:
+            if key not in response['data']['stat'].keys():
+                raise FormatError('video_view', params, response, f'Response data owner should contain key {key}.')
+        # response data staff should be a list if exists
+        if 'staff' in response['data'].keys():
+            if type(response['data']['staff']) != list:
+                raise FormatError('video_view', params, response, 'Response data staff should be a list.')
+            # staff item should be a dict
+            for staff_item in response['data']['staff']:
+                if type(staff_item) != dict:
+                    raise FormatError('video_view', params, response, 'Response data staff item should be a dict.')
+                # staff item should contain keys
+                for key in ['mid', 'title', 'name', 'face']:
+                    if key not in staff_item.keys():
+                        raise FormatError('video_view', params, response, f'Response data staff item should contain key {key}.')
+
+        # assemble data
+        staff = None
+        if 'staff' in response['data'].keys():
+            staff = []
+            for staff_item in response['data']['staff']:
+                staff.append(VideoViewStaffItem(
+                    mid=staff_item['mid'],
+                    title=staff_item['title'],
+                    name=staff_item['name'],
+                    face=staff_item['face']
+                ))
+        return VideoView(
+            bvid=response['data']['bvid'],
+            aid=response['data']['aid'],
+            videos=response['data']['videos'],
+            tid=response['data']['tid'],
+            tname=response['data']['tname'],
+            copyright=response['data']['copyright'],
+            pic=response['data']['pic'],
+            title=response['data']['title'],
+            pubdate=response['data']['pubdate'],
+            ctime=response['data']['ctime'],
+            desc=response['data']['desc'],
+            state=response['data']['state'],
+            duration=response['data']['duration'],
+            owner=VideoViewOwner(
+                mid=response['data']['owner']['mid'],
+                name=response['data']['owner']['name'],
+                face=response['data']['owner']['face']
+            ),
+            stat=VideoViewStat(
+                aid=response['data']['stat']['aid'],
+                view=response['data']['stat']['view'],
+                danmaku=response['data']['stat']['danmaku'],
+                reply=response['data']['stat']['reply'],
+                favorite=response['data']['stat']['favorite'],
+                coin=response['data']['stat']['coin'],
+                share=response['data']['stat']['share'],
+                now_rank=response['data']['stat']['now_rank'],
+                his_rank=response['data']['stat']['his_rank'],
+                like=response['data']['stat']['like'],
+                dislike=response['data']['stat']['dislike']
+            ),
+            attribute=response['data'].get('attribute', None),
+            forward=response['data'].get('forward', None),
+            staff=staff
         )
