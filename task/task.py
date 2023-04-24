@@ -38,3 +38,29 @@ def add_video_record(aid: int, service: Service, session: Session) -> TddVideoRe
     return new_video_record
 
 
+
+
+def add_staff(added: int, aid: int, mid: int, title: str, session: Session, test_exist=True):
+    bvid = a2b(aid)
+
+    # test exist
+    if test_exist:
+        staff = DBOperation.query_video_staff_via_aid_mid(aid, mid, session)
+        if staff is not None:
+            # staff already exist
+            raise AlreadyExistError(table='video_staff', params={'aid': aid, 'mid': mid})
+
+    # assemble staff
+    new_staff = TddVideoStaff(
+        added=added,
+        aid=aid,
+        bvid=bvid,
+        mid=mid,
+        title=title
+    )
+
+    # add to db
+    # TODO: use new db operation which can raise exception
+    DBOperation.add(new_staff, session)
+
+    return new_staff
