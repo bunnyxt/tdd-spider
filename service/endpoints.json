@@ -13,5 +13,10 @@
     "direct": "http://api.bilibili.com/x/space/acc/info",
     "workers": [
     ]
+  },
+  "get_member_relation": {
+    "direct": "http://api.bilibili.com/x/relation/stat",
+    "workers": [
+    ]
   }
 }

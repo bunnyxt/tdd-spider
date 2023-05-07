@@ -27,13 +27,15 @@ VideoViewStat = namedtuple('VideoViewStat',
                             'like', 'dislike'])
 VideoViewStaffItem = namedtuple('VideoViewStaffItem', ['mid', 'title', 'name', 'face'])
 MemberSpace = namedtuple('MemberSpace', ['mid', 'name', 'sex', 'face', 'sign'])
+MemberRelation = namedtuple('MemberRelation', ['mid', 'following', 'follower'])
 
 __all__ = ['Service',
            'ServiceError', 'ResponseError', 'ValidationError', 'FormatError', 'CodeError',
            'RequestMode',
            'VideoStat',
            'VideoView', 'VideoViewOwner', 'VideoViewStat', 'VideoViewStaffItem',
-           'MemberSpace']
+           'MemberSpace',
+           'MemberRelation']
 
 
 class ServiceError(TddError):
@@ -515,4 +517,65 @@ class Service:
             sex=response['data']['sex'],
             face=response['data']['face'],
             sign=response['data']['sign']
+        )
+
+    def get_member_relation(
+            self, params: dict = None, headers: dict = None,
+            retry: int = None, timeout: float = None, colddown_factor: float = None,
+            mode: RequestMode = None, get_proxy_url: Callable = None
+    ) -> MemberRelation:
+        """
+        params: { mid: int }
+        mode: 'direct' | 'worker' | 'proxy'
+        """
+        # config mode and get_proxy_url
+        mode = mode if mode is not None else self._mode
+        get_proxy_url = get_proxy_url if get_proxy_url is not None else self._get_proxy_url
+
+        # validate params
+        if mode not in ['direct', 'worker', 'proxy']:
+            logger.critical(f'Invalid request mode: {mode}.')
+            exit(1)
+        if mode == 'proxy' and get_proxy_url is None:
+            logger.critical('Proxy mode requires get_proxy_url function.')
+            exit(1)
+
+        # get endpoint url
+        try:
+            url = self.endpoints['get_member_relation']['direct']
+            if mode == 'worker':
+                url = random.choice(self.endpoints['get_member_relation']['workers'])
+        except KeyError:
+            logger.critical('Endpoint "get_member_relation" not found.')
+            exit(1)
+
+        # get response
+        response = self._get(url, params=params, headers=headers,
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
+                             get_proxy_url=get_proxy_url if mode == 'proxy' else None)
+        if response is None:
+            raise ResponseError('member_relation', params)
+
+        # validate format
+
+        # response should contain keys
+        for key in ['code', 'message', 'ttl']:
+            if key not in response.keys():
+                raise FormatError('member_relation', params, response, f'Response should contain key {key}.')
+        # response code should be 0
+        if response['code'] != 0:
+            raise CodeError('member_relation', params, response, response['code'])
+        # response data should be a dict
+        if type(response['data']) != dict:
+            raise FormatError('member_relation', params, response, 'Response data should be a dict.')
+        # data should contain keys
+        for key in ['mid', 'following', 'follower']:
+            if key not in response['data'].keys():
+                raise FormatError('member_relation', params, response, f'Response data should contain key {key}.')
+
+        # assemble data
+        return MemberRelation(
+            mid=response['data']['mid'],
+            following=response['data']['following'],
+            follower=response['data']['follower']
         )
