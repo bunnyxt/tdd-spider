@@ -157,7 +157,7 @@ class Service:
     def _get(
             self, url: str, params: dict = None, headers: dict = None,
             retry: int = None, timeout: float = None, colddown_factor: float = None,
-            get_proxy_url: Callable = None
+            get_proxy_url: Callable = None, parser: Callable[[str], Optional[dict]] = None
     ) -> Optional[dict]:
         # assemble headers
         if headers is None:
@@ -208,15 +208,20 @@ class Service:
                 continue
 
             # parse response
-            try:
-                response = r.json()
-                break
-            except json.JSONDecodeError:
-                logger.debug(
-                    f'Fail to decode response to json. '
-                    f'Response: {r.text}, url: {url}, params: {params}, trial: {trial}'
-                )
-                continue
+            if parser is None:
+                try:
+                    response = r.json()
+                    break
+                except json.JSONDecodeError:
+                    logger.debug(
+                        f'Fail to decode response to json. '
+                        f'Response: {r.text}, url: {url}, params: {params}, trial: {trial}'
+                    )
+                    continue
+            else:
+                response = parser(r.text)
+                if response is not None:
+                    break
         return response
 
     def get_video_stat(
@@ -452,10 +457,37 @@ class Service:
             logger.critical('Endpoint "get_member_space" not found.')
             exit(1)
 
+        # define parser
+        def parser(text: str) -> Optional[dict]:
+            logger.debug(f'Try to parse member space response text. text: {text}.')
+            parsed_response = None
+            try:
+                parsed_response = json.loads(text)
+            except json.JSONDecodeError:
+                logger.debug(f'Fail to decode text to json. Try to parse two jsons.')
+                split_index = text.find('}{')
+                if split_index == -1:
+                    logger.debug('Fail to parse two jsons. Return None.')
+                else:
+                    try:
+                        status_response = json.loads(text[:split_index + 1])
+                        info_response = json.loads(text[split_index + 1:])
+                        logger.debug(
+                            f'Successfully parse two jsons. Assign status_response to parsed_response.'
+                            f'status_response: {status_response}, info_response: {info_response}.'
+                        )
+                        parsed_response = info_response
+                    except json.JSONDecodeError:
+                        logger.debug('Fail to parse two jsons. Return None.')
+            if parsed_response is not None and parsed_response['code'] == -401:
+                logger.debug('Status code -401 found. Anti-crawler triggered, return None for retry.')
+                parsed_response = None
+            return parsed_response
+
         # get response
         response = self._get(url, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor,
-                             get_proxy_url=get_proxy_url if mode == 'proxy' else None)
+                             get_proxy_url=get_proxy_url if mode == 'proxy' else None, parser=parser)
         if response is None:
             raise ResponseError('member_space', params)
 
