@@ -1,6 +1,6 @@
 from service import Service, ServiceError, CodeError
 from sqlalchemy.orm.session import Session
-from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember
+from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord
 from util import get_ts_s, a2b
 from typing import List
 from common.error import TddError
@@ -8,7 +8,7 @@ import logging
 
 logger = logging.getLogger('task')
 
-__all__ = ['add_video_record', 'update_video', 'add_member', 'add_staff',
+__all__ = ['add_video_record', 'update_video', 'add_member', 'add_staff', 'add_member_follower_record',
            'TaskError', 'NotExistError', 'AlreadyExistError']
 
 
@@ -299,3 +299,24 @@ def add_staff(added: int, aid: int, mid: int, title: str, session: Session, test
     DBOperation.add(new_staff, session)
 
     return new_staff
+
+
+def add_member_follower_record(mid: int, service: Service, session: Session):
+    # get member relation
+    try:
+        member_relation = service.get_member_relation({'mid': mid})
+    except ServiceError as e:
+        raise e
+
+    # assemble follower record
+    new_follower_record = TddMemberFollowerRecord(
+        mid=mid,
+        added=get_ts_s(),
+        follower=member_relation.follower,
+    )
+
+    # add to db
+    # TODO: use new db operation which can raise exception
+    DBOperation.add(new_follower_record, session)
+
+    return new_follower_record
