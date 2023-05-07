@@ -16,7 +16,7 @@ import re
 from conf import get_proxy_pool_url
 from serverchan import sc_send
 from collections import namedtuple, defaultdict, Counter
-from common import TddError
+from common.error import TddError
 from service import Service, CodeError
 # from proxypool import get_proxy_url
 from task import add_video_record, update_video as task_update_video
