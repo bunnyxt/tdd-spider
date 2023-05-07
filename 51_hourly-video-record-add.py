@@ -19,7 +19,7 @@ from collections import namedtuple, defaultdict, Counter
 from common import TddError
 from service import Service, CodeError
 # from proxypool import get_proxy_url
-from task import add_video_record
+from task import add_video_record, update_video as task_update_video
 import logging
 logger = logging.getLogger('51')
 
@@ -486,7 +486,7 @@ class C0PipelineRunner(Thread):
         # fetch and insert records
         # TODO use multi thread to accelerate
         self.logger.info('Now start fetching and inserting records...')
-        bapi_with_proxy = BiliApi(proxy_pool_url=get_proxy_pool_url())
+        # bapi_with_proxy = BiliApi(proxy_pool_url=get_proxy_pool_url())
         service = Service(mode='worker')
         fail_aids = []
         new_video_record_list = []
@@ -499,11 +499,10 @@ class C0PipelineRunner(Thread):
                 self.logger.debug('Add new record %s' % new_video_record)
             # except InvalidObjCodeError as e:
             except CodeError as e:
-                # TODO: migrate to update_view in service
                 self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e))
                 try:
-                    tdd_video_logs = update_video(aid, bapi_with_proxy, session)
-                except TddCommonError as e2:
+                    tdd_video_logs = task_update_video(aid, service, session)
+                except TddError as e2:
                     self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
                 except Exception as e2:
                     self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
@@ -511,6 +510,16 @@ class C0PipelineRunner(Thread):
                     for log in tdd_video_logs:
                         self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
                                          % (log.aid, log.attr, log.oldval, log.newval))
+                # try:
+                #     tdd_video_logs = update_video(aid, bapi_with_proxy, session)
+                # except TddCommonError as e2:
+                #     self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+                # except Exception as e2:
+                #     self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+                # else:
+                #     for log in tdd_video_logs:
+                #         self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
+                #                          % (log.aid, log.attr, log.oldval, log.newval))
                 fail_aids.append(aid)
             except TddError as e:
                 self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e))
