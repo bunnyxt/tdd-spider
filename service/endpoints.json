@@ -10,7 +10,7 @@
     ]
   },
   "get_member_space": {
-    "direct": "https://api.bilibili.com/x/space/acc/info",
+    "direct": "http://api.bilibili.com/x/space/acc/info",
     "workers": [
     ]
   }
