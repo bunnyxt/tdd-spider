@@ -214,6 +214,7 @@ class C30NoNeedInsertAidsChecker(Thread):
         # - ...
         self.logger.info('Now start checking no need insert records...')
         session = Session()
+        service = Service(mode='worker')
         bapi_with_proxy = BiliApi(get_proxy_pool_url())
         _403_aids = DBOperation.query_403_video_aids(session)
         result_status_dict = defaultdict(list)
@@ -241,13 +242,22 @@ class C30NoNeedInsertAidsChecker(Thread):
             if video_already_exist_flag:
                 # try update video
                 try:
-                    tdd_video_logs = update_video(aid, bapi_with_proxy, session)
-                except TddCommonError as e2:
+                    tdd_video_logs = task_update_video(aid, service, session)
+                except TddError as e2:
                     self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
                     result_status_dict['fail_aids'].append(aid)
                 except Exception as e2:
                     self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
                     result_status_dict['fail_aids'].append(aid)
+                # TODO: remove old update_video
+                # try:
+                #     tdd_video_logs = update_video(aid, bapi_with_proxy, session)
+                # except TddCommonError as e2:
+                #     self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+                #     result_status_dict['fail_aids'].append(aid)
+                # except Exception as e2:
+                #     self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+                #     result_status_dict['fail_aids'].append(aid)
                 else:
                     # init change flags
                     code_change_flag = False
