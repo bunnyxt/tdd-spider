@@ -3,41 +3,13 @@ from sqlalchemy.orm.session import Session
 from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord
 from util import get_ts_s, a2b
 from typing import List
-from common.error import TddError
+from .error import TddError, AlreadyExistError, NotExistError
+
 import logging
 
 logger = logging.getLogger('task')
 
-__all__ = ['add_video_record', 'update_video', 'add_member', 'add_staff', 'add_member_follower_record',
-           'TaskError', 'NotExistError', 'AlreadyExistError']
-
-
-class TaskError(TddError):
-    def __init__(self):
-        super().__init__()
-
-    def __str__(self):
-        return '<TaskError>'
-
-
-class NotExistError(TaskError):
-    def __init__(self, table, params):
-        super().__init__()
-        self.table = table
-        self.params = params
-
-    def __str__(self):
-        return f'<NotExistError(table={self.table},params={self.params})>'
-
-
-class AlreadyExistError(TaskError):
-    def __init__(self, table, params):
-        super().__init__()
-        self.table = table
-        self.params = params
-
-    def __str__(self):
-        return f'<AlreadyExistError(table={self.table},params={self.params})>'
+__all__ = ['add_video_record', 'update_video', 'add_member', 'add_staff', 'add_member_follower_record']
 
 
 def add_video_record(aid: int, service: Service, session: Session) -> TddVideoRecord:
