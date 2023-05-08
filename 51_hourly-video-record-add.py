@@ -80,6 +80,10 @@ class AwesomeApiFetcher(Thread):
                 self.page_num_queue.put(page_num)
             else:
                 self.logger.debug('fetcher %s, pn %d success' % (self.name, page_num))
+                page_obj_videos = len(page_obj['data']['archives'])
+                if page_obj_videos < 50:
+                    self.logger.warning(
+                        'fetcher %s, pn %d, only %d videos found' % (self.name, page_num, page_obj_videos))
                 self.content_queue.put({'added': added, 'content': page_obj})
         self.content_queue.put(EndOfFetcher())
         self.logger.info('fetcher %s, end' % self.name)
