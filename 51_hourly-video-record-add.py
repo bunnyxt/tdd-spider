@@ -21,6 +21,7 @@ from service import Service, CodeError
 # from proxypool import get_proxy_url
 from task import add_video_record, update_video as task_update_video
 import logging
+
 logger = logging.getLogger('51')
 
 # TODO: remove old record
@@ -365,11 +366,21 @@ class C30PipelineRunner(Thread):
                     check_all_zero_record_fail_fetch_again_count += 1
                     continue
                 # assemble new record
-                new_record = Record(
+                # TODO: remove old record
+                # new_record = Record(
+                #     get_ts_s(), aid, a2b(aid),
+                #     -1 if stat_obj['data']['view'] == '--' else stat_obj['data']['view'], stat_obj['data']['danmaku'],
+                #     stat_obj['data']['reply'], stat_obj['data']['favorite'], stat_obj['data']['coin'],
+                #     stat_obj['data']['share'], stat_obj['data']['like']
+                # )
+                new_record = RecordNew(
                     get_ts_s(), aid, a2b(aid),
                     -1 if stat_obj['data']['view'] == '--' else stat_obj['data']['view'], stat_obj['data']['danmaku'],
                     stat_obj['data']['reply'], stat_obj['data']['favorite'], stat_obj['data']['coin'],
-                    stat_obj['data']['share'], stat_obj['data']['like']
+                    stat_obj['data']['share'], stat_obj['data']['like'],
+                    stat_obj['data'].get('dislike', None),
+                    stat_obj['data'].get('now_rank', None), stat_obj['data'].get('his_rank', None),
+                    stat_obj['data'].get('vt', None), stat_obj['data'].get('vv', None),
                 )
                 if is_all_zero_record(new_record):
                     self.logger.warning('Get all zero record of video aid %d again!' % aid)
@@ -423,15 +434,23 @@ class C30PipelineRunner(Thread):
             )
             if idx % 1000 == 0:
                 sql = sql[:-2]  # remove ending comma and space
-                session.execute(sql)
-                session.commit()
+                try:
+                    session.execute(sql)
+                    session.commit()
+                except Exception as e:
+                    self.logger.error('Fail to execute sql: %s...%s' % (sql[:100], sql[-100:]))
+                    self.logger.error('Exception: %s' % str(e))
                 sql = sql_prefix
                 if idx % log_gap == 0:
                     self.logger.info('%d / %d done' % (idx, len(need_insert_aid_list)))
         if sql != sql_prefix:
             sql = sql[:-2]  # remove ending comma and space
-            session.execute(sql)
-            session.commit()
+            try:
+                session.execute(sql)
+                session.commit()
+            except Exception as e:
+                self.logger.error('Fail to execute sql: %s...%s' % (sql[:100], sql[-100:]))
+                self.logger.error('Exception: %s' % str(e))
         self.logger.info('%d / %d done' % (len(need_insert_aid_list), len(need_insert_aid_list)))
         self.logger.info('Finish inserting records! %d records added, %d aids left' % (
             len(need_insert_aid_list), len(need_insert_but_record_not_found_aid_list)))
@@ -445,7 +464,8 @@ class C30PipelineRunner(Thread):
         # - ...
         self.logger.info('%d c30 need add but not found aids got' % len(need_insert_but_record_not_found_aid_list))
         self.logger.info('Now start a branch thread for checking need add but not found aids...')
-        c30_need_add_but_not_found_aids_checker = C30NeedAddButNotFoundAidsChecker(need_insert_but_record_not_found_aid_list)
+        c30_need_add_but_not_found_aids_checker = C30NeedAddButNotFoundAidsChecker(
+            need_insert_but_record_not_found_aid_list)
         c30_need_add_but_not_found_aids_checker.start()
 
         # check no need insert records
@@ -878,7 +898,8 @@ class RecentRecordsAnalystRunner(Thread):
                 if value < -10:
                     change_obj = self._assemble_record_abnormal_change(
                         added=records[-1].added, aid=aid, attr=prop,
-                        speed_now=speed_now[idx2], speed_last=speed_last[idx2], speed_now_incr_rate=speed_ratio[idx2-4],
+                        speed_now=speed_now[idx2], speed_last=speed_last[idx2],
+                        speed_now_incr_rate=speed_ratio[idx2 - 4],
                         period_range=speed_period.timespan, speed_period=speed_period[idx2],
                         speed_overall=speed_overall[idx2],
                         this_record=records[-1], last_record=records[-2],
@@ -893,12 +914,13 @@ class RecentRecordsAnalystRunner(Thread):
             # rule: speed_ratio.prop > 2 and speed_now.prop > 50
             for idx2, prop in enumerate(RecordSpeedRatio._fields[:7]):
                 value = speed_ratio[idx2]
-                if value > 2 and speed_now[idx2+4] > 50:
+                if value > 2 and speed_now[idx2 + 4] > 50:
                     change_obj = self._assemble_record_abnormal_change(
                         added=records[-1].added, aid=aid, attr=prop,
-                        speed_now=speed_now[idx2+4], speed_last=speed_last[idx2+4], speed_now_incr_rate=speed_ratio[idx2],
-                        period_range=speed_period.timespan, speed_period=speed_period[idx2+4],
-                        speed_overall=speed_overall[idx2+4],
+                        speed_now=speed_now[idx2 + 4], speed_last=speed_last[idx2 + 4],
+                        speed_now_incr_rate=speed_ratio[idx2],
+                        period_range=speed_period.timespan, speed_period=speed_period[idx2 + 4],
+                        speed_overall=speed_overall[idx2 + 4],
                         this_record=records[-1], last_record=records[-2],
                         description='unexpected increase detected, speed now of prop %s is %s, > 200%%' % (
                             prop, '%.2f' % value if abs(value) is not 99999999 else '%sinf' % '-' if value < 0 else '')

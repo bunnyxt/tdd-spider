@@ -24,6 +24,7 @@ def str_to_ts_s(s, mask='%Y-%m-%d %H:%M:%S'):
 
 
 def is_all_zero_record(record):
+    # TODO: support dislike, vt, vv
     attributes = ['view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like']
     for idx, attribute in enumerate(attributes, 3):
         if record[idx] > 0:
