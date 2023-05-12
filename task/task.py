@@ -128,7 +128,7 @@ def update_video(aid: int, service: Service, session: Session) -> List[TddVideoL
         if video_view.owner.mid != curr_video.mid:
             video_update_logs.append(
                 TddVideoLog(added, aid, bvid,
-                            'mid', curr_video.owner.mid, video_view.owner.mid))
+                            'mid', curr_video.mid, video_view.owner.mid))
             curr_video.mid = video_view.owner.mid
         # attribute
         if video_view.attribute is not None:
