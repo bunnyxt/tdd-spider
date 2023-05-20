@@ -142,9 +142,6 @@ class BiliApi:
                 logger.warning('Exception occurred during request, decode and parse json! %s' % e)
                 return None
 
-    def get_video_view(self, aid):
-        return self._url_request('GET', 'http://api.bilibili.com/x/web-interface/view?aid={0}'.format(aid))
-
     def get_video_view_via_bvid(self, bvid):
         # bvid with BV/bv prefix is also acceptable
         return self._url_request('GET', 'http://api.bilibili.com/x/web-interface/view?bvid={0}'.format(bvid))
