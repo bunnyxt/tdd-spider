@@ -23,5 +23,10 @@
     "direct": "http://api.bilibili.com/x/relation/stat",
     "workers": [
     ]
+  },
+  "get_archive_rank_by_partion": {
+    "direct": "http://api.bilibili.com/archive_rank/getarchiverankbypartion",
+    "workers": [
+    ]
   }
 }

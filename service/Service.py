@@ -30,6 +30,14 @@ VideoTags = namedtuple('VideoTags', ['tags'])
 VideoTag = namedtuple('VideoTag', ['tag_id', 'tag_name'])
 MemberSpace = namedtuple('MemberSpace', ['mid', 'name', 'sex', 'face', 'sign'])
 MemberRelation = namedtuple('MemberRelation', ['mid', 'following', 'follower'])
+ArchiveRankByPartion = namedtuple('ArchiveRankByPartion', ['archives', 'page'])
+ArchiveRankByPartionArchive = namedtuple('ArchiveRankByPartionArchive',
+                                         ['aid', 'videos', 'tid', 'tname', 'copyright', 'pic', 'title', 'stat', 'bvid',
+                                          'description', 'mid'])
+ArchiveRankByPartionArchiveStat = namedtuple('ArchiveRankByPartionArchiveStat',
+                                             ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share',
+                                              'now_rank', 'his_rank', 'like', 'dislike', 'vt', 'vv'])
+ArchiveRankByPartionPage = namedtuple('ArchiveRankByPartionPage', ['count', 'num', 'size'])
 
 __all__ = ['Service',
            'RequestMode',
@@ -37,7 +45,9 @@ __all__ = ['Service',
            'VideoView', 'VideoViewOwner', 'VideoViewStat', 'VideoViewStaffItem',
            'VideoTags', 'VideoTag',
            'MemberSpace',
-           'MemberRelation']
+           'MemberRelation',
+           'ArchiveRankByPartion', 'ArchiveRankByPartionArchive', 'ArchiveRankByPartionArchiveStat',
+           'ArchiveRankByPartionPage']
 
 
 class Service:
@@ -430,7 +440,7 @@ class Service:
         # response code should be 0
         if response['code'] != 0:
             raise CodeError('video_tags', params, response, response['code'])
-        # response data should be a dict
+        # response data should be a list
         if type(response['data']) != list:
             raise FormatError('video_tags', params, response, 'Response data should be a list.')
         # for each data item
@@ -601,4 +611,132 @@ class Service:
             mid=response['data']['mid'],
             following=response['data']['following'],
             follower=response['data']['follower']
+        )
+
+    def get_archive_rank_by_partion(
+            self, params: dict = None, headers: dict = None,
+            retry: int = None, timeout: float = None, colddown_factor: float = None,
+            mode: RequestMode = None, get_proxy_url: Callable = None
+    ) -> ArchiveRankByPartion:
+        """
+        params: { tid: int, pn: int, ps: int }
+        mode: 'direct' | 'worker' | 'proxy'
+        """
+        # config mode and get_proxy_url
+        mode = mode if mode is not None else self._mode
+        get_proxy_url = get_proxy_url if get_proxy_url is not None else self._get_proxy_url
+
+        # validate params
+        if mode not in ['direct', 'worker', 'proxy']:
+            logger.critical(f'Invalid request mode: {mode}.')
+            exit(1)
+        if mode == 'proxy' and get_proxy_url is None:
+            logger.critical('Proxy mode requires get_proxy_url function.')
+            exit(1)
+
+        # get endpoint url
+        try:
+            url = self.endpoints['get_archive_rank_by_partion']['direct']
+            if mode == 'worker':
+                url = random.choice(self.endpoints['get_archive_rank_by_partion']['workers'])
+        except KeyError:
+            logger.critical('Endpoint "get_archive_rank_by_partion" not found.')
+            exit(1)
+
+        # get response
+        response = self._get(url, params=params, headers=headers,
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
+                             get_proxy_url=get_proxy_url if mode == 'proxy' else None)
+        if response is None:
+            raise ResponseError('archive_rank_by_partion', params)
+
+        # validate format
+
+        # response should contain keys
+        for key in ['code', 'message', 'ttl']:
+            if key not in response.keys():
+                raise FormatError('archive_rank_by_partion', params, response, f'Response should contain key {key}.')
+        # response code should be 0
+        if response['code'] != 0:
+            raise CodeError('archive_rank_by_partion', params, response, response['code'])
+        # response data should be a dict
+        if type(response['data']) != dict:
+            raise FormatError('archive_rank_by_partion', params, response, 'Response data should be a dict.')
+        # data should contain keys
+        for key in ['archives', 'page']:
+            if key not in response['data'].keys():
+                raise FormatError('archive_rank_by_partion', params, response,
+                                  f'Response data should contain key {key}.')
+        # data archives should be a list
+        if type(response['data']['archives']) != list:
+            raise FormatError('archive_rank_by_partion', params, response, 'Response data archives should be a list.')
+        # for each data archives item
+        for data_archives_item in response['data']['archives']:
+            # data archives item should be a dict
+            if type(data_archives_item) != dict:
+                raise FormatError('archive_rank_by_partion', params, response,
+                                  'Response data archives item should be a dict.')
+            # data archives item should contain keys
+            for key in ['aid', 'videos', 'tid', 'tname', 'copyright', 'pic', 'title', 'stat', 'bvid', 'description',
+                        'mid']:
+                if key not in data_archives_item.keys():
+                    raise FormatError('archive_rank_by_partion', params, response,
+                                      f'Response data archives item should contain key {key}.')
+                # data archives item stat should be a dict
+                if type(data_archives_item['stat']) != dict:
+                    raise FormatError('archive_rank_by_partion', params, response,
+                                      'Response data archives item stat should be a dict.')
+                # data archives item stat should contain keys
+                for key2 in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank',
+                             'like', 'dislike', 'vt', 'vv']:
+                    if key2 not in data_archives_item['stat'].keys():
+                        raise FormatError('archive_rank_by_partion', params, response,
+                                          f'Response data archives item stat should contain key {key2}.')
+        # data page should be a dict
+        if type(response['data']['page']) != dict:
+            raise FormatError('archive_rank_by_partion', params, response, 'Response data page should be a dict.')
+        # data page should contain keys
+        for key in ['count', 'num', 'size']:
+            if key not in response['data']['page'].keys():
+                raise FormatError('archive_rank_by_partion', params, response,
+                                  f'Response data page should contain key {key}.')
+
+        # assemble data
+        archiveRankByPartionPage = ArchiveRankByPartionPage(
+            count=response['data']['page']['count'],
+            num=response['data']['page']['num'],
+            size=response['data']['page']['size']
+        )
+        archiveRankByPartionArchives = []
+        for data_archives_item in response['data']['archives']:
+            archiveRankByPartionArchives.append(ArchiveRankByPartionArchive(
+                aid=data_archives_item['aid'],
+                videos=data_archives_item['videos'],
+                tid=data_archives_item['tid'],
+                tname=data_archives_item['tname'],
+                copyright=data_archives_item['copyright'],
+                pic=data_archives_item['pic'],
+                title=data_archives_item['title'],
+                stat=ArchiveRankByPartionArchiveStat(
+                    aid=data_archives_item['stat']['aid'],
+                    view=data_archives_item['stat']['view'],
+                    danmaku=data_archives_item['stat']['danmaku'],
+                    reply=data_archives_item['stat']['reply'],
+                    favorite=data_archives_item['stat']['favorite'],
+                    coin=data_archives_item['stat']['coin'],
+                    share=data_archives_item['stat']['share'],
+                    now_rank=data_archives_item['stat']['now_rank'],
+                    his_rank=data_archives_item['stat']['his_rank'],
+                    like=data_archives_item['stat']['like'],
+                    dislike=data_archives_item['stat']['dislike'],
+                    vt=data_archives_item['stat']['vt'],
+                    vv=data_archives_item['stat']['vv']
+                ),
+                bvid=data_archives_item['bvid'],
+                description=data_archives_item['description'],
+                mid=data_archives_item['mid'],
+            ))
+        return ArchiveRankByPartion(
+            archives=archiveRankByPartionArchives,
+            page=archiveRankByPartionPage
         )
