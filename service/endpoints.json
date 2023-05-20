@@ -9,6 +9,11 @@
     "workers": [
     ]
   },
+  "get_video_tags": {
+    "direct": "http://api.bilibili.com/x/tag/archive/tags",
+    "workers": [
+    ]
+  },
   "get_member_space": {
     "direct": "http://api.bilibili.com/x/space/acc/info",
     "workers": [

@@ -26,6 +26,8 @@ VideoViewStat = namedtuple('VideoViewStat',
                            ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank',
                             'like', 'dislike'])
 VideoViewStaffItem = namedtuple('VideoViewStaffItem', ['mid', 'title', 'name', 'face'])
+VideoTags = namedtuple('VideoTags', ['tags'])
+VideoTag = namedtuple('VideoTag', ['tag_id', 'tag_name'])
 MemberSpace = namedtuple('MemberSpace', ['mid', 'name', 'sex', 'face', 'sign'])
 MemberRelation = namedtuple('MemberRelation', ['mid', 'following', 'follower'])
 
@@ -33,6 +35,7 @@ __all__ = ['Service',
            'RequestMode',
            'VideoStat',
            'VideoView', 'VideoViewOwner', 'VideoViewStat', 'VideoViewStaffItem',
+           'VideoTags', 'VideoTag',
            'MemberSpace',
            'MemberRelation']
 
@@ -380,6 +383,74 @@ class Service:
             forward=response['data'].get('forward', None),
             staff=staff
         )
+
+    def get_video_tags(
+            self, params: dict = None, headers: dict = None,
+            retry: int = None, timeout: float = None, colddown_factor: float = None,
+            mode: RequestMode = None, get_proxy_url: Callable = None
+    ) -> VideoTags:
+        """
+        params: { aid: int }
+        mode: 'direct' | 'worker' | 'proxy'
+        """
+        # config mode and get_proxy_url
+        mode = mode if mode is not None else self._mode
+        get_proxy_url = get_proxy_url if get_proxy_url is not None else self._get_proxy_url
+
+        # validate params
+        if mode not in ['direct', 'worker', 'proxy']:
+            logger.critical(f'Invalid request mode: {mode}.')
+            exit(1)
+        if mode == 'proxy' and get_proxy_url is None:
+            logger.critical('Proxy mode requires get_proxy_url function.')
+            exit(1)
+
+        # get endpoint url
+        try:
+            url = self.endpoints['get_video_tags']['direct']
+            if mode == 'worker':
+                url = random.choice(self.endpoints['get_video_tags']['workers'])
+        except KeyError:
+            logger.critical('Endpoint "get_video_tags" not found.')
+            exit(1)
+
+        # get response
+        response = self._get(url, params=params, headers=headers,
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
+                             get_proxy_url=get_proxy_url if mode == 'proxy' else None)
+        if response is None:
+            raise ResponseError('video_tags', params)
+
+        # validate format
+
+        # response should contain keys
+        for key in ['code', 'message', 'ttl']:
+            if key not in response.keys():
+                raise FormatError('video_tags', params, response, f'Response should contain key {key}.')
+        # response code should be 0
+        if response['code'] != 0:
+            raise CodeError('video_tags', params, response, response['code'])
+        # response data should be a dict
+        if type(response['data']) != list:
+            raise FormatError('video_tags', params, response, 'Response data should be a list.')
+        # for each data item
+        for data_item in response['data']:
+            # data item should be a dict
+            if type(data_item) != dict:
+                raise FormatError('video_tags', params, response, 'Response data item should be a dict.')
+            # data item should contain keys
+            for key in ['tag_id', 'tag_name']:
+                if key not in data_item.keys():
+                    raise FormatError('video_tags', params, response, f'Response data item should contain key {key}.')
+
+        # assemble data
+        videoTags = VideoTags(tags=[])
+        for data_item in response['data']:
+            videoTags.tags.append(VideoTag(
+                tag_id=data_item['tag_id'],
+                tag_name=data_item['tag_name']
+            ))
+        return videoTags
 
     def get_member_space(
             self, params: dict = None, headers: dict = None,
