@@ -10,7 +10,8 @@ import logging
 
 logger = logging.getLogger('task')
 
-__all__ = ['add_video_record', 'update_video', 'add_member', 'add_staff', 'add_member_follower_record']
+__all__ = ['add_video_record', 'update_video', 'add_member', 'add_staff', 'add_member_follower_record',
+           'get_video_tags_str']
 
 
 def add_video_record(aid: int, service: Service, session: Session) -> TddVideoRecord:
@@ -204,6 +205,7 @@ def update_video(aid: int, service: Service, session: Session) -> List[TddVideoL
                 video_update_logs.append(
                     TddVideoLog(added, aid, bvid,
                                 'staff', f'mid: {curr_staff_item.mid}; title: {curr_staff_item.title}', None))
+        # TODO: update tags string
 
     # commit changes
     session.commit()
@@ -293,3 +295,19 @@ def add_member_follower_record(mid: int, service: Service, session: Session):
     DBOperation.add(new_follower_record, session)
 
     return new_follower_record
+
+
+def get_video_tags_str(aid: int, service: Service) -> str:
+    # get video tags
+    try:
+        video_tags = service.get_video_tags({'aid': aid})
+    except ServiceError as e:
+        raise e
+
+    # assemble tags string
+    tags_str = ''
+    for tag in video_tags.tags:
+        tags_str += tag.tag_name
+        tags_str += ';'
+
+    return tags_str
