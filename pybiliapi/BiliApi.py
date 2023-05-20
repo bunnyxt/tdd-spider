@@ -162,8 +162,5 @@ class BiliApi:
     def get_member(self, mid):
         return self._url_request('GET', 'http://api.bilibili.com/x/space/acc/info?mid={0}'.format(mid))
 
-    def get_member_relation(self, mid):
-        return self._url_request('GET', 'http://api.bilibili.com/x/relation/stat?vmid={0}'.format(mid))
-
     def get_archive_rank_by_partion(self, tid, pn, ps):
         return self._url_request('GET', 'http://api.bilibili.com/archive_rank/getarchiverankbypartion?jsonp=jsonp&tid={0}&pn={1}&ps={2}'.format(tid, pn, ps))

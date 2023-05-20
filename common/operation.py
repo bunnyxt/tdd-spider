@@ -10,7 +10,7 @@ __all__ = ['add_video_via_bvid',
            'update_video', 'update_video_via_bvid',
            'add_member', 'update_member', 'add_staff',
            'add_video_record_via_awesome_stat', 'add_video_record_via_stat_api',
-           'add_member_follower_record_via_relation_api', 'get_tags_str']
+           'get_tags_str']
 
 
 # bvid version
@@ -592,32 +592,6 @@ def add_video_record_via_stat_api(aid, bapi, session):
     DBOperation.add(new_video_record, session)
 
     return new_video_record
-
-
-def add_member_follower_record_via_relation_api(mid, bapi, session):
-    # get relation_obj
-    relation_obj = get_valid(bapi.get_member_relation, (mid,), test_member_relation)
-    if relation_obj is None:
-        # fail to get valid relation_obj
-        raise InvalidObjError(obj_name='relation', params={'mid': mid})
-
-    new_member_follower_record = TddMemberFollowerRecord()
-
-    # set basic attr
-    new_member_follower_record.mid = mid
-    new_member_follower_record.added = get_ts_s()
-
-    # set attr from relation_obj
-    if relation_obj['code'] == 0:
-        new_member_follower_record.follower = relation_obj['data']['follower']
-    else:
-        # relation code != 0
-        raise InvalidObjCodeError(obj_name='relation', code=relation_obj['code'])
-
-    # add to db
-    DBOperation.add(new_member_follower_record, session)
-
-    return new_member_follower_record
 
 
 # aid version, deprecated
