@@ -3,8 +3,7 @@ import os
 
 __all__ = ['CONFIG_PATH', 'CONFIG',
            'get_db_args', 'get_library_cookie', 'get_bilibili_cookie', 'get_sckey',
-           'get_proxy_pool_url', 'get_kdl_order_id', 'get_kdl_apikey',
-           'get_video_stat_cfw_url']
+           'get_proxy_pool_url', 'get_kdl_order_id', 'get_kdl_apikey']
 
 # use config parser to load config
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'conf.ini')
@@ -38,7 +37,3 @@ def get_kdl_order_id():
 
 def get_kdl_apikey():
     return CONFIG.get('proxy', 'kdl_apikey')
-
-
-def get_video_stat_cfw_url():
-    return CONFIG.get('cfw', 'video_stat_cfw_url')

@@ -1,7 +1,6 @@
 import urllib3
 import json
 import random
-from conf import get_video_stat_cfw_url
 import logging
 logger = logging.getLogger('BiliApi')
 
@@ -162,9 +161,6 @@ class BiliApi:
 
     def get_video_stat(self, aid):
         return self._url_request('GET', 'http://api.bilibili.com/archive_stat/stat?aid={0}'.format(aid))
-
-    def get_video_stat_cfw(self, aid):
-        return self._url_request('GET', get_video_stat_cfw_url() + '?aid={0}'.format(aid))
 
     def get_member(self, mid):
         return self._url_request('GET', 'http://api.bilibili.com/x/space/acc/info?mid={0}'.format(mid))
