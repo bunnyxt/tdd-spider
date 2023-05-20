@@ -205,7 +205,15 @@ def update_video(aid: int, service: Service, session: Session) -> List[TddVideoL
                 video_update_logs.append(
                     TddVideoLog(added, aid, bvid,
                                 'staff', f'mid: {curr_staff_item.mid}; title: {curr_staff_item.title}', None))
-        # TODO: update tags string
+        # update tags string
+        new_tags = get_video_tags_str(aid, service)
+        new_tags_sorted = ';'.join(sorted(new_tags.split(';')))
+        curr_tags_sorted = ';'.join(sorted(curr_video.tags.split(';')))
+        if new_tags_sorted != curr_tags_sorted:
+            video_update_logs.append(
+                TddVideoLog(added, aid, bvid,
+                            'tags', curr_video.tags, new_tags))
+            curr_video.tags = new_tags
 
     # commit changes
     session.commit()
