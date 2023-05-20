@@ -3,7 +3,8 @@ from sqlalchemy.orm.session import Session
 from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord
 from util import get_ts_s, a2b
 from typing import List
-from .error import TddError, AlreadyExistError, NotExistError
+from common.error import TddError
+from .error import AlreadyExistError, NotExistError
 
 import logging
 
