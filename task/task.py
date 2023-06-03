@@ -287,7 +287,7 @@ def add_staff(added: int, aid: int, mid: int, title: str, session: Session, test
 def add_member_follower_record(mid: int, service: Service, session: Session):
     # get member relation
     try:
-        member_relation = service.get_member_relation({'mid': mid})
+        member_relation = service.get_member_relation({'vmid': mid})
     except ServiceError as e:
         raise e
 

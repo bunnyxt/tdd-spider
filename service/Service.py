@@ -558,7 +558,7 @@ class Service:
             mode: RequestMode = None, get_proxy_url: Callable = None
     ) -> MemberRelation:
         """
-        params: { mid: int }
+        params: { vmid: int }
         mode: 'direct' | 'worker' | 'proxy'
         """
         # config mode and get_proxy_url
