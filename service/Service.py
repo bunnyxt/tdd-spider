@@ -514,9 +514,11 @@ class Service:
                         parsed_response = info_response
                     except json.JSONDecodeError:
                         logger.debug('Fail to parse two jsons. Return None.')
-            if parsed_response is not None and parsed_response['code'] == -401:
-                logger.debug('Status code -401 found. Anti-crawler triggered, return None for retry.')
-                parsed_response = None
+            if parsed_response is not None:
+                code = parsed_response['code']
+                if code in [-401, -799]:
+                    logger.debug(f'Status code {code} found. Anti-crawler triggered, return None for retry.')
+                    parsed_response = None
             return parsed_response
 
         # get response
