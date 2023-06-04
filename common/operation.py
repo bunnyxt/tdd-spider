@@ -9,8 +9,7 @@ import time
 __all__ = ['add_video_via_bvid',
            'update_video', 'update_video_via_bvid',
            'add_member', 'update_member', 'add_staff',
-           'add_video_record_via_awesome_stat', 'add_video_record_via_stat_api',
-           'get_tags_str']
+           'add_video_record_via_awesome_stat', 'add_video_record_via_stat_api']
 
 
 # bvid version
@@ -592,25 +591,6 @@ def add_video_record_via_stat_api(aid, bapi, session):
     DBOperation.add(new_video_record, session)
 
     return new_video_record
-
-
-# aid version, deprecated
-def get_tags_str(aid, bapi):
-    # get tags_obj
-    tags_obj = get_valid(bapi.get_video_tags, (aid,), test_video_tags)
-    if tags_obj is None:
-        # fail to get valid test_video_tags
-        raise InvalidObjError(obj_name='tags', params={'aid': aid})
-
-    tags_str = ''
-    try:
-        for tag in tags_obj['data']:
-            tags_str += tag['tag_name']
-            tags_str += ';'
-    except Exception as e:
-        print(e)
-
-    return tags_str
 
 
 # bvid version
