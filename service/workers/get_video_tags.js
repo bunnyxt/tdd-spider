@@ -1,15 +1,18 @@
-addEventListener("fetch", event => {
-  event.respondWith(handleRequest(event.request))
-});
+// define base url, do NOT include suffix `?` or `/`
+const baseUrl = new URL('http://api.bilibili.com/x/tag/archive/tags');
 
-async function handleRequest(request) {
-  const { searchParams } = new URL(request.url);
+export default {
+  async fetch(request, env, ctx) {
+    // parse request url
+    const requestUrl = new URL(request.url);
+    const searchString = requestUrl.search;
 
-  const aid = searchParams.get('aid');
+    // make sub request and get res
+    let res =  await fetch(baseUrl.href + searchString);
 
-  const response = await fetch(`http://api.bilibili.com/x/tag/archive/tags?aid=${aid}`);
+    // optionally modify res
+    //
 
-  const text = await response.text();
-
-  return new Response(text);
-};
+    return res;
+  }
+}
