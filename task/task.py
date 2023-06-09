@@ -1,6 +1,7 @@
 from service import Service, ServiceError, CodeError
 from sqlalchemy.orm.session import Session
-from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord
+from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord, \
+    TddMemberLog
 from util import get_ts_s, a2b
 from typing import List
 from common.error import TddError
@@ -10,7 +11,7 @@ import logging
 
 logger = logging.getLogger('task')
 
-__all__ = ['add_video_record', 'update_video', 'add_member', 'add_staff', 'add_member_follower_record',
+__all__ = ['add_video_record', 'update_video', 'add_member', 'update_member', 'add_staff', 'add_member_follower_record',
            'get_video_tags_str']
 
 
@@ -256,6 +257,74 @@ def add_member(mid: int, service: Service, session: Session, test_exist=True):
     DBOperation.add(new_member, session)
 
     return new_member
+
+
+def update_member(mid: int, service: Service, session: Session):
+    # get current member
+    # TODO: use new db operation which can raise exception
+    curr_member: TddMember = DBOperation.query_member_via_mid(mid, session)
+    if curr_member is None:
+        raise NotExistError(table='tdd_member', params={'mid': mid})
+
+    member_update_logs: List[TddMemberLog] = []
+
+    # get member space
+    try:
+        member_space = service.get_member_space({'mid': mid})
+    except CodeError as e:
+        # code maybe -404, otherwise anti-crawler triggered, raise error
+        if e.code != -404:
+            raise e
+        if e.code != curr_member.code:
+            member_update_logs.append(
+                TddMemberLog(get_ts_s(), mid,
+                             'code', curr_member.code, e.code))
+            curr_member.code = e.code
+    except ServiceError as e:
+        raise e
+    else:
+        # check attributes
+        added = get_ts_s()
+        # code
+        if 0 != curr_member.code:
+            member_update_logs.append(
+                TddMemberLog(added, mid,
+                             'code', curr_member.code, 0))
+            curr_member.code = 0
+        # sex
+        if member_space.sex != curr_member.sex:
+            member_update_logs.append(
+                TddMemberLog(added, mid,
+                             'sex', curr_member.sex, member_space.sex))
+            curr_member.sex = member_space.sex
+        # name
+        if member_space.name != curr_member.name:
+            member_update_logs.append(
+                TddMemberLog(added, mid,
+                             'name', curr_member.name, member_space.name))
+            curr_member.name = member_space.name
+        # face
+        if member_space.face[-44:] != curr_member.face[-44:]:  # remove prefix, just compare last 44 characters
+            member_update_logs.append(
+                TddMemberLog(added, mid,
+                             'face', curr_member.face, member_space.face))
+            curr_member.face = member_space.face
+        # sign
+        if member_space.sign != curr_member.sign:
+            member_update_logs.append(
+                TddMemberLog(added, mid,
+                             'sign', curr_member.sign, member_space.sign))
+            curr_member.sign = member_space.sign
+
+    # commit changes
+    session.commit()
+
+    # add to db
+    # TODO: use new db operation which can raise exception
+    for log in member_update_logs:
+        DBOperation.add(log, session)
+
+    return member_update_logs
 
 
 def add_staff(added: int, aid: int, mid: int, title: str, session: Session, test_exist=True):
