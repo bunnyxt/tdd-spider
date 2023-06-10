@@ -2,7 +2,7 @@ import datetime
 import time
 import math
 
-__all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s',
+__all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s', 'format_ts_s',
            'is_all_zero_record', 'print_obj', 'null_or_str',
            'b2a', 'a2b', 'get_week_day', 'zk_calc']
 
@@ -21,6 +21,21 @@ def get_ts_s_str():
 
 def str_to_ts_s(s, mask='%Y-%m-%d %H:%M:%S'):
     return int(time.mktime(time.strptime(s, mask)))
+
+
+def format_ts_s(ts_s: int) -> str:
+    hours = ts_s // 3600
+    minutes = (ts_s % 3600) // 60
+    remaining_seconds = ts_s % 60
+
+    formatted_timespan = ''
+    if hours > 0:
+        formatted_timespan += f'{hours}h '
+    if hours > 0 or minutes > 0:
+        formatted_timespan += f'{minutes}m '
+    formatted_timespan += f'{remaining_seconds}s'
+
+    return formatted_timespan
 
 
 def is_all_zero_record(record):
