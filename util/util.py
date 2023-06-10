@@ -3,11 +3,12 @@ import time
 import math
 
 __all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s', 'format_ts_s',
+           'get_ts_ms', 'format_ts_ms',
            'is_all_zero_record', 'print_obj', 'null_or_str',
            'b2a', 'a2b', 'get_week_day', 'zk_calc']
 
 
-def get_ts_s():
+def get_ts_s() -> int:
     return int(round(datetime.datetime.now().timestamp()))
 
 
@@ -28,14 +29,30 @@ def format_ts_s(ts_s: int) -> str:
     minutes = (ts_s % 3600) // 60
     remaining_seconds = ts_s % 60
 
-    formatted_timespan = ''
+    formatted_ts_s = ''
     if hours > 0:
-        formatted_timespan += f'{hours}h '
+        formatted_ts_s += f'{hours}h '
     if hours > 0 or minutes > 0:
-        formatted_timespan += f'{minutes}m '
-    formatted_timespan += f'{remaining_seconds}s'
+        formatted_ts_s += f'{minutes}m '
+    formatted_ts_s += f'{remaining_seconds}s'
 
-    return formatted_timespan
+    return formatted_ts_s
+
+
+def get_ts_ms() -> int:
+    return int(round(datetime.datetime.now().timestamp() * 1000))
+
+
+def format_ts_ms(ts_ms: int) -> str:
+    ts_s = ts_ms // 1000
+    remaining_ms = ts_ms % 1000
+
+    formatted_ts_ms = ''
+    if ts_s > 0:
+        formatted_ts_ms = f'{format_ts_s(ts_s)} '
+    formatted_ts_ms += f'{remaining_ms}ms'
+
+    return formatted_ts_ms
 
 
 def is_all_zero_record(record):
