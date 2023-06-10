@@ -1,5 +1,5 @@
 from db import DBOperation, Session
-from util import get_ts_s, ts_s_to_str, format_ts_s
+from util import get_ts_s, ts_s_to_str, format_ts_s, get_ts_ms, format_ts_ms
 from threading import Thread
 from queue import Queue
 from collections import defaultdict
@@ -27,6 +27,7 @@ class UpdateMemberServiceRunner(Thread):
         self.logger.info(f'runner {self.name}, start')
         while not self.mid_queue.empty():
             mid = self.mid_queue.get()
+            start_ts_ms = get_ts_ms()
             try:
                 tdd_member_logs = update_member(mid, self.service, self.session)
             except TddError as e:
@@ -43,7 +44,12 @@ class UpdateMemberServiceRunner(Thread):
                 for log in tdd_member_logs:
                     self.logger.info(f'Update member info. mid: {mid}, attr: {log.attr}, {log.oldval} -> {log.newval}')
                     self.statistics['change_log_count'] += 1
-                self.logger.debug(f'Finish update member info. mid: {mid}')
+                self.logger.debug(f'{tdd_member_logs} log(s) found. mid: {mid}')
+            end_ts_ms = get_ts_ms()
+            cost_ms = end_ts_ms - start_ts_ms
+            self.logger.debug(f'Finish update member info. mid: {mid}, cost: {format_ts_ms(cost_ms)}')
+            self.statistics['total_count'] += 1
+            self.statistics['total_cost_ms'] += cost_ms
         self.session.close()
         self.logger.info(f'runner {self.name}, end')
 
@@ -57,7 +63,6 @@ def update_member_info():
 
     # get all mids
     mids = DBOperation.query_all_member_mids(session)
-    mids = mids[0:100]
     logger.info(f'{len(mids)} mids got')
 
     # put mid into queue
@@ -66,8 +71,10 @@ def update_member_info():
         mid_queue.put(mid)
     logger.info(f'{mid_queue.qsize()} mids put into queue')
 
-    # create service runner
+    # prepare statistics
     statistics = defaultdict(int)
+
+    # create service runner
     service_runner_num = 10
     service_runner_list = []
     for i in range(service_runner_num):
@@ -92,7 +99,8 @@ def update_member_info():
         f'start: {ts_s_to_str(start_ts)}, ' \
         f'end: {ts_s_to_str(end_ts)}, ' \
         f'cost: {format_ts_s(end_ts - start_ts)}\n\n' \
-        f'total count: {len(mids)}\n\n' + \
+        f'total count: {statistics["total_count"]}, ' + \
+        f'average cost per service: {format_ts_ms(statistics["total_cost_ms"] // statistics["total_count"])}\n\n' \
         f'tdd error count: {statistics["tdd_error_count"]}\n\n' \
         f'other exception count: {statistics["other_exception_count"]}\n\n' \
         f'no update count: {statistics["no_update_count"]}\n\n' \
