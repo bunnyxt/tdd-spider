@@ -60,11 +60,7 @@ def add_new_video_record_via_stat_api(aids, time_label):
     logger_14.warning(summary)
 
     # send sc
-    sc_result = sc_send('%s Finish updating c0 aids!' % time_label, summary)
-    if sc_result['errno'] == 0:
-        logger_14.info('%s Sc summary sent: succeed!' % time_label)
-    else:
-        logger_14.warning('%s Sc summary sent: failed! sc_result = %s.' % (time_label, sc_result))
+    sc_send('%s Finish updating c0 aids!' % time_label, summary)
 
     session.close()
 
@@ -270,11 +266,7 @@ def add_new_video_record_via_awesome_api(aids, time_label):
     logger_14.warning(summary)
 
     # send sc
-    sc_result = sc_send('%s Finish updating c30 aids!' % time_label, summary)
-    if sc_result['errno'] == 0:
-        logger_14.info('%s Sc summary sent: succeed!' % time_label)
-    else:
-        logger_14.warning('%s Sc summary sent: failed! sc_result = %s.' % (time_label, sc_result))
+    sc_send('%s Finish updating c30 aids!' % time_label, summary)
 
     session.close()
 

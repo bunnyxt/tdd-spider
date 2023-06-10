@@ -104,11 +104,7 @@ def update_member_info():
     logger.warning(summary)
 
     # send sc
-    sc_result = sc_send('Finish update member info!', summary)
-    if sc_result['errno'] == 0:
-        logger.info('Sc summary sent: succeed!')
-    else:
-        logger.warning(f'Sc summary sent: failed! sc_result = {sc_result}.')
+    sc_send('Finish update member info!', summary)
 
     session.close()
 

@@ -62,11 +62,7 @@ def member_total_stat_update():
         logger.info(summary)
 
         # send sc
-        sc_result = sc_send('Finish member total stat update!', summary)
-        if sc_result['errno'] == 0:
-            logger.info('Sc summary sent successfully.')
-        else:
-            logger.warning('Sc summary sent wrong. sc_result = %s.' % sc_result)
+        sc_send('Finish member total stat update!', summary)
     except Exception as e:
         logger.exception(e)
 
