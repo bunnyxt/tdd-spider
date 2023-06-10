@@ -18,11 +18,14 @@ def update_video_info():
     session = Session()
     service = Service(mode='worker')
 
+    # get all bvids
     all_bvids = DBOperation.query_all_video_bvids(session)
     logger.info(f'Total {len(all_bvids)} videos got.')
 
     # add latest 5000 bvids first
     bvids = all_bvids[-5000:]
+
+    # TODO: add top 1000 view bvids
 
     # for the rest, add 1 / 7 of them, according to the week day (0-6)
     week_day = get_week_day()

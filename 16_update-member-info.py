@@ -1,5 +1,5 @@
 from db import DBOperation, Session
-from util import get_ts_s, ts_s_to_str, format_ts_s, get_ts_ms, format_ts_ms
+from util import get_ts_s, ts_s_to_str, get_week_day, format_ts_s, get_ts_ms, format_ts_ms
 from threading import Thread
 from queue import Queue
 from collections import defaultdict
@@ -21,10 +21,10 @@ class UpdateMemberServiceRunner(Thread):
         self.statistics = statistics
         self.service = service
         self.session = Session()
-        self.logger = logging.getLogger('UpdateMemberServiceRunner')
+        self.logger = logging.getLogger(f'UpdateMemberServiceRunner.{self.name}')
 
     def run(self):
-        self.logger.info(f'runner {self.name}, start')
+        self.logger.info(f'Runner start.')
         while not self.mid_queue.empty():
             mid = self.mid_queue.get()
             start_ts_ms = get_ts_ms()
@@ -51,25 +51,38 @@ class UpdateMemberServiceRunner(Thread):
             self.statistics['total_count'] += 1
             self.statistics['total_cost_ms'] += cost_ms
         self.session.close()
-        self.logger.info(f'runner {self.name}, end')
+        self.logger.info(f'Runner end.')
 
 
 def update_member_info():
     logger.info('Now start update member info...')
     start_ts = get_ts_s()  # get start ts
 
-    service = Service(mode='worker', retry=20)
     session = Session()
+    service = Service(mode='worker', retry=20)
 
     # get all mids
-    mids = DBOperation.query_all_member_mids(session)
-    logger.info(f'{len(mids)} mids got')
+    all_mids = DBOperation.query_all_member_mids(session)
+    logger.info(f'Total {len(all_mids)} members got.')
+
+    # add latest 1000 mids first
+    mids = all_mids[-1000:]
+
+    # TODO: add top 200 follower mids
+
+    # for the rest, add 1 / 7 of them, according to the week day (0-6)
+    week_day = get_week_day()
+    for idx, mid in enumerate(all_mids[:-1000]):
+        if idx % 7 == week_day:
+            mids.append(mid)
+
+    logger.info(f'Will update {len(mids)} videos info.')
 
     # put mid into queue
     mid_queue = Queue()
     for mid in mids:
         mid_queue.put(mid)
-    logger.info(f'{mid_queue.qsize()} mids put into queue')
+    logger.info(f'{mid_queue.qsize()} mids put into queue.')
 
     # prepare statistics
     statistics = defaultdict(int)
@@ -84,7 +97,7 @@ def update_member_info():
     # start service runner
     for service_runner in service_runner_list:
         service_runner.start()
-    logger.info(f'{service_runner_num} service runner started')
+    logger.info(f'{service_runner_num} service runner started.')
 
     # wait for service runner
     for service_runner in service_runner_list:
