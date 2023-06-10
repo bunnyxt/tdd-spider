@@ -25,7 +25,9 @@ def sc_send(text, desp=None):
         if response.status == 200:
             html = response.data.decode()
             sc_response = json.loads(html)
-            if sc_response['errno'] == 0:
+            if type(sc_response) == dict \
+                    and 'data' in sc_response.keys() and type(sc_response['data']) == dict \
+                    and 'errno' in sc_response['data'].keys() and sc_response['data']['errno'] == 0:
                 logger.debug('Successfully send message %s. sc_response: %s' % (message, sc_response))
             else:
                 logger.warning('Fail to send message %s. sc_response: %s' % (message, sc_response))
