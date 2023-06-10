@@ -3,7 +3,7 @@ from service import Service
 from common.error import TddError
 from task import update_video
 from serverchan import sc_send
-from util import get_ts_s, ts_s_to_str, get_week_day, b2a
+from util import get_ts_s, ts_s_to_str, get_week_day, b2a, format_ts_s
 from logutils import logging_init
 import logging
 
@@ -61,15 +61,15 @@ def update_video_info():
                 logger.info(f'{idx} / {total_count} done')
     logger.info(f'{total_count} / {total_count} done')
 
-    # get finish ts
-    finish_ts = get_ts_s()
+    # get end ts
+    end_ts = get_ts_s()
 
     # make summary
     summary = \
-        'update video info done!\n\n' + \
+        'update video info done!\n\n' \
         f'start: {ts_s_to_str(start_ts)}, ' \
-        f'finish: {ts_s_to_str(finish_ts)}, ' \
-        f'timespan: {finish_ts - start_ts}s\n\n' + \
+        f'end: {ts_s_to_str(end_ts)}, ' \
+        f'cost: {format_ts_s(end_ts - start_ts)}\n\n' \
         f'total count: {total_count}\n\n' + \
         f'tdd error count: {tdd_error_count}\n\n' + \
         f'other exception count: {other_exception_count}\n\n' + \
