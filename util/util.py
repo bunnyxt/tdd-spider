@@ -1,9 +1,15 @@
 import datetime
 import time
 import math
+import re
+import logging
+from typing import Optional
+
+logger = logging.getLogger('util')
 
 __all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s', 'format_ts_s',
            'get_ts_ms', 'format_ts_ms',
+           'parse_pic_url', 'same_pic_url',
            'is_all_zero_record', 'print_obj', 'null_or_str',
            'b2a', 'a2b', 'get_week_day', 'zk_calc']
 
@@ -53,6 +59,31 @@ def format_ts_ms(ts_ms: int) -> str:
     formatted_ts_ms += f'{remaining_ms}ms'
 
     return formatted_ts_ms
+
+
+def parse_pic_url(url: str) -> Optional[dict]:
+    pattern = r"(?P<protocol>https?)://(?P<subdomain>[^.]+)\.(?P<domain>[^.]+\.[^.]+)/(?P<fsname>[^/]+)/(?P<dirname>[^/]+)/(?P<filename>[^.]+)\.(?P<extension>[^.]+)"
+    match = re.search(pattern, url)
+    if match is None:
+        return None
+    return match.groupdict()
+
+
+def same_pic_url(url1: str, url2: str) -> bool:
+    group1 = parse_pic_url(url1)
+    group2 = parse_pic_url(url2)
+
+    if group1 is None or group2 is None:
+        return False
+
+    for key in ['domain', 'fsname', 'filename', 'extension']:
+        if group1[key] != group2[key]:
+            return False
+
+    if group1['dirname'] != group2['dirname']:
+        logger.warning(f'pic url dirname not equal: {url1} vs {url2}')
+
+    return True
 
 
 def is_all_zero_record(record):
