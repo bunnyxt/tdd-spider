@@ -8,7 +8,7 @@ import time
 
 __all__ = ['add_video_via_bvid',
            'update_video_via_bvid',
-           'add_member', 'add_staff',
+           'add_member',
            'add_video_record_via_awesome_stat', 'add_video_record_via_stat_api']
 
 
@@ -301,30 +301,6 @@ def add_member(mid, bapi, session, test_exist=True):
     DBOperation.add(new_member, session)
 
     return new_member
-
-
-# aid version, deprecated
-def add_staff(added, aid, mid, title, session, test_exist=True):
-    # test exist
-    if test_exist:
-        staff = DBOperation.query_video_staff_via_aid_mid(aid, mid, session)
-        if staff is not None:
-            # staff already exist
-            raise AlreadyExistError(table_name='tdd_video_staff', params={'aid': aid, 'mid': mid})
-
-    new_staff = TddVideoStaff()
-
-    # set attr
-    new_staff.added = added
-    new_staff.aid = aid
-    new_staff.bvid = a2b(aid)
-    new_staff.mid = mid
-    new_staff.title = title
-
-    # add to db
-    DBOperation.add(new_staff, session)
-
-    return new_staff
 
 
 # bvid version
