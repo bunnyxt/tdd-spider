@@ -2,7 +2,7 @@ from service import Service, ServiceError, CodeError
 from sqlalchemy.orm.session import Session
 from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord, \
     TddMemberLog
-from util import get_ts_s, a2b
+from util import get_ts_s, a2b, same_pic_url
 from typing import List
 from common.error import TddError
 from .error import AlreadyExistError, NotExistError
@@ -103,8 +103,7 @@ def update_video(aid: int, service: Service, session: Session) -> List[TddVideoL
                             'copyright', curr_video.copyright, video_view.copyright))
             curr_video.copyright = video_view.copyright
         # pic
-        # TODO: check if only prefix changed, ignore?
-        if video_view.pic != curr_video.pic:
+        if not same_pic_url(video_view.pic, curr_video.pic):
             video_update_logs.append(
                 TddVideoLog(added, aid, bvid,
                             'pic', curr_video.pic, video_view.pic))
@@ -309,7 +308,7 @@ def update_member(mid: int, service: Service, session: Session):
                              'name', curr_member.name, member_space.name))
             curr_member.name = member_space.name
         # face
-        if member_space.face[-44:] != curr_member.face[-44:]:  # remove prefix, just compare last 44 characters
+        if not same_pic_url(member_space.face, curr_member.face):
             member_update_logs.append(
                 TddMemberLog(added, mid,
                              'face', curr_member.face, member_space.face))
