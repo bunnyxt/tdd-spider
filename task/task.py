@@ -217,7 +217,12 @@ def update_video(aid: int, service: Service, session: Session) -> List[TddVideoL
             curr_video.tags = new_tags
 
     # commit changes
-    session.commit()
+    try:
+        session.commit()
+    except Exception as e:
+        logger.error(f'Fail to commit changes! object: {curr_video}, error: {e}')
+        session.rollback()
+        raise e
 
     # add to db
     # TODO: use new db operation which can raise exception
@@ -317,7 +322,12 @@ def update_member(mid: int, service: Service, session: Session):
             curr_member.sign = member_space.sign
 
     # commit changes
-    session.commit()
+    try:
+        session.commit()
+    except Exception as e:
+        logger.error(f'Fail to commit changes! object: {curr_member}, error: {e}')
+        session.rollback()
+        raise e
 
     # add to db
     # TODO: use new db operation which can raise exception
