@@ -4,7 +4,7 @@ from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from threading import Thread
 from queue import Queue
 from common import get_valid, test_archive_rank_by_partion, test_video_stat, \
-    add_video_record_via_stat_api, update_video, add_video_via_bvid, \
+    add_video_record_via_stat_api, add_video_via_bvid, \
     InvalidObjCodeError, TddCommonError, AlreadyExistError
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
     str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day
@@ -19,7 +19,7 @@ from collections import namedtuple, defaultdict, Counter
 from common.error import TddError
 from service import Service, CodeError
 # from proxypool import get_proxy_url
-from task import add_video_record, update_video as task_update_video
+from task import add_video_record, update_video
 import logging
 
 logger = logging.getLogger('51')
@@ -154,6 +154,7 @@ class C30NeedAddButNotFoundAidsChecker(Thread):
         # for idx, aid in enumerate(self.need_insert_but_record_not_found_aid_list, 1):
         #     # try update video
         #     try:
+        #         TODO: use new update_video
         #         tdd_video_logs = update_video(aid, bapi_with_proxy, session)
         #     except TddCommonError as e2:
         #         self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
@@ -246,22 +247,13 @@ class C30NoNeedInsertAidsChecker(Thread):
             if video_already_exist_flag:
                 # try update video
                 try:
-                    tdd_video_logs = task_update_video(aid, service, session)
+                    tdd_video_logs = update_video(aid, service, session)
                 except TddError as e2:
                     self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
                     result_status_dict['fail_aids'].append(aid)
                 except Exception as e2:
                     self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
                     result_status_dict['fail_aids'].append(aid)
-                # TODO: remove old update_video
-                # try:
-                #     tdd_video_logs = update_video(aid, bapi_with_proxy, session)
-                # except TddCommonError as e2:
-                #     self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-                #     result_status_dict['fail_aids'].append(aid)
-                # except Exception as e2:
-                #     self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-                #     result_status_dict['fail_aids'].append(aid)
                 else:
                     # init change flags
                     code_change_flag = False
@@ -535,7 +527,7 @@ class C0PipelineRunner(Thread):
             except CodeError as e:
                 self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e))
                 try:
-                    tdd_video_logs = task_update_video(aid, service, session)
+                    tdd_video_logs = update_video(aid, service, session)
                 except TddError as e2:
                     self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
                 except Exception as e2:
@@ -544,16 +536,6 @@ class C0PipelineRunner(Thread):
                     for log in tdd_video_logs:
                         self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
                                          % (log.aid, log.attr, log.oldval, log.newval))
-                # try:
-                #     tdd_video_logs = update_video(aid, bapi_with_proxy, session)
-                # except TddCommonError as e2:
-                #     self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-                # except Exception as e2:
-                #     self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-                # else:
-                #     for log in tdd_video_logs:
-                #         self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
-                #                          % (log.aid, log.attr, log.oldval, log.newval))
                 fail_aids.append(aid)
             except TddError as e:
                 self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e))
