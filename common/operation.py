@@ -7,7 +7,7 @@ from db import TddVideo, TddVideoStaff, TddMember, DBOperation, TddVideoRecord, 
 import time
 
 __all__ = ['add_video_via_bvid',
-           'update_video', 'update_video_via_bvid',
+           'update_video_via_bvid',
            'add_member', 'add_staff',
            'add_video_record_via_awesome_stat', 'add_video_record_via_stat_api']
 
@@ -126,135 +126,6 @@ def add_video_via_bvid(bvid, bapi, session, test_exist=True, params=None, set_re
             session.commit()
 
     return new_video
-
-
-# aid version, deprecated
-def update_video(aid, bapi, session):
-    # get view_obj
-    view_obj = get_valid(bapi.get_video_view, (aid,), test_video_view)
-    if view_obj is None:
-        # fail to get valid view_obj
-        raise InvalidObjError(obj_name='view', params={'aid': aid})
-
-    # get old video obj from db
-    old_obj = DBOperation.query_video_via_aid(aid, session)
-    if old_obj is None:
-        # aid not exist in db
-        raise NotExistError(table_name='tdd_video', params={'aid': aid})
-
-    video_update_logs = []
-    added = get_ts_s()
-
-    # calc aid via bvid
-    bvid = a2b(aid)
-
-    # check following attr
-    try:
-        if view_obj['code'] != old_obj.code:
-            if view_obj['code'] != -403:  # just due to not logged in, actually it's okay
-                video_update_logs.append(TddVideoLog(added, aid, bvid, 'code', old_obj.code, view_obj['code']))
-                old_obj.code = view_obj['code']
-        if view_obj['code'] == 0:
-            if view_obj['data']['videos'] != old_obj.videos:
-                video_update_logs.append(
-                    TddVideoLog(added, aid, bvid, 'videos', old_obj.videos, view_obj['data']['videos']))
-                old_obj.videos = view_obj['data']['videos']
-            if view_obj['data']['tid'] != old_obj.tid:
-                video_update_logs.append(TddVideoLog(added, aid, bvid, 'tid', old_obj.tid, view_obj['data']['tid']))
-                old_obj.tid = view_obj['data']['tid']
-            if view_obj['data']['tname'] != old_obj.tname:
-                video_update_logs.append(
-                    TddVideoLog(added, aid, bvid, 'tname', old_obj.tname, view_obj['data']['tname']))
-                old_obj.tname = view_obj['data']['tname']
-            if view_obj['data']['copyright'] != old_obj.copyright:
-                video_update_logs.append(
-                    TddVideoLog(added, aid, bvid, 'copyright', old_obj.copyright, view_obj['data']['copyright']))
-                old_obj.copyright = view_obj['data']['copyright']
-            if view_obj['data']['pic'] != old_obj.pic:
-                video_update_logs.append(TddVideoLog(added, aid, bvid, 'pic', old_obj.pic, view_obj['data']['pic']))
-                old_obj.pic = view_obj['data']['pic']
-            if view_obj['data']['title'] != old_obj.title:
-                video_update_logs.append(
-                    TddVideoLog(added, aid, bvid, 'title', old_obj.title, view_obj['data']['title']))
-                old_obj.title = view_obj['data']['title']
-            if view_obj['data']['pubdate'] != old_obj.pubdate:
-                video_update_logs.append(
-                    TddVideoLog(added, aid, bvid, 'pubdate', old_obj.pubdate, view_obj['data']['pubdate']))
-                old_obj.pubdate = view_obj['data']['pubdate']
-            if view_obj['data']['desc'] != old_obj.desc:
-                video_update_logs.append(TddVideoLog(added, aid, bvid, 'desc', old_obj.desc, view_obj['data']['desc']))
-                old_obj.desc = view_obj['data']['desc']
-            if view_obj['data']['owner']['mid'] != old_obj.mid:
-                video_update_logs.append(
-                    TddVideoLog(added, aid, bvid, 'mid', old_obj.mid, view_obj['data']['owner']['mid']))
-                old_obj.mid = view_obj['data']['owner']['mid']
-            if 'attribute' in view_obj['data'].keys():
-                if view_obj['data']['attribute'] != old_obj.attribute:
-                    video_update_logs.append(
-                        TddVideoLog(added, aid, bvid, 'attribute', old_obj.attribute, view_obj['data']['attribute']))
-                    old_obj.attribute = view_obj['data']['attribute']
-            if view_obj['data']['state'] != old_obj.state:
-                video_update_logs.append(
-                    TddVideoLog(added, aid, bvid, 'state', old_obj.state, view_obj['data']['state']))
-                old_obj.state = view_obj['data']['state']
-            if 'forward' in view_obj['data'].keys():
-                if view_obj['data']['forward'] != old_obj.forward:
-                    video_update_logs.append(
-                        TddVideoLog(added, aid, bvid, 'forward', old_obj.forward, view_obj['data']['forward']))
-                    old_obj.forward = view_obj['data']['forward']
-            # has staff
-            new_hasstaff = 0
-            if 'staff' in view_obj['data'].keys():
-                new_hasstaff = 1
-            if new_hasstaff != old_obj.hasstaff:
-                video_update_logs.append(TddVideoLog(added, aid, bvid, 'hasstaff', old_obj.hasstaff, new_hasstaff))
-                old_obj.hasstaff = new_hasstaff
-
-            # update staff list
-            old_staff_list = DBOperation.query_video_staff_via_aid(aid, session)
-            if new_hasstaff == 1:
-                for staff in view_obj['data']['staff']:
-                    # get staff in db
-                    old_staff = None
-                    for old_staff_single in old_staff_list:
-                        if old_staff_single.mid == staff['mid']:
-                            old_staff = old_staff_single
-                            old_staff_list.remove(old_staff)
-                    if old_staff:
-                        # staff exist, check it
-                        if staff['title'] != old_staff.title:
-                            video_update_logs.append(
-                                TddVideoLog(added, aid, bvid, 'staff.title', old_staff.title, staff['title']))
-                            old_staff.title = staff['title']
-                    else:
-                        # staff not exist, add it
-                        try:
-                            add_member(staff['mid'], bapi, session)
-                        except TddCommonError as e:
-                            print(e)
-                        try:
-                            new_staff = add_staff(added, aid, staff['mid'], staff['title'], session)
-                        except TddCommonError as e:
-                            print(e)
-                        else:
-                            video_update_logs.append(TddVideoLog(added, aid, bvid, 'staff', None, 'mid: %d; title: %s'
-                                                                 % (new_staff.mid, new_staff.title)))
-                    time.sleep(0.2)
-                # remove staff left in old_staff_list
-                for old_staff in old_staff_list:
-                    DBOperation.delete_video_staff_via_id(old_staff.id, session)
-                    video_update_logs.append(TddVideoLog(added, aid, bvid, 'staff', 'mid: %d; title: %s'
-                                                         % (old_staff.mid, old_staff.title), None))
-
-            session.commit()  # commit changes
-    except Exception as e:
-        print(e)
-
-    # add to db
-    for log in video_update_logs:
-        DBOperation.add(log, session)
-
-    return video_update_logs
 
 
 # bvid version
