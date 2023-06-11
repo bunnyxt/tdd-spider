@@ -8,7 +8,7 @@ import time
 
 __all__ = ['add_video_via_bvid',
            'update_video', 'update_video_via_bvid',
-           'add_member', 'update_member', 'add_staff',
+           'add_member', 'add_staff',
            'add_video_record_via_awesome_stat', 'add_video_record_via_stat_api']
 
 
@@ -430,54 +430,6 @@ def add_member(mid, bapi, session, test_exist=True):
     DBOperation.add(new_member, session)
 
     return new_member
-
-
-def update_member(mid, bapi, session):
-    # get member_obj
-    member_obj = get_valid(bapi.get_member, (mid,), test_member)
-    if member_obj is None:
-        # fail to get valid member_obj
-        raise InvalidObjError(obj_name='member', params={'mid': mid})
-
-    # get old member obj from db
-    old_obj = DBOperation.query_member_via_mid(mid, session)
-    if old_obj is None:
-        # mid not exist in db
-        raise NotExistError(table_name='tdd_member', params={'mid': mid})
-
-    member_update_logs = []
-    added = get_ts_s()
-
-    # check following attr
-    try:
-        if member_obj['code'] != 0:
-            # code maybe -404
-            if member_obj['code'] != old_obj.code:
-                member_update_logs.append(TddMemberLog(added, mid, 'code', old_obj.code, member_obj['code']))
-                old_obj.code = member_obj['code']
-        else:
-            if member_obj['data']['sex'] != old_obj.sex:
-                member_update_logs.append(TddMemberLog(added, mid, 'sex', old_obj.sex, member_obj['data']['sex']))
-                old_obj.sex = member_obj['data']['sex']
-            if member_obj['data']['name'] != old_obj.name:
-                member_update_logs.append(TddMemberLog(added, mid, 'name', old_obj.name, member_obj['data']['name']))
-                old_obj.name = member_obj['data']['name']
-            if member_obj['data']['face'][-44:] != old_obj.face[-44:]:  # remove prefix, just compare last 44 characters
-                member_update_logs.append(TddMemberLog(added, mid, 'face', old_obj.face, member_obj['data']['face']))
-                old_obj.face = member_obj['data']['face']
-            if member_obj['data']['sign'] != old_obj.sign:
-                member_update_logs.append(TddMemberLog(added, mid, 'sign', old_obj.sign, member_obj['data']['sign']))
-                old_obj.sign = member_obj['data']['sign']
-
-            session.commit()  # commit changes
-    except Exception as e:
-        print(e)
-
-    # add to db
-    for log in member_update_logs:
-        DBOperation.add(log, session)
-
-    return member_update_logs
 
 
 # aid version, deprecated
