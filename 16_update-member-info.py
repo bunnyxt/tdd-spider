@@ -88,7 +88,7 @@ def update_member_info():
     statistics = defaultdict(int)
 
     # create service runner
-    service_runner_num = 10
+    service_runner_num = 20
     service_runner_list = []
     for i in range(service_runner_num):
         service_runner = UpdateMemberServiceRunner(f'runner_{i}', mid_queue, statistics, service)
