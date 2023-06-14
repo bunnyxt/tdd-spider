@@ -177,7 +177,7 @@ def update_video(aid: int, service: Service, session: Session) -> List[TddVideoL
                                         'staff',
                                         f'mid: {curr_staff_item_found.mid}; title: {curr_staff_item_found.title}',
                                         f'mid: {staff_item.mid}; title: {staff_item.title}'))
-                        curr_staff_item_found.title = staff_item.item
+                        curr_staff_item_found.title = staff_item.title
                 else:
                     # staff not exist, add it
                     # add member if not exists
