@@ -7,6 +7,7 @@ from service import Service
 from task import update_member
 from common.error import TddError
 from serverchan import sc_send
+from typing import List
 import logging
 from logutils import logging_init
 
@@ -14,7 +15,7 @@ logger = logging.getLogger('16')
 
 
 class UpdateMemberServiceRunner(Thread):
-    def __init__(self, name, mid_queue, statistics, service):
+    def __init__(self, name: str, mid_queue: Queue[int], statistics: defaultdict[str, int], service: Service):
         super().__init__()
         self.name = name
         self.mid_queue = mid_queue
@@ -62,7 +63,7 @@ def update_member_info():
     service = Service(mode='worker', retry=20)
 
     # get all mids
-    all_mids = DBOperation.query_all_member_mids(session)
+    all_mids: List[int] = DBOperation.query_all_member_mids(session)
     logger.info(f'Total {len(all_mids)} members got.')
 
     # add latest 1000 mids first
@@ -79,13 +80,13 @@ def update_member_info():
     logger.info(f'Will update {len(mids)} videos info.')
 
     # put mid into queue
-    mid_queue = Queue()
+    mid_queue: Queue[int] = Queue()
     for mid in mids:
         mid_queue.put(mid)
     logger.info(f'{mid_queue.qsize()} mids put into queue.')
 
     # prepare statistics
-    statistics = defaultdict(int)
+    statistics: defaultdict[str, int] = defaultdict(int)
 
     # create service runner
     service_runner_num = 20

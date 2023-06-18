@@ -7,6 +7,7 @@ from util import get_ts_s, ts_s_to_str, get_week_day, b2a, format_ts_s, get_ts_m
 from threading import Thread
 from queue import Queue
 from collections import defaultdict
+from typing import List
 from logutils import logging_init
 import logging
 
@@ -14,7 +15,7 @@ logger = logging.getLogger('15')
 
 
 class UpdateVideoServiceRunner(Thread):
-    def __init__(self, name, bvid_queue, statistics, service):
+    def __init__(self, name: str, bvid_queue: Queue[str], statistics: defaultdict[str, int], service: Service):
         super().__init__()
         self.name = name
         self.bvid_queue = bvid_queue
@@ -62,7 +63,7 @@ def update_video_info():
     service = Service(mode='worker')
 
     # get all bvids
-    all_bvids = DBOperation.query_all_video_bvids(session)
+    all_bvids: List[str] = DBOperation.query_all_video_bvids(session)
     logger.info(f'Total {len(all_bvids)} videos got.')
 
     # add latest 5000 bvids first
@@ -79,13 +80,13 @@ def update_video_info():
     logger.info(f'Will update {len(bvids)} videos info.')
 
     # put mid into queue
-    bvid_queue = Queue()
+    bvid_queue: Queue[str] = Queue()
     for bvid in bvids:
         bvid_queue.put(bvid)
     logger.info(f'{bvid_queue.qsize()} bvids put into queue.')
 
     # prepare statistics
-    statistics = defaultdict(int)
+    statistics: defaultdict[str, int] = defaultdict(int)
 
     # create service runner
     service_runner_num = 20
