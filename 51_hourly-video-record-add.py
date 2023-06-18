@@ -4,7 +4,7 @@ from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from threading import Thread
 from queue import Queue
 from common import get_valid, test_archive_rank_by_partion, test_video_stat, \
-    add_video_record_via_stat_api, add_video_via_bvid, \
+    add_video_record_via_stat_api, \
     InvalidObjCodeError, TddCommonError, AlreadyExistError as CommonAlreadyExistError
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
     str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day
