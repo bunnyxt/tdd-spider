@@ -1,75 +1,9 @@
-from .validation import get_valid, test_video_view, test_video_view_via_bvid, test_video_tags, test_video_tags_via_bvid, \
-    test_member, test_video_stat, test_member_relation
+from .validation import get_valid, test_video_stat
 from .error import *
-from util import get_ts_s, b2a, a2b
-from db import TddVideo, TddVideoStaff, TddMember, DBOperation, TddVideoRecord, \
-    TddVideoLog, TddMemberLog, TddMemberFollowerRecord
-import time
+from util import get_ts_s
+from db import DBOperation, TddVideoRecord
 
-__all__ = ['add_member',
-           'add_video_record_via_awesome_stat', 'add_video_record_via_stat_api']
-
-
-def add_member(mid, bapi, session, test_exist=True):
-    # test exist
-    if test_exist:
-        member = DBOperation.query_member_via_mid(mid, session)
-        if member is not None:
-            # member already exist
-            raise AlreadyExistError(table_name='tdd_member', params={'mid': mid})
-
-    # get member_obj
-    member_obj = get_valid(bapi.get_member, (mid,), test_member)
-    if member_obj is None:
-        # fail to get valid member_obj
-        raise InvalidObjError(obj_name='member', params={'mid': mid})
-
-    new_member = TddMember()
-
-    # set basic attr
-    new_member.mid = mid
-    new_member.added = get_ts_s()
-
-    # set attr from member_obj
-    if member_obj['code'] == 0:
-        # of course we only add member with code = 0
-        new_member.sex = member_obj['data']['sex']
-        new_member.name = member_obj['data']['name']
-        new_member.face = member_obj['data']['face']
-        new_member.sign = member_obj['data']['sign']
-        new_member.code = 0
-    else:
-        # member_obj code != 0
-        raise InvalidObjCodeError(obj_name='member', code=member_obj['code'])
-
-    # add to db
-    DBOperation.add(new_member, session)
-
-    return new_member
-
-
-# bvid version
-def add_staff_via_bvid(added, bvid, mid, title, session, test_exist=True):
-    # test exist
-    if test_exist:
-        staff = DBOperation.query_video_staff_via_bvid_mid(bvid, mid, session)
-        if staff is not None:
-            # staff already exist
-            raise AlreadyExistError(table_name='tdd_video_staff', params={'bvid': bvid, 'mid': mid})
-
-    new_staff = TddVideoStaff()
-
-    # set attr
-    new_staff.added = added
-    new_staff.aid = b2a(bvid)
-    new_staff.bvid = bvid
-    new_staff.mid = mid
-    new_staff.title = title
-
-    # add to db
-    DBOperation.add(new_staff, session)
-
-    return new_staff
+__all__ = ['add_video_record_via_awesome_stat', 'add_video_record_via_stat_api']
 
 
 def add_video_record_via_awesome_stat(added, stat, session):
@@ -135,22 +69,3 @@ def add_video_record_via_stat_api(aid, bapi, session):
     DBOperation.add(new_video_record, session)
 
     return new_video_record
-
-
-# bvid version
-def get_tags_str_via_bvid(bvid, bapi):
-    # get tags_obj
-    tags_obj = get_valid(bapi.get_video_tags_via_bvid, (bvid,), test_video_tags_via_bvid)
-    if tags_obj is None:
-        # fail to get valid test_video_tags
-        raise InvalidObjError(obj_name='tags', params={'bvid': bvid})
-
-    tags_str = ''
-    try:
-        for tag in tags_obj['data']:
-            tags_str += tag['tag_name']
-            tags_str += ';'
-    except Exception as e:
-        print(e)
-
-    return tags_str

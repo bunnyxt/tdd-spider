@@ -142,21 +142,8 @@ class BiliApi:
                 logger.warning('Exception occurred during request, decode and parse json! %s' % e)
                 return None
 
-    def get_video_tags(self, aid):
-        return self._url_request('GET', 'http://api.bilibili.com/x/tag/archive/tags?aid={0}'.format(aid))
-
-    def get_video_tags_via_bvid(self, bvid):
-        # bvid with BV/bv prefix is also acceptable
-        return self._url_request('GET', 'http://api.bilibili.com/x/tag/archive/tags?bvid={0}'.format(bvid))
-
-    def get_video_pagelist(self, aid):
-        return self._url_request('GET', 'http://api.bilibili.com/x/player/pagelist?aid={0}'.format(aid))
-
     def get_video_stat(self, aid):
         return self._url_request('GET', 'http://api.bilibili.com/archive_stat/stat?aid={0}'.format(aid))
-
-    def get_member(self, mid):
-        return self._url_request('GET', 'http://api.bilibili.com/x/space/acc/info?mid={0}'.format(mid))
 
     def get_archive_rank_by_partion(self, tid, pn, ps):
         return self._url_request('GET', 'http://api.bilibili.com/archive_rank/getarchiverankbypartion?jsonp=jsonp&tid={0}&pn={1}&ps={2}'.format(tid, pn, ps))
