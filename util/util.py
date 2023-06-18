@@ -18,15 +18,15 @@ def get_ts_s() -> int:
     return int(round(datetime.datetime.now().timestamp()))
 
 
-def ts_s_to_str(ts):
+def ts_s_to_str(ts: int) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
 
 
-def get_ts_s_str():
+def get_ts_s_str() -> str:
     return ts_s_to_str(get_ts_s())
 
 
-def str_to_ts_s(s, mask='%Y-%m-%d %H:%M:%S'):
+def str_to_ts_s(s: str, mask='%Y-%m-%d %H:%M:%S') -> int:
     return int(time.mktime(time.strptime(s, mask)))
 
 
@@ -86,7 +86,7 @@ def same_pic_url(url1: str, url2: str) -> bool:
     return True
 
 
-def is_all_zero_record(record):
+def is_all_zero_record(record) -> bool:
     # TODO: support dislike, vt, vv
     attributes = ['view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like']
     for idx, attribute in enumerate(attributes, 3):
@@ -100,7 +100,7 @@ def print_obj(obj):
         print(key, obj.__getattribute__(key))
 
 
-def null_or_str(value):
+def null_or_str(value: any) -> str:
     """
     convert value to string via `str(value)`, if value is None, return 'null'
     """
@@ -132,7 +132,7 @@ def a2b(x):
     return ''.join(r)[2:]  # remove BV prefix
 
 
-def get_week_day():
+def get_week_day() -> int:
     # Mon -> 0, Tue -> 1, ..., Sun -> 6
     return datetime.datetime.now().weekday()
 
