@@ -11,7 +11,9 @@ import logging
 
 logger = logging.getLogger('task')
 
-__all__ = ['add_video_record', 'update_video', 'add_member', 'update_member', 'add_staff', 'add_member_follower_record',
+__all__ = ['add_video_record',
+           'add_video', 'update_video',
+           'add_member', 'update_member', 'add_staff', 'add_member_follower_record',
            'get_video_tags_str']
 
 
@@ -45,6 +47,114 @@ def add_video_record(aid: int, service: Service, session: Session) -> TddVideoRe
     DBOperation.add(new_video_record, session)
 
     return new_video_record
+
+
+def add_video(aid: int, service: Service, session: Session, test_exist=True) -> TddVideo:
+    # TODO: rollback already committed changes if error occurs
+    # test exist
+    if test_exist:
+        video = DBOperation.query_video_via_aid(aid, session)
+        if video is not None:
+            # video already exist
+            raise AlreadyExistError(table='tdd_video', params={'aid': aid})
+
+    # get video view
+    try:
+        video_view = service.get_video_view({'aid': aid})
+    except ServiceError as e:
+        raise e
+
+    # assemble video
+    new_video = TddVideo(
+        added=get_ts_s(),
+        aid=aid,
+        bvid=video_view.bvid,
+        videos=video_view.videos,
+        tid=video_view.tid,
+        tname=video_view.tname,
+        copyright=video_view.copyright,
+        pic=video_view.pic,
+        title=video_view.title,
+        pubdate=video_view.pubdate,
+        desc=video_view.desc,
+        mid=video_view.owner.mid,
+        code=0,
+        state=video_view.state,
+    )
+
+    # optional attributes
+    if video_view.attribute is not None:
+        new_video.attribute = video_view.attribute
+    if video_view.forward is not None:
+        new_video.forward = video_view.forward
+
+    # set tags
+    new_video.tags = get_video_tags_str(aid, service)
+
+    # set recent
+    new_video.recent = 2
+
+    # set isvc
+    for tag in new_video.tags.split(';'):
+        if tag.upper() == 'VOCALOID中文曲':
+            new_video.isvc = 2
+            break
+
+    # create member mid set
+    member_mid_set: set[int] = {new_video.mid}
+
+    # add member
+    try:
+        add_member(new_video.mid, service, session)
+    except AlreadyExistError as e:
+        logger.debug(f'Uploader member of new video already exist! '
+                     f'video: {new_video}, mid: {new_video.mid}, error: {e}')
+    except Exception as e:
+        logger.error(f'Fail to add uploader member when add new video! '
+                     f'video: {new_video}, mid: {new_video.mid}, error: {e}')
+        raise e
+
+    # add staff
+    if video_view.staff is not None:
+        new_video.hasstaff = 1
+        for staff_item in video_view.staff:
+            member_mid_set.add(staff_item.mid)
+            try:
+                add_member(staff_item.mid, service, session)
+            except AlreadyExistError:
+                logger.debug(f'Staff member of new video already exist! '
+                             f'video: {new_video}, mid: {staff_item.mid}')
+            except Exception as e:
+                logger.error(f'Fail to add staff member when add new video! '
+                             f'video: {new_video}, mid: {staff_item.mid}, error: {e}')
+                raise e
+            try:
+                add_staff(new_video.added, aid, staff_item.mid, staff_item.title, session)
+            except Exception as e:
+                logger.error(f'Fail to add staff member when add new video! '
+                             f'video: {new_video}, mid: {staff_item.mid}, title: {staff_item.title}, error: {e}')
+                raise e
+    else:
+        new_video.hasstaff = 0
+
+    # add to db
+    # TODO: use new db operation which can raise exception
+    DBOperation.add(new_video, session)
+
+    # update member last_video and video_count
+    try:
+        for mid in member_mid_set:
+            member = DBOperation.query_member_via_mid(mid, session)
+            member.last_video = new_video.id
+            member.video_count += 1
+            session.commit()
+    except Exception as e:
+        logger.error(f'Fail to update member last_video and video_count! '
+                     f'video: {new_video}, error: {e}')
+        session.rollback()
+        raise e
+
+    return new_video
 
 
 def update_video(aid: int, service: Service, session: Session) -> List[TddVideoLog]:
@@ -160,6 +270,7 @@ def update_video(aid: int, service: Service, session: Session) -> List[TddVideoL
                             'hasstaff', curr_video.hasstaff, new_hasstaff))
             curr_video.hasstaff = new_hasstaff
         # update staff list
+        # TODO: update staff last_video and video_count if changed
         curr_staff_list = DBOperation.query_video_staff_via_aid(aid, session)
         if new_hasstaff == 1:
             for staff_item in video_view.staff:
@@ -184,7 +295,7 @@ def update_video(aid: int, service: Service, session: Session) -> List[TddVideoL
                     try:
                         add_member(staff_item.mid, service, session)
                     except AlreadyExistError:
-                        logger.debug(f'Member already exists, skip add member!'
+                        logger.debug(f'Staff member of video already exist! '
                                      f'mid: {staff_item.mid}')
                     except TddError as e:
                         logger.warning(f'Fail to add new member before add new staff!'
