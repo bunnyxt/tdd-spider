@@ -11,7 +11,7 @@ __all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s', 'format_ts_
            'get_ts_ms', 'format_ts_ms',
            'parse_pic_url', 'same_pic_url',
            'is_all_zero_record', 'print_obj', 'null_or_str',
-           'b2a', 'a2b', 'get_week_day', 'zk_calc']
+           'get_week_day', 'zk_calc']
 
 
 def get_ts_s() -> int:
@@ -105,31 +105,6 @@ def null_or_str(value: any) -> str:
     convert value to string via `str(value)`, if value is None, return 'null'
     """
     return 'null' if value is None else str(value)
-
-
-# ref: https://www.zhihu.com/question/381784377/answer/1099438784
-table = 'fZodR9XQDSUm21yCkr6zBqiveYah8bt4xsWpHnJE7jL5VG3guMTKNPAwcF'
-tr = {}
-for i in range(58):
-    tr[table[i]] = i
-s = [11, 10, 3, 8, 4, 6]
-xor = 177451812
-add = 8728348608
-
-
-def b2a(x):
-    r = 0
-    for i in range(6):
-        r += tr[x[s[i] - 2]] * 58 ** i  # no BV prefix provided
-    return (r - add) ^ xor
-
-
-def a2b(x):
-    x = (x ^ xor) + add
-    r = list('BV1  4 1 7  ')
-    for i in range(6):
-        r[s[i]] = table[x // 58 ** i % 58]
-    return ''.join(r)[2:]  # remove BV prefix
 
 
 def get_week_day() -> int:
