@@ -121,6 +121,28 @@ class Service:
             r'Mozilla/5.0 (Linux; U; Android 2.3.7; en-us; Nexus One Build/FRF91) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1'
         ]
 
+    # since default configs are designed to be immutable, we should use following getters
+
+    def get_default_headers(self) -> Optional[dict]:
+        return self._headers
+
+    def get_default_retry(self) -> int:
+        return self._retry
+
+    def get_default_timeout(self) -> float:
+        return self._timeout
+
+    def get_default_colddown_factor(self) -> float:
+        return self._colddown_factor
+
+    def get_default_mode(self) -> RequestMode:
+        return self._mode
+
+    def get_default_get_proxy_url(self) -> Optional[Callable]:
+        return self._get_proxy_url
+
+    # default config getters end
+
     def _get(
             self, url: str, params: dict = None, headers: dict = None,
             retry: int = None, timeout: float = None, colddown_factor: float = None,
