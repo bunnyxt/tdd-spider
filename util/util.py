@@ -1,5 +1,3 @@
-import datetime
-import time
 import math
 import re
 import logging
@@ -7,58 +5,9 @@ from typing import Optional
 
 logger = logging.getLogger('util')
 
-__all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s', 'format_ts_s',
-           'get_ts_ms', 'format_ts_ms',
-           'parse_pic_url', 'same_pic_url',
+__all__ = ['parse_pic_url', 'same_pic_url',
            'is_all_zero_record', 'print_obj', 'null_or_str',
-           'get_week_day', 'zk_calc']
-
-
-def get_ts_s() -> int:
-    return int(round(datetime.datetime.now().timestamp()))
-
-
-def ts_s_to_str(ts: int) -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
-
-
-def get_ts_s_str() -> str:
-    return ts_s_to_str(get_ts_s())
-
-
-def str_to_ts_s(s: str, mask='%Y-%m-%d %H:%M:%S') -> int:
-    return int(time.mktime(time.strptime(s, mask)))
-
-
-def format_ts_s(ts_s: int) -> str:
-    hours = ts_s // 3600
-    minutes = (ts_s % 3600) // 60
-    remaining_seconds = ts_s % 60
-
-    formatted_ts_s = ''
-    if hours > 0:
-        formatted_ts_s += f'{hours}h '
-    if hours > 0 or minutes > 0:
-        formatted_ts_s += f'{minutes}m '
-    formatted_ts_s += f'{remaining_seconds}s'
-
-    return formatted_ts_s
-
-
-def get_ts_ms() -> int:
-    return int(round(datetime.datetime.now().timestamp() * 1000))
-
-
-def format_ts_ms(ts_ms: int) -> str:
-    ts_s = ts_ms // 1000
-    remaining_ms = ts_ms % 1000
-
-    formatted_ts_ms = ''
-    if ts_s > 0:
-        formatted_ts_ms = f'{format_ts_s(ts_s)} '
-    formatted_ts_ms += f'{remaining_ms}ms'
-
-    return formatted_ts_ms
+           'zk_calc']
 
 
 def parse_pic_url(url: str) -> Optional[dict]:
@@ -105,11 +54,6 @@ def null_or_str(value: any) -> str:
     convert value to string via `str(value)`, if value is None, return 'null'
     """
     return 'null' if value is None else str(value)
-
-
-def get_week_day() -> int:
-    # Mon -> 0, Tue -> 1, ..., Sun -> 6
-    return datetime.datetime.now().weekday()
 
 
 def zk_calc(view, danmaku, reply, favorite, page=1):
