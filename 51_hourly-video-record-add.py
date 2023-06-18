@@ -5,7 +5,7 @@ from threading import Thread
 from queue import Queue
 from common import get_valid, test_archive_rank_by_partion, test_video_stat, \
     add_video_record_via_stat_api, add_video_via_bvid, \
-    InvalidObjCodeError, TddCommonError, AlreadyExistError
+    InvalidObjCodeError, TddCommonError, AlreadyExistError as CommonAlreadyExistError
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
     str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day
 import math
@@ -19,7 +19,7 @@ from collections import namedtuple, defaultdict, Counter
 from common.error import TddError
 from service import Service, CodeError
 # from proxypool import get_proxy_url
-from task import add_video_record, update_video
+from task import add_video_record, update_video, add_video, AlreadyExistError
 import logging
 
 logger = logging.getLogger('51')
@@ -233,12 +233,12 @@ class C30NoNeedInsertAidsChecker(Thread):
             # try add new video first
             video_already_exist_flag = False
             try:
-                new_video = add_video_via_bvid(a2b(aid), bapi_with_proxy, session)
+                new_video = add_video(aid, service, session)
             except AlreadyExistError:
                 # video already exist, which is absolutely common
                 self.logger.debug('Video aid %d already exists' % aid)
                 video_already_exist_flag = True
-            except TddCommonError as e:
+            except TddError as e:
                 self.logger.warning('Fail to add video aid %d. Exception caught. Detail: %s' % (aid, e))
             else:
                 self.logger.info('Add new video %s' % new_video)
