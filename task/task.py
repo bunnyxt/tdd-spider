@@ -13,7 +13,7 @@ logger = logging.getLogger('task')
 
 __all__ = ['add_video_record', 'commit_video_record_via_archive_stat',
            'add_video', 'update_video',
-           'add_member', 'update_member', 'add_staff', 'add_member_follower_record',
+           'add_member', 'update_member', 'commit_staff', 'add_member_follower_record',
            'get_video_tags_str']
 
 
@@ -155,7 +155,7 @@ def add_video(aid: int, service: Service, session: Session, test_exist=True) -> 
                              f'video: {new_video}, mid: {staff_item.mid}, error: {e}')
                 raise e
             try:
-                add_staff(new_video.added, aid, staff_item.mid, staff_item.title, session)
+                commit_staff(new_video.added, aid, staff_item.mid, staff_item.title, session)
             except Exception as e:
                 logger.error(f'Fail to add staff member when add new video! '
                              f'video: {new_video}, mid: {staff_item.mid}, title: {staff_item.title}, error: {e}')
@@ -328,7 +328,7 @@ def update_video(aid: int, service: Service, session: Session) -> List[TddVideoL
                                        f'aid: {aid}, mid: {staff_item.mid}, error: {e}')
                     # add staff
                     try:
-                        new_staff = add_staff(added, aid, staff_item.mid, staff_item.title, session)
+                        new_staff = commit_staff(added, aid, staff_item.mid, staff_item.title, session)
                     except TddError as e:
                         logger.warning(f'Fail to add new staff!'
                                        f'aid: {aid}, mid: {staff_item.mid}, title: {staff_item.title}, error: {e}')
@@ -473,7 +473,7 @@ def update_member(mid: int, service: Service, session: Session):
     return member_update_logs
 
 
-def add_staff(added: int, aid: int, mid: int, title: str, session: Session, test_exist=True):
+def commit_staff(added: int, aid: int, mid: int, title: str, session: Session, test_exist=True):
     bvid = a2b(aid)
 
     # test exist
