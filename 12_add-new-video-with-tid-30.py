@@ -46,7 +46,7 @@ def add_new_video_with_tid_30():
                 statistics['total_count'] += 1
                 # commit video record via archive stat
                 try:
-                    new_video_record = commit_video_record_via_archive_stat(archive.stat, new_video.aid)
+                    new_video_record = commit_video_record_via_archive_stat(archive.stat, session)
                 except Exception as e:
                     logger.warning(f'Fail to add video record parsed from archive stat! '
                                    f'archive: {archive}, error: {e}')
