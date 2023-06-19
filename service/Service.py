@@ -682,17 +682,32 @@ class Service:
             logger.critical('Endpoint "get_archive_rank_by_partion" not found.')
             exit(1)
 
+        # define parser
+        def parser(text: str) -> Optional[dict]:
+            logger.debug(f'Try to parse archive rank by partion response text. text: {text}.')
+            parsed_response = None
+            try:
+                parsed_response = json.loads(text)
+            except json.JSONDecodeError:
+                logger.debug(f'Fail to decode text to json. Return None.')
+            if parsed_response is not None:
+                code = parsed_response['code']
+                if code in [-40002]:
+                    logger.debug(f'Status code {code} found. Server timeout occurred, return None for retry.')
+                    parsed_response = None
+            return parsed_response
+
         # get response
         response = self._get(url, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor,
-                             get_proxy_url=get_proxy_url if mode == 'proxy' else None)
+                             get_proxy_url=get_proxy_url if mode == 'proxy' else None, parser=parser)
         if response is None:
             raise ResponseError('archive_rank_by_partion', params)
 
         # validate format
 
         # response should contain keys
-        for key in ['code', 'message', 'ttl']:
+        for key in ['code', 'message']:
             if key not in response.keys():
                 raise FormatError('archive_rank_by_partion', params, response, f'Response should contain key {key}.')
         # response code should be 0
