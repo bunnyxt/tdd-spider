@@ -39,7 +39,7 @@ def add_new_video_with_tid_30():
             except AlreadyExistError:
                 logger.debug(f'Video parsed from archive already exist! archive: {archive}')
             except Exception as e:
-                logger.warning(f'Fail to add video parsed from archive! archive: {archive}, error: {e}')
+                logger.error(f'Fail to add video parsed from archive! archive: {archive}, error: {e}')
                 statistics['other_exception_count'] += 1
             else:
                 logger.info(f'New video parsed from archive added! video: {new_video}')
@@ -48,8 +48,8 @@ def add_new_video_with_tid_30():
                 try:
                     new_video_record = commit_video_record_via_archive_stat(archive.stat, session)
                 except Exception as e:
-                    logger.warning(f'Fail to add video record parsed from archive stat! '
-                                   f'archive: {archive}, error: {e}')
+                    logger.error(f'Fail to add video record parsed from archive stat! '
+                                 f'archive: {archive}, error: {e}')
                     statistics['other_exception_count'] += 1
                 else:
                     logger.info(f'New video record parsed from archive stat committed! '
@@ -67,7 +67,7 @@ def add_new_video_with_tid_30():
         f'start: {ts_s_to_str(start_ts)}, ' \
         f'end: {ts_s_to_str(end_ts)}, ' \
         f'cost: {format_ts_s(end_ts - start_ts)}\n\n' \
-        f'total count: {statistics["total_count"]}\n\n' + \
+        f'total count: {statistics["total_count"]}\n\n' \
         f'other exception count: {statistics["other_exception_count"]}\n\n' \
         f'by.bunnyxt, {ts_s_to_str(get_ts_s())}'
 

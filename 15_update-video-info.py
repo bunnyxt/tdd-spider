@@ -79,7 +79,7 @@ def update_video_info():
 
     logger.info(f'Will update {len(bvids)} videos info.')
 
-    # put mid into queue
+    # put bvid into queue
     bvid_queue: Queue[str] = Queue()
     for bvid in bvids:
         bvid_queue.put(bvid)
@@ -113,7 +113,7 @@ def update_video_info():
         f'start: {ts_s_to_str(start_ts)}, ' \
         f'end: {ts_s_to_str(end_ts)}, ' \
         f'cost: {format_ts_s(end_ts - start_ts)}\n\n' \
-        f'total count: {statistics["total_count"]}, ' + \
+        f'total count: {statistics["total_count"]}, ' \
         f'average cost per service: {format_ts_ms(statistics["total_cost_ms"] // statistics["total_count"])}\n\n' \
         f'tdd error count: {statistics["tdd_error_count"]}\n\n' \
         f'other exception count: {statistics["other_exception_count"]}\n\n' \
