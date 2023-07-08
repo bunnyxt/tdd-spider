@@ -19,7 +19,7 @@ from collections import namedtuple, defaultdict, Counter
 from common.error import TddError
 from service import Service, CodeError
 # from proxypool import get_proxy_url
-from task import add_video_record, update_video, add_video, AlreadyExistError
+from task import add_video_record, add_video_record_via_video_view, update_video, add_video, AlreadyExistError
 import logging
 
 logger = logging.getLogger('51')
@@ -520,7 +520,8 @@ class C0PipelineRunner(Thread):
             # add video record
             try:
                 # new_video_record = add_video_record_via_stat_api(aid, bapi_with_proxy, session)
-                new_video_record = add_video_record(aid, service, session)
+                # new_video_record = add_video_record(aid, service, session)
+                new_video_record = add_video_record_via_video_view(aid, service, session)
                 new_video_record_list.append(new_video_record)
                 self.logger.debug('Add new record %s' % new_video_record)
             # except InvalidObjCodeError as e:
