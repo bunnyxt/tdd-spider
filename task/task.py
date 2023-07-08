@@ -49,6 +49,38 @@ def add_video_record(aid: int, service: Service, session: Session) -> TddVideoRe
     return new_video_record
 
 
+def add_video_record_via_video_view(aid: int, service: Service, session: Session) -> TddVideoRecord:
+    # get video view
+    try:
+        video_view = service.get_video_view({'aid': aid})
+    except ServiceError as e:
+        raise e
+
+    # assemble video record
+    new_video_record = TddVideoRecord(
+        aid=aid,
+        added=get_ts_s(),
+        view=-1 if video_view.stat.view == '--' else video_view.stat.view,
+        danmaku=video_view.stat.danmaku,
+        reply=video_view.stat.reply,
+        favorite=video_view.stat.favorite,
+        coin=video_view.stat.coin,
+        share=video_view.stat.share,
+        like=video_view.stat.like,
+        dislike=video_view.stat.dislike,
+        now_rank=video_view.stat.now_rank,
+        his_rank=video_view.stat.his_rank,
+        vt=video_view.stat.vt,
+        vv=video_view.stat.vv,
+    )
+
+    # add to db
+    # TODO: use new db operation which can raise exception
+    DBOperation.add(new_video_record, session)
+
+    return new_video_record
+
+
 def commit_video_record_via_archive_stat(stat: ArchiveRankByPartionArchiveStat, session: Session) -> TddVideoRecord:
     # assemble video record
     new_video_record = TddVideoRecord(
