@@ -1,54 +1,15 @@
 from db import DBOperation, Session
 from service import Service
-from task import update_video
 from serverchan import sc_send
-from util import get_ts_s, ts_s_to_str, get_week_day, b2a, format_ts_s, get_ts_ms, format_ts_ms
-from threading import Thread
+from util import get_ts_s, ts_s_to_str, get_week_day, format_ts_s, format_ts_ms
 from queue import Queue
 from collections import defaultdict
 from typing import List
+from job import UpdateVideoJob
 from logutils import logging_init
 import logging
 
 logger = logging.getLogger('15')
-
-
-class UpdateVideoServiceRunner(Thread):
-    def __init__(self, name: str, bvid_queue: Queue[str], statistics: defaultdict[str, int], service: Service):
-        super().__init__()
-        self.name = name
-        self.bvid_queue = bvid_queue
-        self.statistics = statistics
-        self.service = service
-        self.session = Session()
-        self.logger = logging.getLogger(f'UpdateVideoServiceRunner.{self.name}')
-
-    def run(self):
-        self.logger.info(f'Runner start.')
-        while not self.bvid_queue.empty():
-            bvid = self.bvid_queue.get()
-            start_ts_ms = get_ts_ms()
-            try:
-                tdd_video_logs = update_video(b2a(bvid), self.service, self.session)
-            except Exception as e:
-                logger.error(f'Fail to update video info. bvid: {bvid}, error: {e}')
-                self.statistics['other_exception_count'] += 1
-            else:
-                if len(tdd_video_logs) == 0:
-                    self.statistics['no_update_count'] += 1
-                else:
-                    self.statistics['change_count'] += 1
-                for log in tdd_video_logs:
-                    logger.info(f'Update video info. bvid: {bvid}, attr: {log.attr}, {log.oldval} -> {log.newval}')
-                    self.statistics['change_log_count'] += 1
-                logger.debug(f'{tdd_video_logs} log(s) found. bvid: {bvid}')
-            end_ts_ms = get_ts_ms()
-            cost_ms = end_ts_ms - start_ts_ms
-            self.logger.debug(f'Finish update video info. bvid: {bvid}, cost: {format_ts_ms(cost_ms)}')
-            self.statistics['total_count'] += 1
-            self.statistics['total_cost_ms'] += cost_ms
-        self.session.close()
-        self.logger.info(f'Runner end.')
 
 
 def update_video_info():
@@ -84,21 +45,20 @@ def update_video_info():
     # prepare statistics
     statistics: defaultdict[str, int] = defaultdict(int)
 
-    # create service runner
-    service_runner_num = 20
-    service_runner_list = []
-    for i in range(service_runner_num):
-        service_runner = UpdateVideoServiceRunner(f'runner_{i}', bvid_queue, statistics, service)
-        service_runner_list.append(service_runner)
+    # create jobs
+    job_num = 20
+    job_list = []
+    for i in range(job_num):
+        job_list.append(UpdateVideoJob(f'job_{i}', bvid_queue, statistics, service))
 
-    # start service runner
-    for service_runner in service_runner_list:
-        service_runner.start()
-    logger.info(f'{service_runner_num} service runner started.')
+    # start jobs
+    for job in job_list:
+        job.start()
+    logger.info(f'{job_num} job(s) started.')
 
-    # wait for service runner
-    for service_runner in service_runner_list:
-        service_runner.join()
+    # wait for jobs
+    for job in job_list:
+        job.join()
 
     # get end ts
     end_ts = get_ts_s()
