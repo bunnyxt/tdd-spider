@@ -1,11 +1,10 @@
 from db import DBOperation, Session
 from service import Service
 from serverchan import sc_send
-from util import get_ts_s, ts_s_to_str, get_week_day, format_ts_s, format_ts_ms
+from util import get_ts_s, ts_s_to_str, get_week_day, format_ts_s
 from queue import Queue
-from collections import defaultdict
 from typing import List
-from job import UpdateVideoJob
+from job import UpdateVideoJob, JobStat
 from logutils import logging_init
 import logging
 
@@ -42,14 +41,11 @@ def update_video_info():
         bvid_queue.put(bvid)
     logger.info(f'{bvid_queue.qsize()} bvids put into queue.')
 
-    # prepare statistics
-    statistics: defaultdict[str, int] = defaultdict(int)
-
     # create jobs
     job_num = 20
     job_list = []
     for i in range(job_num):
-        job_list.append(UpdateVideoJob(f'job_{i}', bvid_queue, statistics, service))
+        job_list.append(UpdateVideoJob(f'job_{i}', bvid_queue, service))
 
     # start jobs
     for job in job_list:
@@ -60,21 +56,24 @@ def update_video_info():
     for job in job_list:
         job.join()
 
+    # collect statistics
+    job_stat_list: List[JobStat] = []
+    for job in job_list:
+        job_stat_list.append(job.stat)
+
+    # merge statistics counters
+    job_stat_merged = sum(job_stat_list, JobStat())
+
     # get end ts
     end_ts = get_ts_s()
 
     # make summary
     summary = \
-        'update video info done!\n\n' \
+        '# update video info done!\n\n' \
         f'start: {ts_s_to_str(start_ts)}, ' \
         f'end: {ts_s_to_str(end_ts)}, ' \
-        f'cost: {format_ts_s(end_ts - start_ts)}\n\n' \
-        f'total count: {statistics["total_count"]}, ' \
-        f'average cost per service: {format_ts_ms(statistics["total_cost_ms"] // statistics["total_count"])}\n\n' \
-        f'other exception count: {statistics["other_exception_count"]}\n\n' \
-        f'no update count: {statistics["no_update_count"]}\n\n' \
-        f'change count: {statistics["change_count"]}\n\n' \
-        f'change log count: {statistics["change_log_count"]}\n\n' \
+        f'duration: {format_ts_s(end_ts - start_ts)}\n\n' \
+        f'{job_stat_merged.get_summary()}\n\n' \
         f'by.bunnyxt, {ts_s_to_str(get_ts_s())}'
 
     logger.info('Finish update video info!')
