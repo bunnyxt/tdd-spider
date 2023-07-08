@@ -11,7 +11,7 @@ import logging
 
 logger = logging.getLogger('task')
 
-__all__ = ['add_video_record', 'commit_video_record_via_archive_stat',
+__all__ = ['add_video_record', 'add_video_record_via_video_view', 'commit_video_record_via_archive_stat',
            'add_video', 'update_video',
            'add_member', 'update_member', 'commit_staff', 'add_member_follower_record',
            'get_video_tags_str']
