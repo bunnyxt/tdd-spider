@@ -26,7 +26,10 @@ def add_stat_daily():
 
         logger.info(f'Finish add stat daily! {new_stat_daily}')
     except Exception as e:
-        logger.error(f'Fail to add stat daily! error: {e}')
+        logger.critical(f'Exception occurred when adding stat daily! error: {e}')
+        session.rollback()
+        session.close()
+        exit(1)
 
     session.close()
 

@@ -60,6 +60,7 @@ def member_total_stat_update():
     except Exception as e:
         logger.critical(f'Exception occurred when updating member total stat! error: {e}')
         session.rollback()
+        session.close()
         exit(1)
 
     # get end ts

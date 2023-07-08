@@ -1,6 +1,5 @@
 from db import DBOperation, Session
 from service import Service
-from common.error import TddError
 from task import update_video
 from serverchan import sc_send
 from util import get_ts_s, ts_s_to_str, get_week_day, b2a, format_ts_s, get_ts_ms, format_ts_ms
@@ -31,11 +30,8 @@ class UpdateVideoServiceRunner(Thread):
             start_ts_ms = get_ts_ms()
             try:
                 tdd_video_logs = update_video(b2a(bvid), self.service, self.session)
-            except TddError as e:
-                logger.warning(f'Fail to update video info. bvid: {bvid}, error: {e}')
-                self.statistics['tdd_error_count'] += 1
             except Exception as e:
-                logger.warning(f'Fail to update video info. bvid: {bvid}, error: {e}')
+                logger.error(f'Fail to update video info. bvid: {bvid}, error: {e}')
                 self.statistics['other_exception_count'] += 1
             else:
                 if len(tdd_video_logs) == 0:
@@ -115,7 +111,6 @@ def update_video_info():
         f'cost: {format_ts_s(end_ts - start_ts)}\n\n' \
         f'total count: {statistics["total_count"]}, ' \
         f'average cost per service: {format_ts_ms(statistics["total_cost_ms"] // statistics["total_count"])}\n\n' \
-        f'tdd error count: {statistics["tdd_error_count"]}\n\n' \
         f'other exception count: {statistics["other_exception_count"]}\n\n' \
         f'no update count: {statistics["no_update_count"]}\n\n' \
         f'change count: {statistics["change_count"]}\n\n' \
