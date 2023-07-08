@@ -24,7 +24,9 @@ VideoView = namedtuple('VideoView',
 VideoViewOwner = namedtuple('VideoViewOwner', ['mid', 'name', 'face'])
 VideoViewStat = namedtuple('VideoViewStat',
                            ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank',
-                            'like', 'dislike'])
+                            'like', 'dislike',
+                            # optional
+                            'vt', 'vv'])
 VideoViewStaffItem = namedtuple('VideoViewStaffItem', ['mid', 'title', 'name', 'face'])
 VideoTags = namedtuple('VideoTags', ['tags'])
 VideoTag = namedtuple('VideoTag', ['tag_id', 'tag_name'])
@@ -353,7 +355,7 @@ class Service:
         for key in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
                     'dislike']:
             if key not in response['data']['stat'].keys():
-                raise FormatError('video_view', params, response, f'Response data owner should contain key {key}.')
+                raise FormatError('video_view', params, response, f'Response data stat should contain key {key}.')
         # response data staff should be a list if exists
         if 'staff' in response['data'].keys():
             if type(response['data']['staff']) != list:
@@ -409,7 +411,9 @@ class Service:
                 now_rank=response['data']['stat']['now_rank'],
                 his_rank=response['data']['stat']['his_rank'],
                 like=response['data']['stat']['like'],
-                dislike=response['data']['stat']['dislike']
+                dislike=response['data']['stat']['dislike'],
+                vt=response['data']['stat'].get('vt', None),
+                vv=response['data']['stat'].get('vv', None),
             ),
             attribute=response['data'].get('attribute', None),
             forward=response['data'].get('forward', None),
