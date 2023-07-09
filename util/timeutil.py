@@ -2,7 +2,7 @@ import datetime
 import time
 
 __all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s', 'format_ts_s',
-           'get_ts_ms', 'format_ts_ms',
+           'get_ts_ms', 'ts_ms_to_str', 'format_ts_ms',
            'get_week_day']
 
 
@@ -67,6 +67,15 @@ def get_ts_ms() -> int:
     :return: timestamp (milliseconds)
     """
     return int(round(datetime.datetime.now().timestamp() * 1000))
+
+
+def ts_ms_to_str(ts_ms: int) -> str:
+    """
+    Convert timestamp (milliseconds) to string.
+    :param ts_ms: timestamp (milliseconds)
+    :return: time string, format: "%Y-%m-%d %H:%M:%S" + "." + "%ms"
+    """
+    return f'{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts_ms // 1000))}.{ts_ms % 1000}'
 
 
 def format_ts_ms(ts_ms: int) -> str:
