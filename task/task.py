@@ -356,13 +356,13 @@ def update_video(aid: int, service: Service, session: Session) -> List[TddVideoL
                         logger.debug(f'Staff member of video already exist! '
                                      f'mid: {staff_item.mid}')
                     except TddError as e:
-                        logger.warning(f'Fail to add new member before add new staff!'
+                        logger.warning(f'Fail to add new member before add new staff! '
                                        f'aid: {aid}, mid: {staff_item.mid}, error: {e}')
                     # add staff
                     try:
                         new_staff = commit_staff(added, aid, staff_item.mid, staff_item.title, session)
                     except TddError as e:
-                        logger.warning(f'Fail to add new staff!'
+                        logger.warning(f'Fail to add new staff! '
                                        f'aid: {aid}, mid: {staff_item.mid}, title: {staff_item.title}, error: {e}')
                     else:
                         video_update_logs.append(

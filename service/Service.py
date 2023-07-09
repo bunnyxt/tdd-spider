@@ -549,7 +549,7 @@ class Service:
                         status_response = json.loads(text[:split_index + 1])
                         info_response = json.loads(text[split_index + 1:])
                         logger.debug(
-                            f'Successfully parse two jsons. Assign status_response to parsed_response.'
+                            f'Successfully parse two jsons. Assign status_response to parsed_response. '
                             f'status_response: {status_response}, info_response: {info_response}.'
                         )
                         parsed_response = info_response

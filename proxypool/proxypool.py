@@ -20,7 +20,7 @@ def get_proxy_url(https: bool = False) -> Optional[str]:
         proxy_url = r.text
         return 'http%s://%s' % ('s' if https else '', proxy_url)
     except Exception as e:
-        logger.warning(f'Fail to get proxy url from proxy pool {proxy_pool_url}. Error: {e}')
+        logger.warning(f'Fail to get proxy url from proxy pool {proxy_pool_url}. error: {e}')
         return None
 
 

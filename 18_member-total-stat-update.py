@@ -68,13 +68,13 @@ def member_total_stat_update():
 
     # make summary
     summary = \
-        'member total stat update done!\n\n' \
+        '# member total stat update done!\n\n' \
         f'start: {ts_s_to_str(start_ts)}, ' \
         f'end: {ts_s_to_str(end_ts)}, ' \
-        f'cost: {format_ts_s(end_ts - start_ts)}\n\n' \
+        f'duration: {format_ts_s(end_ts - start_ts)}\n\n' \
         f'result len: {result_len}\n\n' \
         f'mid dict len: {mid_dict_len}\n\n' \
-        f'by.bunnyxt, {ts_s_to_str(get_ts_s())}'
+        f'by bunnyxt, {ts_s_to_str(get_ts_s())}'
 
     logger.info('Finish member total stat update!')
     logger.warning(summary)
