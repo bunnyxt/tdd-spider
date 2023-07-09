@@ -74,7 +74,7 @@ def update_video_info():
         f'end: {ts_s_to_str(end_ts)}, ' \
         f'duration: {format_ts_s(end_ts - start_ts)}\n\n' \
         f'{job_stat_merged.get_summary()}\n\n' \
-        f'by.bunnyxt, {ts_s_to_str(get_ts_s())}'
+        f'by bunnyxt, {ts_s_to_str(get_ts_s())}'
 
     logger.info('Finish update video info!')
     logger.warning(summary)

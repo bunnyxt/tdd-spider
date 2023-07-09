@@ -2,7 +2,6 @@ from .Job import Job
 from db import Session
 from service import Service
 from queue import Queue
-from collections import defaultdict
 from task import update_video
 from util import b2a, get_ts_ms, format_ts_ms
 
