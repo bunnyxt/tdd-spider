@@ -1,108 +1,79 @@
-from spider import WebSpider
-from spider.custom import ApiFetcher, TddMemberFollowerRecordParser, DbSaver, LocalProxieser
 from db import DBOperation, Session
+from service import Service
 from util import get_ts_s, ts_s_to_str
 from serverchan import sc_send
+from queue import Queue
+from typing import List
+from util import format_ts_s
+from job import AddMemberFollowerRecordJob, JobStat
 from logutils import logging_init
 import logging
+
 logger = logging.getLogger('17')
-
-
-def create_web_spider(sequential=False):
-    if sequential:
-        # for residual fetch
-        # no proxieser, longer fetcher sleep time, fewer fetch max repeat
-        web_spider = WebSpider(fetcher=ApiFetcher(sleep_time=3, max_repeat=3),
-                               parser=TddMemberFollowerRecordParser(),
-                               saver=DbSaver(get_session=Session),
-                               queue_parse_size=200)
-    else:
-        # for main fetch
-        web_spider = WebSpider(fetcher=ApiFetcher(sleep_time=0, max_repeat=10),
-                               parser=TddMemberFollowerRecordParser(),
-                               saver=DbSaver(get_session=Session),
-                               proxieser=LocalProxieser(sleep_time=5, proxy_num=100),
-                               queue_parse_size=200, queue_proxies_size=500)
-    return web_spider
 
 
 def add_member_follower_record():
     logger.info('Now start add member follower record...')
+    start_ts = get_ts_s()  # get start ts
 
-    start_ts = get_ts_s()
+    session = Session()
+    service = Service(mode='worker')
 
     # load all mids
-    session = Session()
-    mids = DBOperation.query_all_member_mids(session=session)
-    session.close()
+    mids: List[int] = DBOperation.query_all_member_mids(session=session)
+    logger.info(f'Total {len(mids)} members got.')
 
-    # init urls
-    left_url_list = []
+    # put mid into queue
+    mid_queue: Queue[int] = Queue()
     for mid in mids:
-        left_url_list.append('http://api.bilibili.com/x/relation/stat?vmid={0}'.format(mid))
+        mid_queue.put(mid)
+    logger.info(f'{mid_queue.qsize()} mids put into queue.')
 
-    # main fetch, multithreading spider
-    spyder_round = 1
-    left_url_num = len(left_url_list)
-    max_spyder_round = 5  # at most 5 round
-    least_left_url_num = 100  # at least 100 urls left to fetch
-    while spyder_round <= max_spyder_round and left_url_num >= least_left_url_num:
-        # create web spider
-        web_spider = create_web_spider()
+    # create jobs
+    job_num = 20
+    job_list = []
+    for i in range(job_num):
+        job_list.append(AddMemberFollowerRecordJob(f'job_{i}', mid_queue, service))
 
-        # init add urls
-        for url in left_url_list:
-            web_spider.put_item_to_queue_fetch(1, url, {}, 0, 0)
+    # start jobs
+    for job in job_list:
+        job.start()
+    logger.info(f'{job_num} job(s) started.')
 
-        # launch web spider
-        logger.info('spyder round %d start, url total %d' % (spyder_round, left_url_num))
-        web_spider.start_working(fetcher_num=50)
-        web_spider.wait_for_finished()
+    # wait for jobs
+    for job in job_list:
+        job.join()
 
-        # update left urls
-        left_url_list = web_spider.get_fail_url_list()
-        left_url_num = len(left_url_list)
-        logger.info('spyder round %d done, url left %d' % (spyder_round, left_url_num))
-        spyder_round += 1
+    # collect statistics
+    job_stat_list: List[JobStat] = []
+    for job in job_list:
+        job_stat_list.append(job.stat)
 
-    # residual fetch, sequential spider
-    if left_url_num > 0:
-        # create web spider
-        web_spider = create_web_spider(sequential=True)
+    # merge statistics counters
+    job_stat_merged = sum(job_stat_list, JobStat())
 
-        # init add urls
-        for url in left_url_list:
-            web_spider.put_item_to_queue_fetch(1, url, {}, 0, 0)
-
-        # launch web spider
-        logger.info('residual spyder start, url total %d' % left_url_num)
-        web_spider.start_working(fetcher_num=1)  # one fetcher only
-        web_spider.wait_for_finished()
-
-        # update left urls
-        left_url_list = web_spider.get_fail_url_list()
-        left_url_num = len(left_url_list)
-        logger.info('residual spyder done, url left %d' % left_url_num)
-        if left_url_num > 0:
-            logger.info('left url list: %s' % left_url_list)
-
+    # get end ts
     end_ts = get_ts_s()
-    logger.info('start time %s' % ts_s_to_str(start_ts))
-    logger.info('end time %s' % ts_s_to_str(end_ts))
-    logger.info('timespan %d min' % ((end_ts - start_ts) // 60))
+
+    # make summary
+    summary = \
+        '# add member follower record done!\n\n' \
+        f'start: {ts_s_to_str(start_ts)}, ' \
+        f'end: {ts_s_to_str(end_ts)}, ' \
+        f'duration: {format_ts_s(end_ts - start_ts)}\n\n' \
+        f'{job_stat_merged.get_summary()}\n\n' \
+        f'by bunnyxt, {ts_s_to_str(get_ts_s())}'
+
+    logger.info('Finish add member follower record!')
+    logger.warning(summary)
 
     # send sc
-    sc_send(
-        'Finish add member follower record!',
-        'mids len: %d' % len(mids) + '\n\n' +
-        'start time %s' % ts_s_to_str(start_ts) + '\n\n' +
-        'end time %s' % ts_s_to_str(end_ts) + '\n\n' +
-        'timespan %d min' % ((end_ts - start_ts) // 60)
-    )
+    sc_send('Finish add member follower record!', summary)
+
+    session.close()
 
 
 def main():
-    # TODO get rid of spyder, use custom pipeline
     add_member_follower_record()
 
 

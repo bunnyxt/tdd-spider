@@ -1,4 +1,5 @@
+from .AddMemberFollowerRecordJob import *
 from .Job import *
 from .JobStat import *
-from .UpdateVideoJob import *
 from .UpdateMemberJob import *
+from .UpdateVideoJob import *
