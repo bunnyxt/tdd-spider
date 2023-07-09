@@ -9,8 +9,8 @@ import logging
 logger = logging.getLogger('12')
 
 
-def add_new_video_with_tid_30():
-    logger.info('Now start add new video with tid 30...')
+def add_latest_video_with_tid_30():
+    logger.info('Now start add latest video with tid 30...')
     timer = Timer()
     timer.start()  # start timer
 
@@ -32,23 +32,23 @@ def add_new_video_with_tid_30():
 
     # make summary
     summary = \
-        'add new video with tid 30 done!\n\n' \
+        '# add latest video with tid 30 done!\n\n' \
         f'{timer.get_summary()}\n\n' \
         f'{job_stat.get_summary()}\n\n' \
         f'by bunnyxt, {ts_s_to_str(get_ts_s())}'
 
-    logger.info('Finish add new video with tid 30!')
+    logger.info('Finish add latest video with tid 30!')
     logger.warning(summary)
 
     # send sc
     if job_stat.condition['get_archive_exception'] > 0 \
             or job_stat.condition['add_video_exception'] > 0 \
             or job_stat.condition['commit_video_record_exception'] > 0:
-        sc_send('Finish add new video with tid 30!', summary)
+        sc_send('Finish add latest video with tid 30!', summary)
 
 
 def main():
-    add_new_video_with_tid_30()
+    add_latest_video_with_tid_30()
 
 
 if __name__ == '__main__':
