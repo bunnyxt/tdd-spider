@@ -3,9 +3,7 @@ from pybiliapi import BiliApi
 from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from threading import Thread
 from queue import Queue
-from common import get_valid, test_archive_rank_by_partion, test_video_stat, \
-    add_video_record_via_stat_api, \
-    InvalidObjCodeError, TddCommonError, AlreadyExistError as CommonAlreadyExistError
+from common import get_valid, test_archive_rank_by_partion, test_video_stat
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
     str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day
 import math
@@ -519,12 +517,10 @@ class C0PipelineRunner(Thread):
         for idx, aid in enumerate(need_insert_aid_list, 1):
             # add video record
             try:
-                # new_video_record = add_video_record_via_stat_api(aid, bapi_with_proxy, session)
                 # new_video_record = add_video_record(aid, service, session)
                 new_video_record = add_video_record_via_video_view(aid, service, session)
                 new_video_record_list.append(new_video_record)
                 self.logger.debug('Add new record %s' % new_video_record)
-            # except InvalidObjCodeError as e:
             except CodeError as e:
                 self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e))
                 try:
