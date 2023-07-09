@@ -12,8 +12,12 @@ class Timer:
     def start(self):
         self.start_ts_ms = get_ts_ms()
 
-    def end(self):
+    def stop(self):
         self.end_ts_ms = get_ts_ms()
+
+    def reset(self):
+        self.start_ts_ms = None
+        self.end_ts_ms = None
 
     def get_duration_ms(self) -> Optional[int]:
         if self.start_ts_ms is None or self.end_ts_ms is None:
