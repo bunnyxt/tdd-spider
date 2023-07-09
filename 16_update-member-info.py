@@ -35,8 +35,6 @@ def update_member_info():
 
     logger.info(f'Will update {len(mids)} videos info.')
 
-    mids = mids[-1000:]
-
     # put mid into queue
     mid_queue: Queue[int] = Queue()
     for mid in mids:
