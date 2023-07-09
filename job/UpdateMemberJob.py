@@ -3,7 +3,8 @@ from db import Session
 from service import Service
 from queue import Queue
 from task import update_member
-from util import get_ts_ms, format_ts_ms
+from timer import Timer
+from util import format_ts_ms
 
 __all__ = ['UpdateMemberJob']
 
@@ -19,7 +20,8 @@ class UpdateMemberJob(Job):
         while not self.mid_queue.empty():
             mid = self.mid_queue.get()
             self.logger.debug(f'Now start update member info. mid: {mid}')
-            start_ts_ms = get_ts_ms()
+            timer = Timer()
+            timer.start()
 
             try:
                 tdd_member_logs = update_member(mid, self.service, self.session)
@@ -32,11 +34,11 @@ class UpdateMemberJob(Job):
                 self.logger.debug(f'{len(tdd_member_logs)} log(s) found. mid: {mid}')
                 self.stat.condition[f'{len(tdd_member_logs)}_update'] += 1
 
-            end_ts_ms = get_ts_ms()
-            duration_ms = end_ts_ms - start_ts_ms
-            self.logger.debug(f'Finish update member info. mid: {mid}, cost: {format_ts_ms(duration_ms)}')
+            timer.stop()
+            self.logger.debug(f'Finish update member info. '
+                              f'mid: {mid}, duration: {format_ts_ms(timer.get_duration_ms())}')
             self.stat.total_count += 1
-            self.stat.total_duration_ms += duration_ms
+            self.stat.total_duration_ms += timer.get_duration_ms()
 
     def cleanup(self):
         self.session.close()

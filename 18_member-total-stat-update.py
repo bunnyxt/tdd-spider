@@ -1,20 +1,22 @@
-import logging
 from logutils import logging_init
 from db import Session, TddMemberTotalStatRecord
 from util import get_ts_s, ts_s_to_str, format_ts_s
+from timer import Timer
 from serverchan import sc_send
+import logging
 
 logger = logging.getLogger('18')
 
 
 def member_total_stat_update():
     logger.info('Now start member total stat update...')
-    start_ts = get_ts_s()  # get start ts
+    timer = Timer()
+    timer.start()  # start timer
 
     session = Session()
 
     try:
-        added = start_ts
+        added = get_ts_s()
 
         sql = 'select ' \
               'v.aid, v.mid as v_mid, ' \
@@ -63,15 +65,12 @@ def member_total_stat_update():
         session.close()
         exit(1)
 
-    # get end ts
-    end_ts = get_ts_s()
+    timer.stop()  # stop timer
 
     # make summary
     summary = \
         '# member total stat update done!\n\n' \
-        f'start: {ts_s_to_str(start_ts)}, ' \
-        f'end: {ts_s_to_str(end_ts)}, ' \
-        f'duration: {format_ts_s(end_ts - start_ts)}\n\n' \
+        f'{timer.get_summary()}\n\n' \
         f'result len: {result_len}\n\n' \
         f'mid dict len: {mid_dict_len}\n\n' \
         f'by bunnyxt, {ts_s_to_str(get_ts_s())}'

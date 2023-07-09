@@ -4,6 +4,7 @@ from util import get_ts_s, ts_s_to_str
 from serverchan import sc_send
 from queue import Queue
 from typing import List
+from timer import Timer
 from util import format_ts_s
 from job import AddMemberFollowerRecordJob, JobStat
 from logutils import logging_init
@@ -14,7 +15,8 @@ logger = logging.getLogger('17')
 
 def add_member_follower_record():
     logger.info('Now start add member follower record...')
-    start_ts = get_ts_s()  # get start ts
+    timer = Timer()
+    timer.start()  # start timer
 
     session = Session()
     service = Service(mode='worker')
@@ -52,15 +54,12 @@ def add_member_follower_record():
     # merge statistics counters
     job_stat_merged = sum(job_stat_list, JobStat())
 
-    # get end ts
-    end_ts = get_ts_s()
+    timer.stop()  # stop timer
 
     # make summary
     summary = \
         '# add member follower record done!\n\n' \
-        f'start: {ts_s_to_str(start_ts)}, ' \
-        f'end: {ts_s_to_str(end_ts)}, ' \
-        f'duration: {format_ts_s(end_ts - start_ts)}\n\n' \
+        f'{timer.get_summary()}\n\n' \
         f'{job_stat_merged.get_summary()}\n\n' \
         f'by bunnyxt, {ts_s_to_str(get_ts_s())}'
 

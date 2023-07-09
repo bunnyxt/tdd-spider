@@ -1,7 +1,8 @@
 from db import DBOperation, Session
 from service import Service
 from serverchan import sc_send
-from util import get_ts_s, ts_s_to_str, get_week_day, format_ts_s
+from util import get_ts_s, ts_s_to_str, get_week_day
+from timer import Timer
 from queue import Queue
 from typing import List
 from job import UpdateVideoJob, JobStat
@@ -13,7 +14,8 @@ logger = logging.getLogger('15')
 
 def update_video_info():
     logger.info('Now start update video info...')
-    start_ts = get_ts_s()  # get start ts
+    timer = Timer()
+    timer.start()  # start timer
 
     session = Session()
     service = Service(mode='worker')
@@ -64,15 +66,12 @@ def update_video_info():
     # merge statistics counters
     job_stat_merged = sum(job_stat_list, JobStat())
 
-    # get end ts
-    end_ts = get_ts_s()
+    timer.stop()  # stop timer
 
     # make summary
     summary = \
         '# update video info done!\n\n' \
-        f'start: {ts_s_to_str(start_ts)}, ' \
-        f'end: {ts_s_to_str(end_ts)}, ' \
-        f'duration: {format_ts_s(end_ts - start_ts)}\n\n' \
+        f'{timer.get_summary()}\n\n' \
         f'{job_stat_merged.get_summary()}\n\n' \
         f'by bunnyxt, {ts_s_to_str(get_ts_s())}'
 

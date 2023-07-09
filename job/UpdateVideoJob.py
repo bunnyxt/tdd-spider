@@ -3,7 +3,8 @@ from db import Session
 from service import Service
 from queue import Queue
 from task import update_video
-from util import b2a, get_ts_ms, format_ts_ms
+from timer import Timer
+from util import b2a, format_ts_ms
 
 __all__ = ['UpdateVideoJob']
 
@@ -19,7 +20,8 @@ class UpdateVideoJob(Job):
         while not self.bvid_queue.empty():
             bvid = self.bvid_queue.get()
             self.logger.debug(f'Now start update video info. bvid: {bvid}')
-            start_ts_ms = get_ts_ms()
+            timer = Timer()
+            timer.start()
 
             try:
                 tdd_video_logs = update_video(b2a(bvid), self.service, self.session)
@@ -32,11 +34,11 @@ class UpdateVideoJob(Job):
                 self.logger.debug(f'{len(tdd_video_logs)} log(s) found. bvid: {bvid}')
                 self.stat.condition[f'{len(tdd_video_logs)}_update'] += 1
 
-            end_ts_ms = get_ts_ms()
-            duration_ms = end_ts_ms - start_ts_ms
-            self.logger.debug(f'Finish update video info. bvid: {bvid}, cost: {format_ts_ms(duration_ms)}')
+            timer.stop()
+            self.logger.debug(f'Finish update video info. '
+                              f'bvid: {bvid}, cost: {format_ts_ms(timer.get_duration_ms())}')
             self.stat.total_count += 1
-            self.stat.total_duration_ms += duration_ms
+            self.stat.total_duration_ms += timer.get_duration_ms()
 
     def cleanup(self):
         self.session.close()
