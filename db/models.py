@@ -4,7 +4,8 @@ from sqlalchemy.dialects.mysql import LONGTEXT, TINYINT, DOUBLE
 
 __all__ = ['TddVideo', 'TddMember', 'TddVideoStaff', 'TddVideoRecord', 'TddMemberFollowerRecord', 'TddStatDaily',
            'TddVideoLog', 'TddMemberLog', 'TddMemberTotalStatRecord', 'TddTaskVisitVideoRecord',
-           'TddVideoRecordAbnormalChange']
+           'TddVideoRecordAbnormalChange',
+           'TddSprintVideoRecord']
 
 
 class TddVideo(Base):
@@ -143,7 +144,7 @@ class TddStatDaily(Base):
 
     def __repr__(self):
         return '<TddStatDaily(added=%d,video_count=%d,member_count=%d,video_record_count=%d)>' \
-               % (self.added, self.video_count, self.member_count, self.video_record_count)
+            % (self.added, self.video_count, self.member_count, self.video_record_count)
 
 
 class TddVideoLog(Base):
@@ -280,3 +281,25 @@ class TddVideoRecordAbnormalChange(Base):
 
     def __repr__(self):
         return '<TddVideoRecordAbnormalChange(aid=%d,attr=%s)>' % (self.aid, self.attr)
+
+
+class TddSprintVideoRecord(Base):
+    """tdd_sprint_video_record table"""
+
+    __tablename__ = 'tdd_sprint_video_record'
+
+    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    added = Column(Integer, default=None)
+    aid = Column(Integer, default=None)
+    view = Column(Integer, default=None)  # maybe '--' from api, set -1 instead
+    danmaku = Column(Integer, default=None)
+    reply = Column(Integer, default=None)
+    favorite = Column(Integer, default=None)
+    coin = Column(Integer, default=None)
+    share = Column(Integer, default=None)
+    like = Column(Integer, default=None)
+
+    # Foreign key here?
+
+    def __repr__(self):
+        return "<TddSprintVideoRecord(aid=%d,view=%d)>" % (self.aid, self.view)
