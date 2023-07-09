@@ -1,3 +1,4 @@
+from .AddLatestVideoJob import *
 from .AddMemberFollowerRecordJob import *
 from .Job import *
 from .JobStat import *
