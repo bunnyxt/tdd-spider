@@ -460,7 +460,7 @@ class Service:
                 logger.debug(f'Fail to decode text to json. Return None.')
             if parsed_response is not None:
                 code = parsed_response['code']
-                if code in [-504]:
+                if code in [-500, -504]:
                     logger.debug(f'Status code {code} found. Server timeout occurred, return None for retry.')
                     parsed_response = None
             return parsed_response
