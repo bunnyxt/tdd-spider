@@ -3,9 +3,8 @@ from db import Session
 import datetime
 from timer import Timer
 from serverchan import sc_send, sc_send_critical
-from util import get_ts_s, ts_s_to_str, get_current_line_no
+from util import logging_init, get_ts_s, ts_s_to_str, get_current_line_no
 import math
-from logutils import logging_init
 import logging
 
 logger = logging.getLogger('72')

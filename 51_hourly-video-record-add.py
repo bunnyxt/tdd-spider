@@ -1,11 +1,10 @@
-from logutils import logging_init
 from pybiliapi import BiliApi
 from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from threading import Thread
 from queue import Queue
 from common import get_valid, test_archive_rank_by_partion, test_video_stat
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
-    str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day
+    str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day, logging_init
 import math
 import time
 import datetime

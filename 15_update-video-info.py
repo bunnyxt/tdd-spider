@@ -1,12 +1,11 @@
 from db import DBOperation, Session
 from service import Service
 from serverchan import sc_send
-from util import get_ts_s, ts_s_to_str, get_week_day
+from util import logging_init, get_ts_s, ts_s_to_str, get_week_day
 from timer import Timer
 from queue import Queue
 from typing import List
 from job import UpdateVideoJob, JobStat
-from logutils import logging_init
 import logging
 
 logger = logging.getLogger('15')

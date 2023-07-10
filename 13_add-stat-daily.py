@@ -1,6 +1,5 @@
 import logging
-from logutils import logging_init
-from util import get_ts_s, get_current_line_no
+from util import logging_init, get_ts_s, get_current_line_no
 from db import Session, DBOperation, TddStatDaily
 from serverchan import sc_send_critical
 

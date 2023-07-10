@@ -1,11 +1,10 @@
 from serverchan import sc_send
 from task import add_video, commit_video_record_via_archive_stat
 import math
-from util import get_ts_s, ts_s_to_str, format_ts_s
+from util import get_ts_s, ts_s_to_str, format_ts_s, logging_init
 from service import Service
 from collections import defaultdict
 from db import Session
-from logutils import logging_init
 import logging
 
 logger = logging.getLogger('01')

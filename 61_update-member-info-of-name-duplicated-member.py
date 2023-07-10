@@ -1,11 +1,10 @@
 import logging
-from logutils import logging_init
 from db import Session
 from service import Service
 from task import update_member
 from common.error import TddError
 from collections import defaultdict
-from util import get_ts_s, ts_s_to_str, format_ts_s, format_ts_ms, get_ts_ms
+from util import logging_init, get_ts_s, ts_s_to_str, format_ts_s, format_ts_ms, get_ts_ms
 from serverchan import sc_send
 
 logger = logging.getLogger('61')

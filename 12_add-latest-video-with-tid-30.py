@@ -2,8 +2,7 @@ from service import Service
 from serverchan import sc_send
 from timer import Timer
 from job import AddLatestVideoJob
-from util import get_ts_s, ts_s_to_str, format_ts_s
-from logutils import logging_init
+from util import get_ts_s, ts_s_to_str, logging_init
 import logging
 
 logger = logging.getLogger('12')

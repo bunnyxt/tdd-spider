@@ -3,9 +3,8 @@ from timer import Timer
 from job import AddSprintVideoRecordJob
 from service import Service
 from serverchan import sc_send
-from util import get_ts_s, ts_s_to_str
+from util import logging_init, get_ts_s, ts_s_to_str
 from queue import Queue
-from logutils import logging_init
 import logging
 
 logger = logging.getLogger('71')

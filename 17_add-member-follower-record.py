@@ -1,13 +1,11 @@
 from db import DBOperation, Session
 from service import Service
-from util import get_ts_s, ts_s_to_str
+from util import logging_init, get_ts_s, ts_s_to_str
 from serverchan import sc_send
 from queue import Queue
 from typing import List
 from timer import Timer
-from util import format_ts_s
 from job import AddMemberFollowerRecordJob, JobStat
-from logutils import logging_init
 import logging
 
 logger = logging.getLogger('17')

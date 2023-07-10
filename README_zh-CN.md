@@ -105,10 +105,6 @@ nohup python -u <script-name.py> >/dev/null 2>&1 &
 
 ### db
 
-### logger
-
-### logutils
-
 ### pybiliapi
 
 ### serverchan
