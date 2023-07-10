@@ -1,12 +1,13 @@
 import math
 import re
+import inspect
 import logging
 from typing import Optional
 
 logger = logging.getLogger('util')
 
 __all__ = ['parse_pic_url', 'same_pic_url',
-           'is_all_zero_record', 'print_obj', 'null_or_str',
+           'is_all_zero_record', 'print_obj', 'get_current_line_no', 'null_or_str',
            'zk_calc']
 
 
@@ -47,6 +48,10 @@ def is_all_zero_record(record) -> bool:
 def print_obj(obj):
     for key in dir(obj):
         print(key, obj.__getattribute__(key))
+
+
+def get_current_line_no():
+    return inspect.currentframe().f_back.f_lineno
 
 
 def null_or_str(value: any) -> str:

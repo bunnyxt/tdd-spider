@@ -5,7 +5,7 @@ import logging
 
 logger = logging.getLogger('serverchan')
 
-__all__ = ['sc_send']
+__all__ = ['sc_send', 'sc_send_critical']
 
 http = urllib3.PoolManager()
 
@@ -35,3 +35,9 @@ def sc_send(text, desp=None):
         logger.warning('Exception occurred when send message %s. Detail: %s' % (message, e))
     finally:
         return sc_response
+
+
+def sc_send_critical(title, message, file_name, line_no):
+    desc = f'{message}\n\n' \
+           f'file: {file_name}, line: {line_no}'
+    sc_send('CRITICAL: %s' % title, desc)
