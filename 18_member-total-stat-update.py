@@ -1,8 +1,8 @@
 from logutils import logging_init
 from db import Session, TddMemberTotalStatRecord
-from util import get_ts_s, ts_s_to_str, format_ts_s
+from util import get_ts_s, ts_s_to_str, get_current_line_no
 from timer import Timer
-from serverchan import sc_send
+from serverchan import sc_send, sc_send_critical
 import logging
 
 logger = logging.getLogger('18')
@@ -60,7 +60,10 @@ def member_total_stat_update():
             session.commit()
             logger.info(f'{cnt} / {mid_dict_len} added')
     except Exception as e:
-        logger.critical(f'Exception occurred when updating member total stat! error: {e}')
+        critical_title = 'Exception occurred when updating member total stat!'
+        critical_message = f'error: {e}'
+        logger.critical(f'{critical_title} {critical_message}')
+        sc_send_critical(critical_title, critical_message, __file__, get_current_line_no())
         session.rollback()
         session.close()
         exit(1)

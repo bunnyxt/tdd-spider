@@ -2,8 +2,8 @@ import time
 from db import Session
 import datetime
 from timer import Timer
-from serverchan import sc_send
-from util import get_ts_s, ts_s_to_str
+from serverchan import sc_send, sc_send_critical
+from util import get_ts_s, ts_s_to_str, get_current_line_no
 import math
 from logutils import logging_init
 import logging
@@ -116,7 +116,10 @@ def add_sprint_daily():
                     f'newvids_str: {newvids_str}, millvids_str: {millvids_str}, '
                     f'view_incr_total: {view_incr_total}, view_incr_incr: {view_incr_incr}')
     except Exception as e:
-        logger.critical(f'Exception occurred when updating member total stat! error: {e}')
+        critical_title = f'Exception occurred when updating member total stat!'
+        critical_message = f'error: {e}'
+        logger.critical(f'{critical_title} {critical_message}')
+        sc_send_critical(critical_title, critical_message, __file__, get_current_line_no())
         session.rollback()
         session.close()
         exit(1)

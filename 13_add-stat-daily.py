@@ -1,7 +1,8 @@
 import logging
 from logutils import logging_init
-from util import get_ts_s
+from util import get_ts_s, get_current_line_no
 from db import Session, DBOperation, TddStatDaily
+from serverchan import sc_send_critical
 
 logger = logging.getLogger('13')
 
@@ -26,7 +27,10 @@ def add_stat_daily():
 
         logger.info(f'Finish add stat daily! {new_stat_daily}')
     except Exception as e:
-        logger.critical(f'Exception occurred when adding stat daily! error: {e}')
+        critical_title = 'Exception occurred when adding stat daily!'
+        critical_message = f'error: {e}'
+        logger.critical(f'{critical_title} {critical_message}')
+        sc_send_critical(critical_title, critical_message, __file__, get_current_line_no())
         session.rollback()
         session.close()
         exit(1)
