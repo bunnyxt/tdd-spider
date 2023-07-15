@@ -80,7 +80,8 @@ def add_sprint_daily():
             pday = math.floor((added - created) / (24 * 60 * 60))
 
             # calc lday
-            lday = math.floor((1000000 - end_view) / view_incr)
+            # if no view incr, lday is 9999999
+            lday = math.floor((1000000 - end_view) / view_incr) if view_incr != 0 else 9999999
 
             session.execute(f'insert into tdd_sprint_daily_record (added, `date`, aid, `view`, viewincr, pday, lday) '
                             f'values ({added}, "{date}", {aid}, {end_view}, {view_incr}, {pday}, {lday})')
