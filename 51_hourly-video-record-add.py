@@ -87,23 +87,17 @@ class AwesomeApiFetcher(Thread):
 
 
 class AwesomeApiRecordParser(Thread):
-    def __init__(self, name, content_queue, record_queue, eof_total_num):
+    def __init__(self, name, content_queue, record_queue):
         super().__init__()
         self.name = name
         self.content_queue = content_queue
         self.record_queue = record_queue
-        self.eof_total_num = eof_total_num  # TODO use better way to stop thread
         self.logger = logging.getLogger('AwesomeApiRecordParser')
 
     def run(self):
         self.logger.info('parser %s, start' % self.name)
-        eof_num = 0
-        while eof_num < self.eof_total_num:
+        while not self.content_queue.empty():
             content = self.content_queue.get()
-            if isinstance(content, EndOfFetcher):
-                eof_num += 1
-                self.logger.info('parser %s, get %d eof' % (self.name, eof_num))
-                continue
             added = content['added']
             page_obj = content['content']
             for arch in page_obj['data']['archives']:
@@ -312,7 +306,7 @@ class C30PipelineRunner(Thread):
 
         # create parser
         record_queue = Queue()  # store parsed record
-        parser = AwesomeApiRecordParser('parser_0', content_queue, record_queue, fetcher_total_num)
+        parser = AwesomeApiRecordParser('parser_0', content_queue, record_queue)
         self.logger.info('awesome api record parser created')
 
         # start fetcher
