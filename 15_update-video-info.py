@@ -1,20 +1,22 @@
 from db import DBOperation, Session
 from service import Service
-from serverchan import sc_send
-from util import logging_init, get_ts_s, ts_s_to_str, get_week_day
+from serverchan import sc_send_summary
+from util import logging_init, get_week_day
 from timer import Timer
 from queue import Queue
 from typing import List
 from job import UpdateVideoJob, JobStat
 import logging
 
-logger = logging.getLogger('15')
+script_id = '15'
+script_name = 'update-video-info'
+logger = logging.getLogger(script_id)
 
 
 def update_video_info():
-    logger.info('Now start update video info...')
+    logger.info(f'Now start {script_id} - {script_name}...')
     timer = Timer()
-    timer.start()  # start timer
+    timer.start()
 
     session = Session()
     service = Service(mode='worker')
@@ -65,22 +67,15 @@ def update_video_info():
     # merge statistics counters
     job_stat_merged = sum(job_stat_list, JobStat())
 
-    timer.stop()  # stop timer
-
-    # make summary
-    summary = \
-        '# update video info done!\n\n' \
-        f'{timer.get_summary()}\n\n' \
-        f'{job_stat_merged.get_summary()}\n\n' \
-        f'by bunnyxt, {ts_s_to_str(get_ts_s())}'
-
-    logger.info('Finish update video info!')
-    logger.warning(summary)
-
-    # send sc
-    sc_send('Finish update video info!', summary)
-
     session.close()
+
+    timer.stop()
+
+    # summary
+    logger.info(f'Finish {script_id} - {script_name}!')
+    logger.info(timer.get_summary())
+    logger.info(job_stat_merged.get_summary())
+    sc_send_summary(script_id, script_name, timer, job_stat_merged)
 
 
 def main():
@@ -88,5 +83,5 @@ def main():
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix='15')
+    logging_init(file_prefix=script_id)
     main()
