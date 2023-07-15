@@ -29,7 +29,7 @@ class AddSprintVideoRecordJob(Job):
                 self.logger.error(f'Fail to add sprint video record. aid: {aid}, error: {e}')
                 self.stat.condition['exception'] += 1
             else:
-                self.logger.debug(f'New sprint video record {new_sprint_video_record} added. aid: {aid}')
+                self.logger.info(f'New sprint video record {new_sprint_video_record} added. aid: {aid}')
                 self.stat.condition['success'] += 1
 
                 # check million
