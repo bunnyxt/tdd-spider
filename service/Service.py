@@ -4,15 +4,13 @@ import time
 import random
 from collections import namedtuple
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, Literal
 from .error import ResponseError, FormatError, CodeError
 import logging
 
 logger = logging.getLogger('Service')
 
-# TODO: use typing.Literal in python 3.8+
-# RequestMode = Literal['direct', 'worker', 'proxy']
-RequestMode = str
+RequestMode = Literal['direct', 'worker', 'proxy']
 VideoStat = namedtuple('VideoStat',
                        ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
                         'dislike', 'vt', 'vv'])
