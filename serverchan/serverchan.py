@@ -1,8 +1,9 @@
-import urllib3
+import requests
 import json
 from conf import get_sckey
 from timer import Timer
 from job import JobStat
+from typing import Optional
 from util import get_ts_s_str
 import logging
 
@@ -10,11 +11,11 @@ logger = logging.getLogger('serverchan')
 
 __all__ = ['sc_send', 'sc_send_summary', 'sc_send_critical']
 
-http = urllib3.PoolManager()
+send_url = f'http://sc.ftqq.com/{get_sckey()}.send'
 
 
-def sc_send(text, desp=None):
-    sc_response = None
+def sc_send(text: str, desp: Optional[str] = None):
+    response = None
 
     # assemble message
     message = {'text': text}
@@ -22,22 +23,22 @@ def sc_send(text, desp=None):
         message['desp'] = desp
 
     try:
-        sckey = get_sckey()
-        url = 'http://sc.ftqq.com/%s.send' % sckey
-        response = http.request('POST', url, body=json.dumps(message), headers={'Content-Type': 'application/json'})
-        if response.status == 200:
-            html = response.data.decode()
-            sc_response = json.loads(html)
-            if type(sc_response) == dict \
-                    and 'data' in sc_response.keys() and type(sc_response['data']) == dict \
-                    and 'errno' in sc_response['data'].keys() and sc_response['data']['errno'] == 0:
-                logger.debug('Successfully send message %s. sc_response: %s' % (message, sc_response))
-            else:
-                logger.warning('Fail to send message %s. sc_response: %s' % (message, sc_response))
+        # send message
+        r = requests.post(send_url, headers={'Content-Type': 'application/json'}, data=json.dumps(message))
+        r.raise_for_status()
+
+        # check response
+        response = r.json()
+        if type(response) == dict \
+                and 'data' in response.keys() and type(response['data']) == dict \
+                and 'errno' in response['data'].keys() and response['data']['errno'] == 0:
+            logger.debug(f'SC send successfully! message: {message}, response: {response}')
+        else:
+            logger.warning(f'SC send failed! Unexpected response got. message: {message}, response: {response}')
     except Exception as e:
-        logger.warning('Exception occurred when send message %s. Detail: %s' % (message, e))
+        logger.warning(f'SC send failed! Exception caught. message: {message}, exception: {e}')
     finally:
-        return sc_response
+        return response
 
 
 def sc_send_summary(script_id: str, script_name: str, timer: Timer, stat: JobStat):
