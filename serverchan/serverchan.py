@@ -42,10 +42,12 @@ def sc_send(text, desp=None):
 
 def sc_send_summary(script_id: str, script_name: str, timer: Timer, stat: JobStat):
     title = f'SUMMARY: {script_id} - {script_name})'
-    desc = f'# {script_id} - {script_name} done!\n\n' \
-           f'{timer.get_summary()}\n\n' \
-           f'{stat.get_summary()}\n\n' \
-           f'by bunnyxt, {get_ts_s_str()}'
+    desc = '\n\n'.join([
+        f'# {script_id} - {script_name} done!',
+        timer.get_summary(),
+        stat.get_summary('\n\n'),
+        f'by bunnyxt, {get_ts_s_str()}'
+    ])
     sc_send(title, desc)
 
 
