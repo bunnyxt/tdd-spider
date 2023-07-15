@@ -36,7 +36,7 @@ class UpdateVideoJob(Job):
 
             timer.stop()
             self.logger.debug(f'Finish update video info. '
-                              f'bvid: {bvid}, cost: {format_ts_ms(timer.get_duration_ms())}')
+                              f'bvid: {bvid}, duration: {format_ts_ms(timer.get_duration_ms())}')
             self.stat.total_count += 1
             self.stat.total_duration_ms += timer.get_duration_ms()
 
