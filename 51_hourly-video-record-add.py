@@ -1,5 +1,5 @@
 from pybiliapi import BiliApi
-from db import Session, DBOperation, TddVideoRecordAbnormalChange
+from db import Session, DBOperation, TddVideoRecordAbnormalChange, TddVideoRecord
 from threading import Thread
 from queue import Queue
 from common import get_valid, test_video_stat
@@ -15,7 +15,7 @@ from serverchan import sc_send
 from collections import namedtuple, defaultdict, Counter
 from common.error import TddError
 from service import Service, CodeError, ArchiveRankByPartionArchive
-from job import GetPartionArchiveJob, JobStat
+from job import GetPartionArchiveJob, JobStat, AddVideoRecordJob
 from typing import List, Tuple
 # from proxypool import get_proxy_url
 from task import add_video_record, add_video_record_via_video_view, update_video, add_video, AlreadyExistError
@@ -461,57 +461,70 @@ class C0PipelineRunner(Thread):
         # get need insert aid list
         session = Session()
         need_insert_aid_list = get_need_insert_aid_list(self.time_label, False, session)
+        session.close()
         self.logger.info('%d aid(s) need insert for time label %s' % (len(need_insert_aid_list), self.time_label))
 
-        # fetch and insert records
-        # TODO use multi thread to accelerate
-        self.logger.info('Now start fetching and inserting records...')
-        # bapi_with_proxy = BiliApi(proxy_pool_url=get_proxy_pool_url())
         service = Service(mode='worker')
-        fail_aids = []
-        new_video_record_list = []
-        for idx, aid in enumerate(need_insert_aid_list, 1):
-            # add video record
-            try:
-                # new_video_record = add_video_record(aid, service, session)
-                new_video_record = add_video_record_via_video_view(aid, service, session)
-                new_video_record_list.append(new_video_record)
-                self.logger.debug('Add new record %s' % new_video_record)
-            except CodeError as e:
-                self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e))
-                try:
-                    tdd_video_logs = update_video(aid, service, session)
-                except TddError as e2:
-                    self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-                except Exception as e2:
-                    self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-                else:
-                    for log in tdd_video_logs:
-                        self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
-                                         % (log.aid, log.attr, log.oldval, log.newval))
-                fail_aids.append(aid)
-            except TddError as e:
-                self.logger.warning('Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e))
-                fail_aids.append(aid)
-            if idx % 10 == 0:
-                self.logger.info('%d / %d done' % (idx, len(need_insert_aid_list)))
-        self.logger.info('%d / %d done' % (len(need_insert_aid_list), len(need_insert_aid_list)))
-        self.logger.info('Finish fetching and inserting records! %d records added, %d aids fail'
-                         % (len(new_video_record_list), len(fail_aids)))
-        self.logger.warning('fail_aids: %r' % fail_aids)
 
-        record_list = [
-            # 'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'
-            Record(r.added, r.aid, a2b(r.aid), r.view, r.danmaku, r.reply, r.favorite, r.coin, r.share, r.like)
-            # TODO: use following record new
-            # RecordNew(
-            #     r.added, r.aid, a2b(r.aid), r.view, r.danmaku, r.reply, r.favorite, r.coin, r.share, r.like,
-            #     r.dislike, r.now_rank, r.his_rank, r.vt, r.vv)
-            for r in new_video_record_list
-        ]
+        # put aid into queue
+        aid_queue: Queue[int] = Queue()
+        for aid in need_insert_aid_list:
+            aid_queue.put(aid)
+
+        # create video record queue
+        video_record_queue: Queue[TddVideoRecord] = Queue()
+
+        # create jobs
+        job_num = 10
+        job_list = []
+        for i in range(job_num):
+            job_list.append(AddVideoRecordJob(f'job_{i}', aid_queue, video_record_queue, service))
+
+        # start jobs
+        for job in job_list:
+            job.start()
+        logger.info(f'{job_num} job(s) started.')
+
+        # wait for jobs
+        for job in job_list:
+            job.join()
+
+        # collect statistics
+        job_stat_list: List[JobStat] = []
+        for job in job_list:
+            job_stat_list.append(job.stat)
+
+        # merge statistics counters
+        job_stat_merged = sum(job_stat_list, JobStat())
+
+        self.logger.info(f'Finish add need insert aid list!')
+        self.logger.info(job_stat_merged.get_summary())
+
+        # parse tdd video record to record
+        record_list: List[RecordNew] = []
+        while not video_record_queue.empty():
+            video_record = video_record_queue.get()
+            record_list.append(RecordNew(
+                added=video_record.added,
+                aid=video_record.aid,
+                bvid=a2b(video_record.aid),
+                view=video_record.view,
+                danmaku=video_record.danmaku,
+                reply=video_record.reply,
+                favorite=video_record.favorite,
+                coin=video_record.coin,
+                share=video_record.share,
+                like=video_record.like,
+                dislike=video_record.dislike,
+                now_rank=video_record.now_rank,
+                his_rank=video_record.his_rank,
+                vt=video_record.vt,
+                vv=video_record.vv,
+            ))
+        self.logger.info('%d record(s) parsed' % len(record_list))
+
         self.logger.info('c0 video pipeline done! return %d records' % len(record_list))
         self.return_record_list = record_list
-        session.close()
 
 
 # TODO: change to record new
