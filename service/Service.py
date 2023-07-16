@@ -2,52 +2,23 @@ import requests
 import json
 import time
 import random
-from collections import namedtuple
 from pathlib import Path
 from typing import Optional, Callable, Literal
 from .error import ResponseError, FormatError, CodeError
+from .response import \
+    VideoStat, \
+    VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, \
+    VideoTag, VideoTags, \
+    MemberSpace, \
+    MemberRelation, \
+    ArchiveRankByPartionPage, ArchiveRankByPartionArchiveStat, ArchiveRankByPartionArchive, ArchiveRankByPartion
 import logging
 
 logger = logging.getLogger('Service')
 
 RequestMode = Literal['direct', 'worker', 'proxy']
-VideoStat = namedtuple('VideoStat',
-                       ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
-                        'dislike', 'vt', 'vv'])
-VideoView = namedtuple('VideoView',
-                       ['bvid', 'aid', 'videos', 'tid', 'tname', 'copyright', 'pic', 'title', 'pubdate', 'ctime',
-                        'desc', 'state', 'duration', 'owner', 'stat',
-                        # optional
-                        'attribute', 'forward', 'staff'])
-VideoViewOwner = namedtuple('VideoViewOwner', ['mid', 'name', 'face'])
-VideoViewStat = namedtuple('VideoViewStat',
-                           ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank',
-                            'like', 'dislike',
-                            # optional
-                            'vt', 'vv'])
-VideoViewStaffItem = namedtuple('VideoViewStaffItem', ['mid', 'title', 'name', 'face'])
-VideoTags = namedtuple('VideoTags', ['tags'])
-VideoTag = namedtuple('VideoTag', ['tag_id', 'tag_name'])
-MemberSpace = namedtuple('MemberSpace', ['mid', 'name', 'sex', 'face', 'sign'])
-MemberRelation = namedtuple('MemberRelation', ['mid', 'following', 'follower'])
-ArchiveRankByPartion = namedtuple('ArchiveRankByPartion', ['archives', 'page'])
-ArchiveRankByPartionArchive = namedtuple('ArchiveRankByPartionArchive',
-                                         ['aid', 'videos', 'tid', 'tname', 'copyright', 'pic', 'title', 'stat', 'bvid',
-                                          'description', 'mid'])
-ArchiveRankByPartionArchiveStat = namedtuple('ArchiveRankByPartionArchiveStat',
-                                             ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share',
-                                              'now_rank', 'his_rank', 'like', 'dislike', 'vt', 'vv'])
-ArchiveRankByPartionPage = namedtuple('ArchiveRankByPartionPage', ['count', 'num', 'size'])
 
-__all__ = ['Service',
-           'RequestMode',
-           'VideoStat',
-           'VideoView', 'VideoViewOwner', 'VideoViewStat', 'VideoViewStaffItem',
-           'VideoTags', 'VideoTag',
-           'MemberSpace',
-           'MemberRelation',
-           'ArchiveRankByPartion', 'ArchiveRankByPartionArchive', 'ArchiveRankByPartionArchiveStat',
-           'ArchiveRankByPartionPage']
+__all__ = ['Service', 'RequestMode']
 
 
 class Service:
