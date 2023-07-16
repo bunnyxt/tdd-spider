@@ -15,7 +15,8 @@ __all__ = ['add_video_record', 'add_video_record_via_video_view', 'commit_video_
            'add_sprint_video_record_via_video_view',
            'add_video', 'update_video',
            'add_member', 'update_member', 'commit_staff', 'add_member_follower_record',
-           'get_video_tags_str']
+           'get_video_tags_str',
+           'get_archive_partion_count']
 
 
 def add_video_record(aid: int, service: Service, session: Session) -> TddVideoRecord:
@@ -602,3 +603,16 @@ def get_video_tags_str(aid: int, service: Service) -> str:
         tags_str += ';'
 
     return tags_str
+
+
+def get_archive_partion_count(tid: int, service: Service) -> int:
+    # get archive count
+    try:
+        archive_rank_by_partion = service.get_archive_rank_by_partion({'tid': tid, 'pn': 1, 'ps': 50})
+    except ServiceError as e:
+        raise e
+
+    # get archive partion count
+    archive_partion_count = archive_rank_by_partion.page.count
+
+    return archive_partion_count
