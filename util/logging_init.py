@@ -10,7 +10,19 @@ if not os.path.exists(LOG_DIR):
     os.mkdir(LOG_DIR)
 
 
+class UnescapeFormatter(logging.Formatter):
+    """
+    Unescape escaped character for logging. For example, print '\n' as '\\n'.
+    """
+
+    def format(self, record):
+        original = logging.Formatter.format(self, record)
+        escaped = original.encode('unicode_escape').decode()
+        return escaped
+
+
 def logging_init(format=DEFAULT_LOG_FORMAT,
+                 unescape=True,
                  console_handler_enable=True, console_handler_level=logging.INFO,
                  file_prefix='default', file_handler_levels=(logging.INFO, logging.WARNING)):
     handlers = []
@@ -22,9 +34,13 @@ def logging_init(format=DEFAULT_LOG_FORMAT,
 
     for level in file_handler_levels:
         level_name = logging.getLevelName(level)
-        file_handler = logging.FileHandler(filename=os.path.join(LOG_DIR, '%s_%s.log' % (file_prefix, level_name)))
+        file_handler = logging.FileHandler(filename=os.path.join(LOG_DIR, f'{file_prefix}_{level_name}.log'))
         file_handler.setLevel(level)
         handlers.append(file_handler)
+
+    if unescape:
+        for handler in handlers:
+            handler.setFormatter(UnescapeFormatter(format))
 
     logging.basicConfig(
         format=format,
