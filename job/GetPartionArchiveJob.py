@@ -3,15 +3,15 @@ from db import Session
 from service import Service, ArchiveRankByPartionArchive
 from queue import Queue
 from timer import Timer
-import math
-from util import format_ts_ms
+from typing import Tuple
+from util import format_ts_ms, get_ts_s
 
 __all__ = ['GetPartionArchiveJob']
 
 
 class GetPartionArchiveJob(Job):
     def __init__(self, name: str, tid: int, page_num_queue: Queue[int],
-                 archive_video_queue: Queue[ArchiveRankByPartionArchive], service: Service):
+                 archive_video_queue: Queue[Tuple[int, ArchiveRankByPartionArchive]], service: Service):
         super().__init__(name)
         self.tid = tid
         self.page_num_queue = page_num_queue
@@ -35,9 +35,10 @@ class GetPartionArchiveJob(Job):
                                   f'tid: {self.tid}, pn: {page_num}, ps: 50, error: {e}')
                 self.stat.condition['get_archive_exception'] += 1
             else:
+                added = get_ts_s()
                 for archive in archive_rank_by_partion.archives:
                     # put archive video
-                    self.archive_video_queue.put(archive)
+                    self.archive_video_queue.put((added, archive))
                 page_archive_len = len(archive_rank_by_partion.archives)
                 if page_archive_len < 50:
                     self.logger.warning(f'Not fully loaded page found. '
