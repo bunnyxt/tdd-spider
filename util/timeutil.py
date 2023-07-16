@@ -73,9 +73,9 @@ def ts_ms_to_str(ts_ms: int) -> str:
     """
     Convert timestamp (milliseconds) to string.
     :param ts_ms: timestamp (milliseconds)
-    :return: time string, format: "%Y-%m-%d %H:%M:%S" + "." + "%ms"
+    :return: time string, format: "%Y-%m-%d %H:%M:%S" + "," + "%ms"
     """
-    return f'{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts_ms // 1000))}.{ts_ms % 1000}'
+    return f'{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts_ms // 1000))},{str(ts_ms % 1000).zfill(3)}'
 
 
 def format_ts_ms(ts_ms: int) -> str:
