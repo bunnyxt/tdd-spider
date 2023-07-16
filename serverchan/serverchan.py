@@ -52,7 +52,11 @@ def sc_send_summary(script_fullname: str, timer: Timer, stat: JobStat):
     sc_send(title, desc)
 
 
-def sc_send_critical(title, message, file_name, line_no):
-    desc = f'{message}\n\n' \
-           f'file: {file_name}, line: {line_no}'
-    sc_send('CRITICAL: %s' % title, desc)
+def sc_send_critical(script_fullname: str, message: str, file_name: str, line_no: str):
+    title = f'CRITICAL: {script_fullname}'
+    desc = '\n\n'.join([
+        message,
+        f'file: {file_name}, line: {line_no}',
+        f'by bunnyxt, {get_ts_s_str()}'
+    ])
+    sc_send(title, desc)

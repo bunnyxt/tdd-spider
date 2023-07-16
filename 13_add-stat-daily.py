@@ -33,10 +33,9 @@ def add_stat_daily():
 
         logger.info(f'Add stat daily done! new_stat_daily: {new_stat_daily}')
     except Exception as e:
-        critical_title = 'Exception occurred when adding stat daily!'
-        critical_message = f'error: {e}'
-        logger.critical(f'{critical_title} {critical_message}')
-        sc_send_critical(critical_title, critical_message, __file__, get_current_line_no())
+        message = f'Exception occurred when adding stat daily! error: {e}'
+        logger.critical(message)
+        sc_send_critical(script_fullname, message, __file__, get_current_line_no())
         session.rollback()
         session.close()
         exit(1)

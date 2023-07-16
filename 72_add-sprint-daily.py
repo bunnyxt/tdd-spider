@@ -119,10 +119,9 @@ def add_sprint_daily():
                     f'newvids_str: {newvids_str}, millvids_str: {millvids_str}, '
                     f'view_incr_total: {view_incr_total}, view_incr_incr: {view_incr_incr}')
     except Exception as e:
-        critical_title = f'Exception occurred when updating member total stat!'
-        critical_message = f'error: {e}'
-        logger.critical(f'{critical_title} {critical_message}')
-        sc_send_critical(critical_title, critical_message, __file__, get_current_line_no())
+        message = f'Exception occurred when updating member total stat! error: {e}'
+        logger.critical(message)
+        sc_send_critical(script_fullname, message, __file__, get_current_line_no())
         session.rollback()
         session.close()
         exit(1)
