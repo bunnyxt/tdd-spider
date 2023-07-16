@@ -2,7 +2,7 @@ from pybiliapi import BiliApi
 from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from threading import Thread
 from queue import Queue
-from common import get_valid, test_archive_rank_by_partion, test_video_stat
+from common import get_valid, test_video_stat
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
     str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day, logging_init, fullname
 import math
@@ -14,7 +14,9 @@ from conf import get_proxy_pool_url
 from serverchan import sc_send
 from collections import namedtuple, defaultdict, Counter
 from common.error import TddError
-from service import Service, CodeError
+from service import Service, CodeError, ArchiveRankByPartionArchive
+from job import GetPartionArchiveJob, JobStat
+from typing import List, Tuple
 # from proxypool import get_proxy_url
 from task import add_video_record, add_video_record_via_video_view, update_video, add_video, AlreadyExistError
 import logging
@@ -49,83 +51,6 @@ def get_need_insert_aid_list(time_label, is_tid_30, session):
         aid_list += DBOperation.query_freq_update_video_aids(1, is_tid_30, session)  # freq = 1
 
     return aid_list
-
-
-class EndOfFetcher:
-    def __init__(self):
-        pass
-
-    def __repr__(self):
-        return "<EndOfFetcher>"
-
-
-class AwesomeApiFetcher(Thread):
-    def __init__(self, name, page_num_queue, content_queue, bapi=None):
-        super().__init__()
-        self.name = name
-        self.page_num_queue = page_num_queue
-        self.content_queue = content_queue
-        self.bapi = bapi if bapi is not None else BiliApi()
-        self.logger = logging.getLogger('AwesomeApiFetcher')
-
-    def run(self):
-        self.logger.info('fetcher %s, start' % self.name)
-        while not self.page_num_queue.empty():
-            page_num = self.page_num_queue.get()
-            page_obj = get_valid(self.bapi.get_archive_rank_by_partion, (30, page_num, 50),
-                                 test_archive_rank_by_partion)
-            added = get_ts_s()
-            if page_obj is None:
-                self.logger.warning('fetcher %s, pn %d fail' % (self.name, page_num))
-                self.page_num_queue.put(page_num)
-            else:
-                self.logger.debug('fetcher %s, pn %d success' % (self.name, page_num))
-                page_obj_videos = len(page_obj['data']['archives'])
-                if page_obj_videos < 50:
-                    self.logger.warning(
-                        'fetcher %s, pn %d, only %d videos found' % (self.name, page_num, page_obj_videos))
-                self.content_queue.put({'added': added, 'content': page_obj})
-        self.content_queue.put(EndOfFetcher())
-        self.logger.info('fetcher %s, end' % self.name)
-
-
-class AwesomeApiRecordParser(Thread):
-    def __init__(self, name, content_queue, record_queue, eof_total_num):
-        super().__init__()
-        self.name = name
-        self.content_queue = content_queue
-        self.record_queue = record_queue
-        self.eof_total_num = eof_total_num  # TODO use better way to stop thread
-        self.logger = logging.getLogger('AwesomeApiRecordParser')
-
-    def run(self):
-        self.logger.info('parser %s, start' % self.name)
-        eof_num = 0
-        while eof_num < self.eof_total_num:
-            content = self.content_queue.get()
-            if isinstance(content, EndOfFetcher):
-                eof_num += 1
-                self.logger.info('parser %s, get %d eof' % (self.name, eof_num))
-                continue
-            added = content['added']
-            page_obj = content['content']
-            for arch in page_obj['data']['archives']:
-                arch_stat = arch['stat']
-                # TODO: remove old record
-                # record = Record(
-                #     added, arch['aid'], arch['bvid'].lstrip('BV'),
-                #     -1 if arch_stat['view'] == '--' else arch_stat['view'], arch_stat['danmaku'], arch_stat['reply'],
-                #     arch_stat['favorite'], arch_stat['coin'], arch_stat['share'], arch_stat['like']
-                # )
-                record = RecordNew(
-                    added, arch['aid'], arch['bvid'].lstrip('BV'),
-                    -1 if arch_stat['view'] == '--' else arch_stat['view'], arch_stat['danmaku'], arch_stat['reply'],
-                    arch_stat['favorite'], arch_stat['coin'], arch_stat['share'], arch_stat['like'],
-                    arch_stat.get('dislike', None), arch_stat.get('now_rank', None), arch_stat.get('his_rank', None),
-                    arch_stat.get('vt', None), arch_stat.get('vv', None)
-                )
-                self.record_queue.put(record)
-        self.logger.info('parser %s, end' % self.name)
 
 
 class C30NeedAddButNotFoundAidsChecker(Thread):
@@ -290,49 +215,78 @@ class C30PipelineRunner(Thread):
     def run(self):
         self.logger.info('c30 video pipeline start')
 
-        bapi = BiliApi()
+        service = Service(mode='worker')
 
-        # get page total
-        obj = get_valid(bapi.get_archive_rank_by_partion, (30, 1, 50), test_archive_rank_by_partion)
-        if obj is None:
-            raise RuntimeError('Fail to get page total via awesome api!')
-        page_total = math.ceil(obj['data']['page']['count'] / 50)
-        self.logger.info('%d page(s) found' % page_total)
+        # get archive rank by partion
+        try:
+            archive_rank_by_partion = service.get_archive_rank_by_partion(
+                {'tid': 30, 'pn': 1, 'ps': 50}, retry=20)  # retry more times to make sure get archive count
+        except Exception as e:
+            self.logger.error(f'Fail to get archive rank by partion for calculating page num total. '
+                              f'tid: {50}, pn: 1, ps: 50, error: {e}')
+            return
 
-        # put page num into page_num_queue
-        page_num_queue = Queue()  # store pn for awesome api fetcher to consume
-        for pn in range(1, page_total + 1):
-            page_num_queue.put(pn)
-        self.logger.info('%d page(s) put in page_num_queue' % page_num_queue.qsize())
+        # calculate page num total
+        page_num_total = math.ceil(archive_rank_by_partion.page.count / 50)
+        self.logger.info(f'Archive page num total calculated. page_num_total: {page_num_total}')
 
-        # create fetcher
-        content_queue = Queue()  # store api returned object (json parsed) content for parser consume
-        fetcher_total_num = 5  # can be modified, default 5 is reasonable
-        awesome_api_fetcher_list = []
-        for i in range(fetcher_total_num):
-            awesome_api_fetcher_list.append(AwesomeApiFetcher('fetcher_%d' % i, page_num_queue, content_queue))
-        self.logger.info('%d awesome api fetcher(s) created' % len(awesome_api_fetcher_list))
+        # put page num into queue
+        page_num_queue: Queue[int] = Queue()
+        for page_num in range(1, page_num_total + 1):
+            page_num_queue.put(page_num)
+        self.logger.info(f'{page_num_queue.qsize()} page nums put into queue.')
 
-        # create parser
-        record_queue = Queue()  # store parsed record
-        parser = AwesomeApiRecordParser('parser_0', content_queue, record_queue, fetcher_total_num)
-        self.logger.info('awesome api record parser created')
+        # create archive video queue
+        archive_video_queue: Queue[Tuple[int, ArchiveRankByPartionArchive]] = Queue()
 
-        # start fetcher
-        for fetcher in awesome_api_fetcher_list:
-            fetcher.start()
-        self.logger.info('%d awesome api fetcher(s) started' % len(awesome_api_fetcher_list))
+        # create jobs
+        get_partion_archive_job_num = 60
+        get_partion_archive_job_list = []
+        for i in range(get_partion_archive_job_num):
+            get_partion_archive_job_list.append(
+                GetPartionArchiveJob(f'job_{i}', 30, page_num_queue, archive_video_queue, service))
 
-        # start parser
-        parser.start()
-        self.logger.info('awesome api record parser started')
+        # start jobs
+        for job in get_partion_archive_job_list:
+            job.start()
+        logger.info(f'{get_partion_archive_job_num} job(s) started.')
 
-        # join fetcher and parser
-        for fetcher in awesome_api_fetcher_list:
-            fetcher.join()
-        parser.join()
+        # wait for jobs
+        for job in get_partion_archive_job_list:
+            job.join()
 
-        # finish multi thread fetching and parsing
+        # collect statistics
+        get_partion_archive_job_stat_list: List[JobStat] = []
+        for job in get_partion_archive_job_list:
+            get_partion_archive_job_stat_list.append(job.stat)
+
+        # merge statistics counters
+        get_partion_archive_job_stat_merged = sum(get_partion_archive_job_stat_list, JobStat())
+
+        self.logger.info(f'Finish get archive videos!')
+        self.logger.info(get_partion_archive_job_stat_merged.get_summary())
+
+        # parse archive video to record
+        record_queue: Queue[RecordNew] = Queue()
+        while not archive_video_queue.empty():
+            added, archive_video = archive_video_queue.get()
+            record_queue.put(RecordNew(
+                added=added,
+                aid=archive_video.aid,
+                bvid=archive_video.bvid.lstrip('BV'),
+                view=archive_video.stat.view,
+                danmaku=archive_video.stat.danmaku,
+                reply=archive_video.stat.reply,
+                favorite=archive_video.stat.favorite,
+                coin=archive_video.stat.coin,
+                share=archive_video.stat.share,
+                like=archive_video.stat.like,
+                dislike=archive_video.stat.dislike,
+                now_rank=archive_video.stat.now_rank,
+                his_rank=archive_video.stat.his_rank,
+                vt=archive_video.stat.vt,
+                vv=archive_video.stat.vv
+            ))
         self.logger.info('%d record(s) parsed' % record_queue.qsize())
 
         # remove duplicate and record queue -> aid record dict
