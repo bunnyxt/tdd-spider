@@ -46,8 +46,8 @@ class GetPartionArchiveJob(Job):
                     self.stat.condition['not_fully_loaded_page'] += 1
 
             timer.stop()
-            self.logger.info(f'Finish put archive video from archive page. '
-                             f'page_num: {page_num}, duration: {format_ts_ms(timer.get_duration_ms())}')
+            self.logger.debug(f'Finish put archive video from archive page. '
+                              f'page_num: {page_num}, duration: {format_ts_ms(timer.get_duration_ms())}')
             self.stat.total_count += 1
             self.stat.total_duration_ms += timer.get_duration_ms()
 
