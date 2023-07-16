@@ -1,20 +1,22 @@
 from db import DBOperation, Session
 from service import Service
-from util import logging_init, get_ts_s, ts_s_to_str
-from serverchan import sc_send
+from util import logging_init
+from serverchan import sc_send_summary
 from queue import Queue
 from typing import List
 from timer import Timer
 from job import AddMemberFollowerRecordJob, JobStat
 import logging
 
-logger = logging.getLogger('17')
+script_id = '17'
+script_name = 'add-member-follower-record'
+logger = logging.getLogger(script_id)
 
 
 def add_member_follower_record():
-    logger.info('Now start add member follower record...')
+    logger.info(f'Now start {script_id} - {script_name}...')
     timer = Timer()
-    timer.start()  # start timer
+    timer.start()
 
     session = Session()
     service = Service(mode='worker')
@@ -52,22 +54,15 @@ def add_member_follower_record():
     # merge statistics counters
     job_stat_merged = sum(job_stat_list, JobStat())
 
-    timer.stop()  # stop timer
-
-    # make summary
-    summary = \
-        '# add member follower record done!\n\n' \
-        f'{timer.get_summary()}\n\n' \
-        f'{job_stat_merged.get_summary()}\n\n' \
-        f'by bunnyxt, {ts_s_to_str(get_ts_s())}'
-
-    logger.info('Finish add member follower record!')
-    logger.warning(summary)
-
-    # send sc
-    sc_send('Finish add member follower record!', summary)
-
     session.close()
+
+    timer.stop()
+
+    # summary
+    logger.info(f'Finish {script_id} - {script_name}!')
+    logger.info(timer.get_summary())
+    logger.info(job_stat_merged.get_summary())
+    sc_send_summary(script_id, script_name, timer, job_stat_merged)
 
 
 def main():
@@ -75,5 +70,5 @@ def main():
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix='17')
+    logging_init(file_prefix=script_id)
     main()

@@ -1,16 +1,18 @@
 from db import Session, TddMemberTotalStatRecord
-from util import logging_init, get_ts_s, ts_s_to_str, get_current_line_no
+from util import logging_init, get_ts_s, get_current_line_no
 from timer import Timer
-from serverchan import sc_send, sc_send_critical
+from serverchan import sc_send_critical
 import logging
 
-logger = logging.getLogger('18')
+script_id = '18'
+script_name = 'member-total-stat-update'
+logger = logging.getLogger(script_id)
 
 
 def member_total_stat_update():
-    logger.info('Now start member total stat update...')
+    logger.info(f'Now start {script_id} - {script_name}...')
     timer = Timer()
-    timer.start()  # start timer
+    timer.start()
 
     session = Session()
 
@@ -67,23 +69,13 @@ def member_total_stat_update():
         session.close()
         exit(1)
 
-    timer.stop()  # stop timer
-
-    # make summary
-    summary = \
-        '# member total stat update done!\n\n' \
-        f'{timer.get_summary()}\n\n' \
-        f'result len: {result_len}\n\n' \
-        f'mid dict len: {mid_dict_len}\n\n' \
-        f'by bunnyxt, {ts_s_to_str(get_ts_s())}'
-
-    logger.info('Finish member total stat update!')
-    logger.warning(summary)
-
-    # send sc
-    sc_send('Finish member total stat update!', summary)
-
     session.close()
+
+    timer.stop()
+
+    # summary
+    logger.info(f'Finish {script_id} - {script_name}!')
+    logger.info(timer.get_summary())
 
 
 def main():
@@ -91,5 +83,5 @@ def main():
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix='18')
+    logging_init(file_prefix=script_id)
     main()

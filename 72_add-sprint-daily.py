@@ -7,13 +7,15 @@ from util import logging_init, get_ts_s, ts_s_to_str, get_current_line_no
 import math
 import logging
 
-logger = logging.getLogger('72')
+script_id = '72'
+script_name = 'add-sprint-daily'
+logger = logging.getLogger(script_id)
 
 
 def add_sprint_daily():
-    logger.info('Now start add sprint daily...')
+    logger.info(f'Now start {script_id} - {script_name}...')
     timer = Timer()
-    timer.start()  # start timer
+    timer.start()
 
     session = Session()
 
@@ -124,7 +126,9 @@ def add_sprint_daily():
         session.close()
         exit(1)
 
-    timer.stop()  # stop timer
+    session.close()
+
+    timer.stop()
 
     # make summary
     summary = \
@@ -141,13 +145,11 @@ def add_sprint_daily():
     # send sc
     sc_send('Finish add sprint daily!', summary)
 
-    session.close()
-
 
 def main():
     add_sprint_daily()
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix='72')
+    logging_init(file_prefix=script_id)
     main()

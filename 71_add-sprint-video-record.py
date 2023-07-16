@@ -2,18 +2,20 @@ from db import Session
 from timer import Timer
 from job import AddSprintVideoRecordJob
 from service import Service
-from serverchan import sc_send
-from util import logging_init, get_ts_s, ts_s_to_str
+from serverchan import sc_send_summary
+from util import logging_init
 from queue import Queue
 import logging
 
-logger = logging.getLogger('71')
+script_id = '71'
+script_name = 'add-sprint-video-record'
+logger = logging.getLogger(script_id)
 
 
 def add_sprint_video_record():
-    logger.info('Now start add sprint video record...')
+    logger.info(f'Now start {script_id} - {script_name}...')
     timer = Timer()
-    timer.start()  # start timer
+    timer.start()
 
     session = Session()
     service = Service(mode='worker')
@@ -41,25 +43,18 @@ def add_sprint_video_record():
     # collect statistic
     job_stat = job.stat
 
-    timer.stop()  # stop timer
+    session.close()
 
-    # make summary
-    summary = \
-        '# add sprint video record done!\n\n' \
-        f'{timer.get_summary()}\n\n' \
-        f'{job_stat.get_summary()}\n\n' \
-        f'by bunnyxt, {ts_s_to_str(get_ts_s())}'
+    timer.stop()
 
-    logger.info('Finish add sprint video record!')
-    logger.warning(summary)
-
-    # send sc
+    # summary
+    logger.info(f'Finish {script_id} - {script_name}!')
+    logger.info(timer.get_summary())
+    logger.info(job_stat.get_summary())
     if job_stat.condition['exception'] > 0 \
             or job_stat.condition['million_exception'] > 0 \
             or job_stat.condition['million_success'] > 0:
-        sc_send('Finish add sprint video record!', summary)
-
-    session.close()
+        sc_send_summary(script_id, script_name, timer, job_stat)
 
 
 def main():
@@ -67,5 +62,5 @@ def main():
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix='71')
+    logging_init(file_prefix=script_id)
     main()

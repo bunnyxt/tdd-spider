@@ -7,13 +7,15 @@ from collections import defaultdict
 from db import Session
 import logging
 
-logger = logging.getLogger('01')
+script_id = '01'
+script_name = 'add-all-videos-with-tid-30'
+logger = logging.getLogger(script_id)
 
 
 def add_all_video_with_tid_30():
     # NOTE: NOT TESTED
     # due to the bug of get_archive_rank_by_partion api, will miss about 20% video
-    logger.info('Now start add all video with tid 30...')
+    logger.info(f'Now start {script_id} - {script_name}...')
     start_ts = get_ts_s()  # get start ts
 
     session = Session()
@@ -94,5 +96,5 @@ def main():
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix='01')
+    logging_init(file_prefix=script_id)
     main()

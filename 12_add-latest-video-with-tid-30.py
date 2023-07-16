@@ -1,17 +1,19 @@
 from service import Service
-from serverchan import sc_send
+from serverchan import sc_send_summary
 from timer import Timer
 from job import AddLatestVideoJob
-from util import get_ts_s, ts_s_to_str, logging_init
+from util import logging_init
 import logging
 
-logger = logging.getLogger('12')
+script_id = '12'
+script_name = 'add-latest-video-with-tid-30'
+logger = logging.getLogger(script_id)
 
 
 def add_latest_video_with_tid_30():
-    logger.info('Now start add latest video with tid 30...')
+    logger.info(f'Now start {script_id} - {script_name}...')
     timer = Timer()
-    timer.start()  # start timer
+    timer.start()
 
     service = Service(mode='worker')
 
@@ -27,23 +29,16 @@ def add_latest_video_with_tid_30():
     # collect statistic
     job_stat = job.stat
 
-    timer.stop()  # stop timer
+    timer.stop()
 
-    # make summary
-    summary = \
-        '# add latest video with tid 30 done!\n\n' \
-        f'{timer.get_summary()}\n\n' \
-        f'{job_stat.get_summary()}\n\n' \
-        f'by bunnyxt, {ts_s_to_str(get_ts_s())}'
-
-    logger.info('Finish add latest video with tid 30!')
-    logger.warning(summary)
-
-    # send sc
+    # summary
+    logger.info(f'Finish {script_id} - {script_name}!')
+    logger.info(timer.get_summary())
+    logger.info(job_stat.get_summary())
     if job_stat.condition['get_archive_exception'] > 0 \
             or job_stat.condition['add_video_exception'] > 0 \
             or job_stat.condition['commit_video_record_exception'] > 0:
-        sc_send('Finish add latest video with tid 30!', summary)
+        sc_send_summary(script_id, script_name, timer, job_stat)
 
 
 def main():
@@ -51,5 +46,5 @@ def main():
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix='12')
+    logging_init(file_prefix=script_id)
     main()

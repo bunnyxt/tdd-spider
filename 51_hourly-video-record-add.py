@@ -19,7 +19,9 @@ from service import Service, CodeError
 from task import add_video_record, add_video_record_via_video_view, update_video, add_video, AlreadyExistError
 import logging
 
-logger = logging.getLogger('51')
+script_id = '51'
+script_name = 'hourly-video-record-add'
+logger = logging.getLogger(script_id)
 
 # TODO: remove old record
 Record = namedtuple('Record', [
@@ -1676,5 +1678,5 @@ def main():
 if __name__ == '__main__':
     # current time task, only number, ex: 201301311900
     time_task_simple = ('%s:00' % get_ts_s_str()[:13]).replace('-', '').replace(' ', '').replace(':', '')
-    logging_init(file_prefix='51_%s' % time_task_simple)
+    logging_init(file_prefix=f'{script_id}_{time_task_simple}')
     main()

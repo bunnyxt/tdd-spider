@@ -42,7 +42,7 @@ def sc_send(text: str, desp: Optional[str] = None):
 
 
 def sc_send_summary(script_id: str, script_name: str, timer: Timer, stat: JobStat):
-    title = f'SUMMARY: {script_id} - {script_name})'
+    title = f'SUMMARY: {script_id} - {script_name}'
     desc = '\n\n'.join([
         f'# {script_id} - {script_name} done!',
         timer.get_summary(),

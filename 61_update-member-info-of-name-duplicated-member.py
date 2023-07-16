@@ -7,11 +7,13 @@ from collections import defaultdict
 from util import logging_init, get_ts_s, ts_s_to_str, format_ts_s, format_ts_ms, get_ts_ms
 from serverchan import sc_send
 
-logger = logging.getLogger('61')
+script_id = '61'
+script_name = 'update-member-info-of-name-duplicated-member'
+logger = logging.getLogger(script_id)
 
 
 def update_member_info_of_name_duplicated_member():
-    logger.info('Now start update member info of name duplicated member...')
+    logger.info(f'Now start {script_id} - {script_name}...')
     start_ts = get_ts_s()  # get start ts
 
     session = Session()
@@ -97,5 +99,5 @@ def main():
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix='61')
+    logging_init(file_prefix=script_id)
     main()
