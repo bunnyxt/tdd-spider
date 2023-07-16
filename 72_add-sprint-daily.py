@@ -3,17 +3,18 @@ from db import Session
 import datetime
 from timer import Timer
 from serverchan import sc_send, sc_send_critical
-from util import logging_init, get_ts_s, ts_s_to_str, get_current_line_no
+from util import logging_init, get_ts_s, ts_s_to_str, get_current_line_no, fullname
 import math
 import logging
 
 script_id = '72'
 script_name = 'add-sprint-daily'
+script_fullname = fullname(script_id, script_name)
 logger = logging.getLogger(script_id)
 
 
 def add_sprint_daily():
-    logger.info(f'Now start {script_id} - {script_name}...')
+    logger.info(f'Now start {script_fullname}...')
     timer = Timer()
     timer.start()
 

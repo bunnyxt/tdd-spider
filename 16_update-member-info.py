@@ -1,5 +1,5 @@
 from db import DBOperation, Session
-from util import logging_init, get_week_day
+from util import logging_init, get_week_day, fullname
 from queue import Queue
 from service import Service
 from serverchan import sc_send_summary
@@ -10,11 +10,12 @@ import logging
 
 script_id = '16'
 script_name = 'update-member-info'
+script_fullname = fullname(script_id, script_name)
 logger = logging.getLogger(script_id)
 
 
 def update_member_info():
-    logger.info(f'Now start {script_id} - {script_name}...')
+    logger.info(f'Now start {script_fullname}...')
     timer = Timer()
     timer.start()
 
@@ -72,7 +73,7 @@ def update_member_info():
     timer.stop()
 
     # summary
-    logger.info(f'Finish {script_id} - {script_name}!')
+    logger.info(f'Finish {script_fullname}!')
     logger.info(timer.get_summary())
     logger.info(job_stat_merged.get_summary())
     sc_send_summary(script_id, script_name, timer, job_stat_merged)

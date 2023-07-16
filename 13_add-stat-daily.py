@@ -1,16 +1,17 @@
 import logging
-from util import logging_init, get_ts_s, get_current_line_no
+from util import logging_init, get_ts_s, get_current_line_no, fullname
 from db import Session, DBOperation, TddStatDaily
 from timer import Timer
 from serverchan import sc_send_critical
 
 script_id = '13'
 script_name = 'add-stat-daily'
+script_fullname = fullname(script_id, script_name)
 logger = logging.getLogger(script_id)
 
 
 def add_stat_daily():
-    logger.info(f'Now start {script_id} - {script_name}...')
+    logger.info(f'Now start {script_fullname}...')
     timer = Timer()
     timer.start()
 
@@ -45,7 +46,7 @@ def add_stat_daily():
     timer.stop()
 
     # summary
-    logger.info(f'Finish {script_id} - {script_name}!')
+    logger.info(f'Finish {script_fullname}!')
     logger.info(timer.get_summary())
 
 

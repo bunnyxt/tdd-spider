@@ -4,16 +4,17 @@ from service import Service
 from task import update_member
 from common.error import TddError
 from collections import defaultdict
-from util import logging_init, get_ts_s, ts_s_to_str, format_ts_s, format_ts_ms, get_ts_ms
+from util import logging_init, get_ts_s, ts_s_to_str, format_ts_s, format_ts_ms, get_ts_ms, fullname
 from serverchan import sc_send
 
 script_id = '61'
 script_name = 'update-member-info-of-name-duplicated-member'
+script_fullname = fullname(script_id, script_name)
 logger = logging.getLogger(script_id)
 
 
 def update_member_info_of_name_duplicated_member():
-    logger.info(f'Now start {script_id} - {script_name}...')
+    logger.info(f'Now start {script_fullname}...')
     start_ts = get_ts_s()  # get start ts
 
     session = Session()

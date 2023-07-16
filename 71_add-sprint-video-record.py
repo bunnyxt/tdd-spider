@@ -3,17 +3,18 @@ from timer import Timer
 from job import AddSprintVideoRecordJob
 from service import Service
 from serverchan import sc_send_summary
-from util import logging_init
+from util import logging_init, fullname
 from queue import Queue
 import logging
 
 script_id = '71'
 script_name = 'add-sprint-video-record'
+script_fullname = fullname(script_id, script_name)
 logger = logging.getLogger(script_id)
 
 
 def add_sprint_video_record():
-    logger.info(f'Now start {script_id} - {script_name}...')
+    logger.info(f'Now start {script_fullname}...')
     timer = Timer()
     timer.start()
 
@@ -48,7 +49,7 @@ def add_sprint_video_record():
     timer.stop()
 
     # summary
-    logger.info(f'Finish {script_id} - {script_name}!')
+    logger.info(f'Finish {script_fullname}!')
     logger.info(timer.get_summary())
     logger.info(job_stat.get_summary())
     if job_stat.condition['exception'] > 0 \

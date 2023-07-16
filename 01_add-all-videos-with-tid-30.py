@@ -1,7 +1,7 @@
 from serverchan import sc_send
 from task import add_video, commit_video_record_via_archive_stat
 import math
-from util import get_ts_s, ts_s_to_str, format_ts_s, logging_init
+from util import get_ts_s, ts_s_to_str, format_ts_s, logging_init, fullname
 from service import Service
 from collections import defaultdict
 from db import Session
@@ -9,13 +9,14 @@ import logging
 
 script_id = '01'
 script_name = 'add-all-videos-with-tid-30'
+script_fullname = fullname(script_id, script_name)
 logger = logging.getLogger(script_id)
 
 
 def add_all_video_with_tid_30():
     # NOTE: NOT TESTED
     # due to the bug of get_archive_rank_by_partion api, will miss about 20% video
-    logger.info(f'Now start {script_id} - {script_name}...')
+    logger.info(f'Now start {script_fullname}...')
     start_ts = get_ts_s()  # get start ts
 
     session = Session()

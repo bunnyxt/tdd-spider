@@ -4,7 +4,7 @@ from threading import Thread
 from queue import Queue
 from common import get_valid, test_archive_rank_by_partion, test_video_stat
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
-    str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day, logging_init
+    str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day, logging_init, fullname
 import math
 import time
 import datetime
@@ -21,6 +21,7 @@ import logging
 
 script_id = '51'
 script_name = 'hourly-video-record-add'
+script_fullname = fullname(script_id, script_name)
 logger = logging.getLogger(script_id)
 
 # TODO: remove old record

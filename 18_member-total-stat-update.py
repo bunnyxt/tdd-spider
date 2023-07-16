@@ -1,16 +1,17 @@
 from db import Session, TddMemberTotalStatRecord
-from util import logging_init, get_ts_s, get_current_line_no
+from util import logging_init, get_ts_s, get_current_line_no, fullname
 from timer import Timer
 from serverchan import sc_send_critical
 import logging
 
 script_id = '18'
 script_name = 'member-total-stat-update'
+script_fullname = fullname(script_id, script_name)
 logger = logging.getLogger(script_id)
 
 
 def member_total_stat_update():
-    logger.info(f'Now start {script_id} - {script_name}...')
+    logger.info(f'Now start {script_fullname}...')
     timer = Timer()
     timer.start()
 
@@ -74,7 +75,7 @@ def member_total_stat_update():
     timer.stop()
 
     # summary
-    logger.info(f'Finish {script_id} - {script_name}!')
+    logger.info(f'Finish {script_fullname}!')
     logger.info(timer.get_summary())
 
 
