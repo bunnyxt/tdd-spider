@@ -39,7 +39,7 @@ def add_latest_video_with_tid_30():
     if job_stat.condition['get_archive_exception'] > 0 \
             or job_stat.condition['add_video_exception'] > 0 \
             or job_stat.condition['commit_video_record_exception'] > 0:
-        sc_send_summary(script_id, script_name, timer, job_stat)
+        sc_send_summary(script_fullname, timer, job_stat)
 
 
 def main():

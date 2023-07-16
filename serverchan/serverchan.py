@@ -4,7 +4,7 @@ from conf import get_sckey
 from timer import Timer
 from job import JobStat
 from typing import Optional
-from util import get_ts_s_str, fullname
+from util import get_ts_s_str
 import logging
 
 logger = logging.getLogger('serverchan')
@@ -41,10 +41,10 @@ def sc_send(text: str, desp: Optional[str] = None):
         return response
 
 
-def sc_send_summary(script_id: str, script_name: str, timer: Timer, stat: JobStat):
-    title = f'SUMMARY: {fullname(script_id, script_name)}'
+def sc_send_summary(script_fullname: str, timer: Timer, stat: JobStat):
+    title = f'SUMMARY: {script_fullname}'
     desc = '\n\n'.join([
-        f'# {fullname(script_id, script_name)} done!',
+        f'# {script_fullname} done!',
         timer.get_summary(),
         stat.get_summary('\n\n'),
         f'by bunnyxt, {get_ts_s_str()}'

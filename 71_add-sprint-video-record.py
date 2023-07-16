@@ -55,7 +55,7 @@ def add_sprint_video_record():
     if job_stat.condition['exception'] > 0 \
             or job_stat.condition['million_exception'] > 0 \
             or job_stat.condition['million_success'] > 0:
-        sc_send_summary(script_id, script_name, timer, job_stat)
+        sc_send_summary(script_fullname, timer, job_stat)
 
 
 def main():
