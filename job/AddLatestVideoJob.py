@@ -30,31 +30,30 @@ class AddLatestVideoJob(Job):
                 self.logger.error(f'Fail to get archive rank by partion. '
                                   f'tid: {self.tid}, pn: {page_num}, ps: 50, error: {e}')
                 self.stat.condition['get_archive_exception'] += 1
-                continue
-
-            for archive in archive_rank_by_partion.archives:
-                # add video
-                try:
-                    new_video = add_video(archive.aid, self.service, self.session)
-                except AlreadyExistError:
-                    self.logger.debug(f'Video parsed from archive already exist! archive: {archive}')
-                except Exception as e:
-                    self.logger.error(f'Fail to add video parsed from archive! archive: {archive}, error: {e}')
-                    self.stat.condition['add_video_exception'] += 1
-                else:
-                    self.logger.info(f'New video parsed from archive added! video: {new_video}')
-                    self.stat.condition['new_video'] += 1
-
-                    # commit video record via archive stat
+            else:
+                for archive in archive_rank_by_partion.archives:
+                    # add video
                     try:
-                        new_video_record = commit_video_record_via_archive_stat(archive.stat, self.session)
+                        new_video = add_video(archive.aid, self.service, self.session)
+                    except AlreadyExistError:
+                        self.logger.debug(f'Video parsed from archive already exist! archive: {archive}')
                     except Exception as e:
-                        self.logger.error(f'Fail to add video record parsed from archive stat! '
-                                          f'archive: {archive}, error: {e}')
-                        self.stat.condition['commit_video_record_exception'] += 1
+                        self.logger.error(f'Fail to add video parsed from archive! archive: {archive}, error: {e}')
+                        self.stat.condition['add_video_exception'] += 1
                     else:
-                        self.logger.info(f'New video record parsed from archive stat committed! '
-                                         f'video record: {new_video_record}')
+                        self.logger.info(f'New video parsed from archive added! video: {new_video}')
+                        self.stat.condition['new_video'] += 1
+
+                        # commit video record via archive stat
+                        try:
+                            new_video_record = commit_video_record_via_archive_stat(archive.stat, self.session)
+                        except Exception as e:
+                            self.logger.error(f'Fail to add video record parsed from archive stat! '
+                                              f'archive: {archive}, error: {e}')
+                            self.stat.condition['commit_video_record_exception'] += 1
+                        else:
+                            self.logger.info(f'New video record parsed from archive stat committed! '
+                                             f'video record: {new_video_record}')
                         self.stat.condition['new_video_record'] += 1
 
             timer.stop()
