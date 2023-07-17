@@ -2,19 +2,20 @@ from db import Session, DBOperation, TddVideoRecordAbnormalChange, TddVideoRecor
 from threading import Thread
 from queue import Queue
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
-    str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day, logging_init, fullname
+    str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day, logging_init, fullname, get_current_line_no
 import math
 import time
 import datetime
 import os
 import re
-from serverchan import sc_send
+from serverchan import sc_send, sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from core import TddError
 from service import Service, ArchiveRankByPartionArchive
 from job import GetPartionArchiveJob, JobStat, AddVideoRecordJob
 from typing import List, Tuple, NamedTuple, Optional
 from task import update_video, add_video, AlreadyExistError
+from timer import Timer
 import logging
 
 script_id = '51'
@@ -1644,21 +1645,36 @@ def run_hourly_video_record_add(time_task):
     del data_analysis_pipeline_runner_list  # release memory
 
 
-def main():
-    logger.info('51: hourly video record add')
+def hourly_video_record_add():
+    logger.info(f'Now start {script_fullname}...')
+    timer = Timer()
+    timer.start()
 
-    time_task = '%s:00' % get_ts_s_str()[:13]  # current time task, ex: 2013-01-31 19:00
-    logger.info('Now start, time task: %s' % time_task)
+    time_task = f'{get_ts_s_str()[:13]}:00'  # current time task, ex: 2013-01-31 19:00
+    logger.info(f'Time task: {time_task}')
+
     try:
         run_hourly_video_record_add(time_task)
     except Exception as e:
-        logger.critical(e)
-        sc_send('51: Critical exception occurred!', 'send time: %s, exception description: %s' % (get_ts_s_str(), e))
-    logger.info('Done! time task: %s' % time_task)
+        message = f'Exception occurred when running hourly video record add! time task: {time_task}, error: {e}'
+        logger.critical(message)
+        sc_send_critical(script_fullname, message, __file__, get_current_line_no())
+        exit(1)
+
+    timer.stop()
+
+    # summary
+    logger.info(f'Finish {script_fullname}!')
+    logger.info(f'Time task: {time_task}')
+    logger.info(timer.get_summary())
+
+
+def main():
+    hourly_video_record_add()
 
 
 if __name__ == '__main__':
     # current time task, only number, ex: 201301311900
-    time_task_simple = ('%s:00' % get_ts_s_str()[:13]).replace('-', '').replace(' ', '').replace(':', '')
+    time_task_simple = f'{get_ts_s_str()[:13]}:00'.replace('-', '').replace(' ', '').replace(':', '')
     logging_init(file_prefix=f'{script_id}_{time_task_simple}')
     main()
