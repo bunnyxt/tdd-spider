@@ -137,7 +137,7 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
                         new_video_record = TddVideoRecord(
                             aid=aid,
                             added=get_ts_s(),
-                            view=-video_view.stat.view,
+                            view=video_view.stat.view,
                             danmaku=video_view.stat.danmaku,
                             reply=video_view.stat.reply,
                             favorite=video_view.stat.favorite,
