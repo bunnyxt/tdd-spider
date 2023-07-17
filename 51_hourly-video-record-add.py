@@ -10,11 +10,11 @@ import os
 import re
 from serverchan import sc_send
 from collections import namedtuple, defaultdict, Counter
-from common.error import TddError
+from core import TddError
 from service import Service, ArchiveRankByPartionArchive
 from job import GetPartionArchiveJob, JobStat, AddVideoRecordJob
 from typing import List, Tuple
-from task import add_video_record, update_video, add_video, AlreadyExistError
+from task import update_video, add_video, AlreadyExistError
 import logging
 
 script_id = '51'

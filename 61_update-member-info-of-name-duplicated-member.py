@@ -2,7 +2,7 @@ import logging
 from db import Session
 from service import Service
 from task import update_member
-from common.error import TddError
+from core import TddError
 from collections import defaultdict
 from util import logging_init, get_ts_s, ts_s_to_str, format_ts_s, format_ts_ms, get_ts_ms, fullname
 from serverchan import sc_send

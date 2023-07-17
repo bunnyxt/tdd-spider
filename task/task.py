@@ -4,7 +4,7 @@ from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff
     TddMemberLog, TddSprintVideoRecord
 from util import get_ts_s, a2b, same_pic_url
 from typing import List
-from common.error import TddError
+from core import TddError
 from .error import AlreadyExistError, NotExistError
 
 import logging

@@ -1,4 +1,4 @@
-from common.error import TddError
+from core import TddError
 
 __all__ = ['TaskError', 'NotExistError', 'AlreadyExistError']
 
