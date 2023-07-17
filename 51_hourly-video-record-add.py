@@ -1,4 +1,3 @@
-from pybiliapi import BiliApi
 from db import Session, DBOperation, TddVideoRecordAbnormalChange, TddVideoRecord
 from threading import Thread
 from queue import Queue
@@ -9,7 +8,6 @@ import time
 import datetime
 import os
 import re
-from conf import get_proxy_pool_url
 from serverchan import sc_send
 from collections import namedtuple, defaultdict, Counter
 from common.error import TddError
@@ -67,7 +65,6 @@ class C30NeedAddButNotFoundAidsChecker(Thread):
         # - ...
         self.logger.info('Now start checking need add but not found aids...')
         session = Session()
-        bapi_with_proxy = BiliApi(get_proxy_pool_url())
         result_status_dict = defaultdict(list)
         # self.logger.error('%s' % self.need_insert_but_record_not_found_aid_list)  # TMP
         self.logger.error('TMP stop add affected video record, count: %d' % len(
@@ -143,7 +140,6 @@ class C30NoNeedInsertAidsChecker(Thread):
         self.logger.info('Now start checking no need insert records...')
         session = Session()
         service = Service(mode='worker')
-        bapi_with_proxy = BiliApi(get_proxy_pool_url())
         _403_aids = DBOperation.query_403_video_aids(session)
         result_status_dict = defaultdict(list)
         for idx, aid in enumerate(self.no_need_insert_aid_list, 1):
