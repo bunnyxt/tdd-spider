@@ -13,7 +13,7 @@ from collections import namedtuple, defaultdict, Counter
 from core import TddError
 from service import Service, ArchiveRankByPartionArchive
 from job import GetPartionArchiveJob, JobStat, AddVideoRecordJob
-from typing import List, Tuple
+from typing import List, Tuple, NamedTuple, Optional
 from task import update_video, add_video, AlreadyExistError
 import logging
 
@@ -25,13 +25,32 @@ logger = logging.getLogger(script_id)
 # TODO: remove old record
 Record = namedtuple('Record', [
     'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
-RecordNew = namedtuple('RecordNew', [
-    'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like',
-    'dislike', 'now_rank', 'his_rank', 'vt', 'vv'])
+# RecordNew = namedtuple('RecordNew', [
+#     'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like',
+#     'dislike', 'now_rank', 'his_rank', 'vt', 'vv'])
 RecordSpeed = namedtuple('RecordSpeed', [
     'start_ts', 'end_ts', 'timespan', 'per_seconds', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
 RecordSpeedRatio = namedtuple('RecordSpeedRatio', [
     'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like', 'inf_magic_num'])
+
+
+# TODO: rename back to Record after all old Record is removed
+class RecordNew(NamedTuple):
+    added: int
+    aid: int
+    bvid: str
+    view: int
+    danmaku: int
+    reply: int
+    favorite: int
+    coin: int
+    share: int
+    like: int
+    dislike: int
+    now_rank: int
+    his_rank: int
+    vt: Optional[int]
+    vv: Optional[int]
 
 
 def get_need_insert_aid_list(time_label, is_tid_30, session):
