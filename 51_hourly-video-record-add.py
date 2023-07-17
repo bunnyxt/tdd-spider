@@ -2,7 +2,6 @@ from pybiliapi import BiliApi
 from db import Session, DBOperation, TddVideoRecordAbnormalChange, TddVideoRecord
 from threading import Thread
 from queue import Queue
-from common import get_valid, test_video_stat
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
     str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day, logging_init, fullname
 import math
@@ -14,11 +13,10 @@ from conf import get_proxy_pool_url
 from serverchan import sc_send
 from collections import namedtuple, defaultdict, Counter
 from common.error import TddError
-from service import Service, CodeError, ArchiveRankByPartionArchive
+from service import Service, ArchiveRankByPartionArchive
 from job import GetPartionArchiveJob, JobStat, AddVideoRecordJob
 from typing import List, Tuple
-# from proxypool import get_proxy_url
-from task import add_video_record, add_video_record_via_video_view, update_video, add_video, AlreadyExistError
+from task import add_video_record, update_video, add_video, AlreadyExistError
 import logging
 
 script_id = '51'
@@ -305,7 +303,6 @@ class C30PipelineRunner(Thread):
         check_all_zero_record_all_zero_record_again_count = 0
         check_all_zero_record_not_all_zero_record_count = 0
         check_all_zero_record_fail_fetch_again_count = 0
-        bapi_with_proxy = BiliApi(proxy_pool_url=get_proxy_pool_url())
         for aid, record in aid_record_dict.items():
             if is_all_zero_record(record):
                 # check within this if statement in order to reduce check end time consumption
@@ -314,34 +311,34 @@ class C30PipelineRunner(Thread):
                     break
                 check_all_zero_record_all_zero_record_count += 1
                 self.logger.warning('All zero record of video aid %d detected! Try get video record again...' % aid)
-                # get stat_obj
-                stat_obj = get_valid(bapi_with_proxy.get_video_stat, (aid,), test_video_stat)
-                if stat_obj is None:
-                    self.logger.warning('Fail to get valid stat obj of video aid %d!' % aid)
+
+                # get video view
+                try:
+                    video_view = service.get_video_view({'aid': aid})
+                except Exception as e:
+                    self.logger.warning(f'Fail to get valid video view. aid: {aid}, error: {e}')
                     check_all_zero_record_fail_fetch_again_count += 1
                     continue
-                if stat_obj['code'] != 0:
-                    self.logger.warning('Fail to get stat obj with code 0 of video aid %d! code %s detected' % (
-                        aid, stat_obj['code']))
-                    check_all_zero_record_fail_fetch_again_count += 1
-                    continue
+
                 # assemble new record
-                # TODO: remove old record
-                # new_record = Record(
-                #     get_ts_s(), aid, a2b(aid),
-                #     -1 if stat_obj['data']['view'] == '--' else stat_obj['data']['view'], stat_obj['data']['danmaku'],
-                #     stat_obj['data']['reply'], stat_obj['data']['favorite'], stat_obj['data']['coin'],
-                #     stat_obj['data']['share'], stat_obj['data']['like']
-                # )
                 new_record = RecordNew(
-                    get_ts_s(), aid, a2b(aid),
-                    -1 if stat_obj['data']['view'] == '--' else stat_obj['data']['view'], stat_obj['data']['danmaku'],
-                    stat_obj['data']['reply'], stat_obj['data']['favorite'], stat_obj['data']['coin'],
-                    stat_obj['data']['share'], stat_obj['data']['like'],
-                    stat_obj['data'].get('dislike', None),
-                    stat_obj['data'].get('now_rank', None), stat_obj['data'].get('his_rank', None),
-                    stat_obj['data'].get('vt', None), stat_obj['data'].get('vv', None),
+                    added=get_ts_s(),
+                    aid=video_view.aid,
+                    bvid=video_view.bvid.lstrip('BV'),
+                    view=video_view.stat.view,
+                    danmaku=video_view.stat.danmaku,
+                    reply=video_view.stat.reply,
+                    favorite=video_view.stat.favorite,
+                    coin=video_view.stat.coin,
+                    share=video_view.stat.share,
+                    like=video_view.stat.like,
+                    dislike=video_view.stat.dislike,
+                    now_rank=video_view.stat.now_rank,
+                    his_rank=video_view.stat.his_rank,
+                    vt=video_view.stat.vt,
+                    vv=video_view.stat.vv
                 )
+
                 if is_all_zero_record(new_record):
                     self.logger.warning('Get all zero record of video aid %d again!' % aid)
                     check_all_zero_record_all_zero_record_again_count += 1
@@ -1257,29 +1254,25 @@ class RankWeeklyUpdateRunner(Thread):
                 no_base_c0_video_aid_list = list(set(all_c0_video_aid_list) - set(all_video_aid_in_base_tmp_list))
                 self.logger.info('%d no base c0 video found, now add base record for them...'
                                  % len(no_base_c0_video_aid_list))
-                bapi_with_proxy = BiliApi(proxy_pool_url=get_proxy_pool_url())
                 fail_aids = []
                 success_aids = []
+                service = Service(mode='worker')
                 for idx, aid in enumerate(no_base_c0_video_aid_list, 1):
-                    # get stat_obj
-                    stat_obj = get_valid(bapi_with_proxy.get_video_stat, (aid,), test_video_stat)
-                    if stat_obj is None:
-                        self.logger.warning('Fail to get valid stat obj of video aid %d!' % aid)
-                        fail_aids.append(aid)
+                    # get video view
+                    try:
+                        video_view = service.get_video_view({'aid': aid})
+                    except Exception as e:
+                        self.logger.warning(f'Fail to get valid video view. aid: {aid}, error: {e}')
                         continue
-                    if stat_obj['code'] != 0:
-                        self.logger.warning('Fail to get stat obj with code 0 of video aid %d! code %s detected' % (
-                            aid, stat_obj['code']))
-                        fail_aids.append(aid)
-                        continue
+
                     # add record to base
                     add_record_to_base_sql = 'insert into tdd_video_record_rank_weekly_base_tmp values ' + \
                                              '(%d, \'%s\', %d, %d, %d, %d, %d, %d, %d)' \
                                              % (get_ts_s(), a2b(aid),
-                                                -1 if stat_obj['data']['view'] == '--' else stat_obj['data']['view'],
-                                                stat_obj['data']['danmaku'], stat_obj['data']['reply'],
-                                                stat_obj['data']['favorite'], stat_obj['data']['coin'],
-                                                stat_obj['data']['share'], stat_obj['data']['like'])
+                                                video_view.stat.view,
+                                                video_view.stat.danmaku, video_view.stat.reply,
+                                                video_view.stat.favorite, video_view.stat.coin,
+                                                video_view.stat.share, video_view.stat.like)
                     session.execute(add_record_to_base_sql)
                     success_aids.append(aid)
                     if idx % 10 == 0:
