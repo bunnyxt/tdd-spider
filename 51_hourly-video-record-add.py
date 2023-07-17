@@ -2,17 +2,17 @@ from db import Session, DBOperation, TddVideoRecordAbnormalChange, TddVideoRecor
 from threading import Thread
 from queue import Queue
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
-    str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day, logging_init, fullname, get_current_line_no
+    str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day, logging_init, fullname, get_current_line_no, format_ts_ms
 import math
 import time
 import datetime
 import os
 import re
-from serverchan import sc_send, sc_send_critical
+from serverchan import sc_send_summary, sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from core import TddError
 from service import Service, ArchiveRankByPartionArchive
-from job import GetPartionArchiveJob, JobStat, AddVideoRecordJob
+from job import GetPartionArchiveJob, JobStat, AddVideoRecordJob, Job
 from typing import List, Tuple, NamedTuple, Optional
 from task import update_video, add_video, AlreadyExistError
 from timer import Timer
@@ -69,77 +69,172 @@ def get_need_insert_aid_list(time_label, is_tid_30, session):
     return aid_list
 
 
-class C30NeedAddButNotFoundAidsChecker(Thread):
-    def __init__(self, need_insert_but_record_not_found_aid_list):
-        super().__init__()
-        self.need_insert_but_record_not_found_aid_list = need_insert_but_record_not_found_aid_list
-        self.logger = logging.getLogger('C30NeedAddButNotFoundAidsChecker')
+class CheckC30NeedInsertButNotFoundAidsJob(Job):
+    """
+    Check c30 need insert but not found aids.
+    It is expected that record of those aids already fetched, however not found at present.
+    Possible reasons:
+    - now video tid != 30
+    - now video code != 0
+    - now video state = -4, forward = another video aid
+    - missing video from api (e.g. partion archive api)
+    - ...
+    """
 
-    def run(self):
-        # check need insert but not found aid list
-        # these aids should have record in aid_record_dict, but not found at present
-        # possible reasons:
-        # - now video tid != 30
-        # - now video code != 0
-        # - now video state = -4, forward = another video aid
-        # - ...
-        self.logger.info('Now start checking need add but not found aids...')
-        session = Session()
-        result_status_dict = defaultdict(list)
-        # self.logger.error('%s' % self.need_insert_but_record_not_found_aid_list)  # TMP
-        self.logger.error('TMP stop add affected video record, count: %d' % len(
-            self.need_insert_but_record_not_found_aid_list))  # TMP
-        sc_send('affected video found', 'send time: %s, count: %d' % (
-            get_ts_s_str(), len(self.need_insert_but_record_not_found_aid_list)))  # TMP
-        # for idx, aid in enumerate(self.need_insert_but_record_not_found_aid_list, 1):
-        #     # try update video
-        #     try:
-        #         TODO: use new update_video
-        #         tdd_video_logs = update_video(aid, bapi_with_proxy, session)
-        #     except TddCommonError as e2:
-        #         self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-        #         result_status_dict['fail_aids'].append(aid)
-        #     except Exception as e2:
-        #         self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-        #         result_status_dict['fail_aids'].append(aid)
-        #     else:
-        #         # check update logs
-        #         for log in tdd_video_logs:
-        #             self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
-        #                              % (log.aid, log.attr, log.oldval, log.newval))
-        #         # set result status
-        #         # NOTE: here maybe code_change_aids and tid_change_aids both +1 aid
-        #         tdd_video_logs_attr_list = [ log.attr for log in tdd_video_logs]
-        #         expected_change_found = False
-        #         if 'code' in tdd_video_logs_attr_list:
-        #             result_status_dict['code_change_aids'].append(aid)
-        #             expected_change_found = True
-        #         if 'tid' in tdd_video_logs_attr_list:
-        #             result_status_dict['tid_change_aids'].append(aid)
-        #             expected_change_found = True
-        #         if 'state' in tdd_video_logs_attr_list and 'forward' in tdd_video_logs_attr_list:
-        #             result_status_dict['state_and_forward_change_aids'].append(aid)
-        #             expected_change_found = True
-        #         if not expected_change_found:
-        #             self.logger.warning('No expected change (code / tid / state & forward) found for video aid %d, need further check' % aid)
-        #             # TMP START
-        #             try:
-        #                 new_video_record = add_video_record_via_stat_api(aid, bapi_with_proxy, session)
-        #                 self.logger.warning('TMP add affected video record %s' % new_video_record)
-        #             except Exception as e3:
-        #                 self.logger.warning('TMP Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e3))
-        #             # TMP END
-        #             result_status_dict['no_expected_change_found_aids'].append(aid)
-        #     finally:
-        #         if idx % 10 == 0:
-        #             self.logger.info('%d / %d done' % (idx, len(self.need_insert_but_record_not_found_aid_list)))
-        # self.logger.info('%d / %d done' % (len(self.need_insert_but_record_not_found_aid_list),
-        #                                    len(self.need_insert_but_record_not_found_aid_list)))
-        session.close()
-        self.logger.info('Finish checking need add but not found aids! %s' %
-                         ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
-        self.logger.warning('fail_aids: %r' % result_status_dict['fail_aids'])
-        self.logger.warning('no_change_found_aids: %r' % result_status_dict['no_change_found_aids'])
+    def __init__(self, name: str, aid_queue: Queue[int], video_record_queue: Queue[TddVideoRecord], service: Service):
+        super().__init__(name)
+        self.aid_queue = aid_queue
+        self.video_record_queue = video_record_queue
+        self.service = service
+        self.session = Session()
+
+    def process(self):
+        while not self.aid_queue.empty():
+            aid = self.aid_queue.get()
+            self.logger.debug(f'Now check c30 need insert but not found aid. aid: {aid}')
+            timer = Timer()
+            timer.start()
+
+            try:
+                tdd_video_logs = update_video(aid, self.service, self.session)
+            except Exception as e:
+                self.logger.error(f'Fail to update video info. aid: {aid}, error: {e}')
+                self.stat.condition['update_exception'] += 1
+            else:
+                for log in tdd_video_logs:
+                    self.logger.info(f'Update video info. aid: {aid}, attr: {log.attr}, {log.oldval} -> {log.newval}')
+                self.logger.debug(f'{len(tdd_video_logs)} log(s) found. aid: {aid}')
+                self.stat.condition[f'{len(tdd_video_logs)}_update'] += 1
+
+                log_attr_log_dict = {log.attr: log for log in tdd_video_logs}
+                expected_change_found = False
+                if 'tid' in log_attr_log_dict:
+                    if log_attr_log_dict['tid'].oldval == '30' and log_attr_log_dict['tid'].newval != '30':
+                        expected_change_found = True
+                        self.stat.condition['tid_not_30'] += 1
+                if 'code' in log_attr_log_dict:
+                    if log_attr_log_dict['code'].oldval == '0' and log_attr_log_dict['code'].newval != '0':
+                        expected_change_found = True
+                        self.stat.condition['code_not_0'] += 1
+                if 'state' in log_attr_log_dict and 'forward' in log_attr_log_dict:
+                    if log_attr_log_dict['state'].oldval == '0' and log_attr_log_dict['state'].newval == '-4' and \
+                            log_attr_log_dict['forward'].newval != str(aid):
+                        expected_change_found = True
+                        self.stat.condition['state_-4'] += 1
+
+                if expected_change_found:
+                    self.stat.condition['expected_change_found'] += 1
+                else:
+                    self.logger.warning(f'Expected change not found, maybe missing video from api. aid: {aid}')
+                    self.stat.condition['expected_change_not_found'] += 1
+
+                    try:
+                        video_view = self.service.get_video_view({'aid': aid})
+                    except Exception as e2:
+                        self.logger.error(f'Fail to get video view for video record. aid: {aid}, error: {e2}')
+                        self.stat.condition['get_video_view_exception'] += 1
+                    else:
+                        new_video_record = TddVideoRecord(
+                            aid=aid,
+                            added=get_ts_s(),
+                            view=-video_view.stat.view,
+                            danmaku=video_view.stat.danmaku,
+                            reply=video_view.stat.reply,
+                            favorite=video_view.stat.favorite,
+                            coin=video_view.stat.coin,
+                            share=video_view.stat.share,
+                            like=video_view.stat.like,
+                            dislike=video_view.stat.dislike,
+                            now_rank=video_view.stat.now_rank,
+                            his_rank=video_view.stat.his_rank,
+                            vt=video_view.stat.vt,
+                            vv=video_view.stat.vv,
+                        )
+                        self.video_record_queue.put(new_video_record)
+                        self.logger.info(f'Missing video record get. aid: {aid}, record: {new_video_record}')
+                        self.stat.condition['missing_video_record_get'] += 1
+
+            timer.stop()
+            self.logger.debug(f'Finish check c30 need insert but not found aid. '
+                              f'aid: {aid}, duration: {format_ts_ms(timer.get_duration_ms())}')
+            self.stat.total_count += 1
+            self.stat.total_duration_ms += timer.get_duration_ms()
+
+    def cleanup(self):
+        self.session.close()
+
+
+# class C30NeedAddButNotFoundAidsChecker(Thread):
+#     def __init__(self, need_insert_but_record_not_found_aid_list):
+#         super().__init__()
+#         self.need_insert_but_record_not_found_aid_list = need_insert_but_record_not_found_aid_list
+#         self.logger = logging.getLogger('C30NeedAddButNotFoundAidsChecker')
+#
+#     def run(self):
+#         # check need insert but not found aid list
+#         # these aids should have record in aid_record_dict, but not found at present
+#         # possible reasons:
+#         # - now video tid != 30
+#         # - now video code != 0
+#         # - now video state = -4, forward = another video aid
+#         # - ...
+#         self.logger.info('Now start checking need add but not found aids...')
+#         session = Session()
+#         result_status_dict = defaultdict(list)
+#         # self.logger.error('%s' % self.need_insert_but_record_not_found_aid_list)  # TMP
+#         self.logger.error('TMP stop add affected video record, count: %d' % len(
+#             self.need_insert_but_record_not_found_aid_list))  # TMP
+#         sc_send('affected video found', 'send time: %s, count: %d' % (
+#             get_ts_s_str(), len(self.need_insert_but_record_not_found_aid_list)))  # TMP
+#         # for idx, aid in enumerate(self.need_insert_but_record_not_found_aid_list, 1):
+#         #     # try update video
+#         #     try:
+#         #         TODO: use new update_video
+#         #         tdd_video_logs = update_video(aid, bapi_with_proxy, session)
+#         #     except TddCommonError as e2:
+#         #         self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+#         #         result_status_dict['fail_aids'].append(aid)
+#         #     except Exception as e2:
+#         #         self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+#         #         result_status_dict['fail_aids'].append(aid)
+#         #     else:
+#         #         # check update logs
+#         #         for log in tdd_video_logs:
+#         #             self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
+#         #                              % (log.aid, log.attr, log.oldval, log.newval))
+#         #         # set result status
+#         #         # NOTE: here maybe code_change_aids and tid_change_aids both +1 aid
+#         #         tdd_video_logs_attr_list = [ log.attr for log in tdd_video_logs]
+#         #         expected_change_found = False
+#         #         if 'code' in tdd_video_logs_attr_list:
+#         #             result_status_dict['code_change_aids'].append(aid)
+#         #             expected_change_found = True
+#         #         if 'tid' in tdd_video_logs_attr_list:
+#         #             result_status_dict['tid_change_aids'].append(aid)
+#         #             expected_change_found = True
+#         #         if 'state' in tdd_video_logs_attr_list and 'forward' in tdd_video_logs_attr_list:
+#         #             result_status_dict['state_and_forward_change_aids'].append(aid)
+#         #             expected_change_found = True
+#         #         if not expected_change_found:
+#         #             self.logger.warning('No expected change (code / tid / state & forward) found for video aid %d, need further check' % aid)
+#         #             # TMP START
+#         #             try:
+#         #                 new_video_record = add_video_record_via_stat_api(aid, bapi_with_proxy, session)
+#         #                 self.logger.warning('TMP add affected video record %s' % new_video_record)
+#         #             except Exception as e3:
+#         #                 self.logger.warning('TMP Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e3))
+#         #             # TMP END
+#         #             result_status_dict['no_expected_change_found_aids'].append(aid)
+#         #     finally:
+#         #         if idx % 10 == 0:
+#         #             self.logger.info('%d / %d done' % (idx, len(self.need_insert_but_record_not_found_aid_list)))
+#         # self.logger.info('%d / %d done' % (len(self.need_insert_but_record_not_found_aid_list),
+#         #                                    len(self.need_insert_but_record_not_found_aid_list)))
+#         session.close()
+#         self.logger.info('Finish checking need add but not found aids! %s' %
+#                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
+#         self.logger.warning('fail_aids: %r' % result_status_dict['fail_aids'])
+#         self.logger.warning('no_change_found_aids: %r' % result_status_dict['no_change_found_aids'])
 
 
 class C30NoNeedInsertAidsChecker(Thread):
@@ -429,17 +524,41 @@ class C30PipelineRunner(Thread):
             len(need_insert_aid_list), len(need_insert_but_record_not_found_aid_list)))
 
         # check need insert but not found aid list
-        # these aids should have record in aid_record_dict, but not found at present
-        # possible reasons:
-        # - now video tid != 30
-        # - now video code != 0
-        # - now video state = -4, forward = another video aid
-        # - ...
-        self.logger.info('%d c30 need add but not found aids got' % len(need_insert_but_record_not_found_aid_list))
-        self.logger.info('Now start a branch thread for checking need add but not found aids...')
-        c30_need_add_but_not_found_aids_checker = C30NeedAddButNotFoundAidsChecker(
-            need_insert_but_record_not_found_aid_list)
-        c30_need_add_but_not_found_aids_checker.start()
+        # # these aids should have record in aid_record_dict, but not found at present
+        # # possible reasons:
+        # # - now video tid != 30
+        # # - now video code != 0
+        # # - now video state = -4, forward = another video aid
+        # # - ...
+        # self.logger.info('%d c30 need add but not found aids got' % len(need_insert_but_record_not_found_aid_list))
+        # self.logger.info('Now start a branch thread for checking need add but not found aids...')
+        # c30_need_add_but_not_found_aids_checker = C30NeedAddButNotFoundAidsChecker(
+        #     need_insert_but_record_not_found_aid_list)
+        # c30_need_add_but_not_found_aids_checker.start()
+
+        # put need insert but not found aids into queue
+        need_insert_but_not_found_aid_queue: Queue[int] = Queue()
+        for aid in need_insert_but_record_not_found_aid_list:
+            need_insert_but_not_found_aid_queue.put(aid)
+        self.logger.info(f'{len(need_insert_but_record_not_found_aid_list)} c30 need insert but not found aids '
+                         f'put into queue.')
+
+        # create missing video record queue
+        missing_video_record_queue: Queue[TddVideoRecord] = Queue()
+
+        # create jobs
+        check_c30_need_insert_but_not_found_aid_job_num = min(
+            50, max(len(need_insert_but_record_not_found_aid_list) // 10, 1))  # [1, 50]
+        check_c30_need_insert_but_not_found_aid_job_list = []
+        for i in range(check_c30_need_insert_but_not_found_aid_job_num):
+            check_c30_need_insert_but_not_found_aid_job_list.append(
+                CheckC30NeedInsertButNotFoundAidsJob(
+                    f'job_{i}', need_insert_but_not_found_aid_queue, missing_video_record_queue, service))
+
+        # start jobs
+        for job in check_c30_need_insert_but_not_found_aid_job_list:
+            job.start()
+        logger.info(f'{check_c30_need_insert_but_not_found_aid_job_num} job(s) started.')
 
         # check no need insert records
         # if time label is 04:00, we need to add all video records into tdd_video_record table,
@@ -456,8 +575,55 @@ class C30PipelineRunner(Thread):
             c30_no_need_insert_aids_checker = C30NoNeedInsertAidsChecker(no_need_insert_aid_list)
             c30_no_need_insert_aids_checker.start()
 
+        # wait for jobs
+        for job in check_c30_need_insert_but_not_found_aid_job_list:
+            job.join()
+
+        # collect statistics
+        check_c30_need_insert_but_not_found_aid_job_stat_list: List[JobStat] = []
+        for job in check_c30_need_insert_but_not_found_aid_job_list:
+            check_c30_need_insert_but_not_found_aid_job_stat_list.append(job.stat)
+
+        # merge statistics counters
+        check_c30_need_insert_but_not_found_aid_job_stat_merged = sum(
+            check_c30_need_insert_but_not_found_aid_job_stat_list, JobStat())
+
+        self.logger.info(f'Finish check c30 need insert but not found aid!')
+        self.logger.info(check_c30_need_insert_but_not_found_aid_job_stat_merged.get_summary())
+        check_c30_need_insert_but_not_found_aid_timer = Timer()
+        check_c30_need_insert_but_not_found_aid_timer.start_ts_ms \
+            = check_c30_need_insert_but_not_found_aid_job_stat_merged.start_ts_ms
+        check_c30_need_insert_but_not_found_aid_timer.end_ts_ms \
+            = check_c30_need_insert_but_not_found_aid_job_stat_merged.end_ts_ms
+        sc_send_summary(f'{script_fullname}.', check_c30_need_insert_but_not_found_aid_timer,
+                        check_c30_need_insert_but_not_found_aid_job_stat_merged)
+
+        # collect missing video records
+        missing_record_list: List[RecordNew] = []
+        while not missing_video_record_queue.empty():
+            missing_video_record = missing_video_record_queue.get()
+            missing_record_list.append(RecordNew(
+                added=missing_video_record.added,
+                aid=missing_video_record.aid,
+                bvid=a2b(missing_video_record.aid),
+                view=missing_video_record.view,
+                danmaku=missing_video_record.danmaku,
+                reply=missing_video_record.reply,
+                favorite=missing_video_record.favorite,
+                coin=missing_video_record.coin,
+                share=missing_video_record.share,
+                like=missing_video_record.like,
+                dislike=missing_video_record.dislike,
+                now_rank=missing_video_record.now_rank,
+                his_rank=missing_video_record.his_rank,
+                vt=missing_video_record.vt,
+                vv=missing_video_record.vv
+            ))
+
         self.logger.info('c30 video pipeline done! return %d records' % len(aid_record_dict))
-        self.return_record_list = [record for record in aid_record_dict.values()]
+        return_record_list = [record for record in aid_record_dict.values()]
+        return_record_list.extend(missing_record_list)
+        self.return_record_list = return_record_list
         session.close()
 
 
