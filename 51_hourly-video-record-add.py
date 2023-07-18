@@ -89,7 +89,14 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
         self.session = Session()
 
     def process(self):
+        # TMP time limit
+        start_ts_s = get_ts_s()
         while not self.aid_queue.empty():
+            current_ts_s = get_ts_s()
+            if current_ts_s - start_ts_s > 60 * 10:
+                self.logger.warning('Time limit reached. Exit.')
+                break
+
             aid = self.aid_queue.get()
             self.logger.debug(f'Now check c30 need insert but not found aid. aid: {aid}')
             timer = Timer()
