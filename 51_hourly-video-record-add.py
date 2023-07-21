@@ -93,7 +93,7 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
         start_ts_s = get_ts_s()
         while not self.aid_queue.empty():
             current_ts_s = get_ts_s()
-            if current_ts_s - start_ts_s > 60 * 10:
+            if current_ts_s - start_ts_s > 60 * 30:
                 self.logger.warning('Time limit reached. Exit.')
                 break
 
@@ -555,7 +555,7 @@ class C30PipelineRunner(Thread):
 
         # create jobs
         check_c30_need_insert_but_not_found_aid_job_num = min(
-            50, max(len(need_insert_but_record_not_found_aid_list) // 10, 1))  # [1, 50]
+            100, max(len(need_insert_but_record_not_found_aid_list) // 10, 1))  # [1, 100]
         check_c30_need_insert_but_not_found_aid_job_list = []
         for i in range(check_c30_need_insert_but_not_found_aid_job_num):
             check_c30_need_insert_but_not_found_aid_job_list.append(
