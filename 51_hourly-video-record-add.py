@@ -87,13 +87,14 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
         self.video_record_queue = video_record_queue
         self.service = service
         self.session = Session()
+        self._time_limit_s = 60 * 40  # 40 minutes
 
     def process(self):
         # TMP time limit
         start_ts_s = get_ts_s()
         while not self.aid_queue.empty():
             current_ts_s = get_ts_s()
-            if current_ts_s - start_ts_s > 60 * 40:
+            if current_ts_s - start_ts_s > self._time_limit_s:
                 self.logger.warning('Time limit reached. Exit.')
                 break
 
@@ -132,9 +133,15 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
                 if expected_change_found:
                     self.stat.condition['expected_change_found'] += 1
                 else:
-                    self.logger.warning(f'Expected change not found, maybe missing video from api. aid: {aid}')
+                    # Due to the bug of awesome api, some video may not be fetched from the batch api.
+                    # In this case, we need to retrieve video record via view api.
+                    # So much such missing video existed, therefore, to simplify the log,
+                    # we downgrade the log level from warning to debug.
+                    self.logger.debug(f'Expected change not found, maybe missing video from api. aid: {aid}')
                     self.stat.condition['expected_change_not_found'] += 1
 
+                    # TODO: Use stat data from video view that fetched when update video before, instead of re-fetch.
+                    #   This is excepted to save at least half time.
                     try:
                         video_view = self.service.get_video_view({'aid': aid})
                     except Exception as e2:
