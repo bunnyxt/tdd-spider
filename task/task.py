@@ -268,7 +268,7 @@ def update_video(aid: int, service: Service, session: Session, out_context: dict
     # get video view
     try:
         video_view = service.get_video_view({'aid': aid})
-        if out_context:
+        if out_context is not None:
             out_context['video_view'] = video_view
     except CodeError as e:
         if e.code != curr_video.code:
