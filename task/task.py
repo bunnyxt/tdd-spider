@@ -136,7 +136,6 @@ def add_sprint_video_record_via_video_view(aid: int, service: Service, session: 
 
 
 def add_video(aid: int, service: Service, session: Session, test_exist=True) -> TddVideo:
-    # TODO: rollback already committed changes if error occurs
     # test exist
     if test_exist:
         video = DBOperation.query_video_via_aid(aid, session)
@@ -202,24 +201,37 @@ def add_video(aid: int, service: Service, session: Session, test_exist=True) -> 
 
     # add staff
     if video_view.staff is not None:
-        new_video.hasstaff = 1
-        for staff_item in video_view.staff:
-            member_mid_set.add(staff_item.mid)
-            try:
-                add_member(staff_item.mid, service, session)
-            except AlreadyExistError:
-                logger.debug(f'Staff member of new video already exist! '
-                             f'video: {new_video}, mid: {staff_item.mid}')
-            except Exception as e:
-                logger.error(f'Fail to add staff member when add new video! '
-                             f'video: {new_video}, mid: {staff_item.mid}, error: {e}')
-                raise e
-            try:
-                commit_staff(new_video.added, aid, staff_item.mid, staff_item.title, session)
-            except Exception as e:
-                logger.error(f'Fail to add staff member when add new video! '
-                             f'video: {new_video}, mid: {staff_item.mid}, title: {staff_item.title}, error: {e}')
-                raise e
+        added_staff_mids: list[int] = []
+        try:
+            new_video.hasstaff = 1
+            for staff_item in video_view.staff:
+                member_mid_set.add(staff_item.mid)
+                try:
+                    add_member(staff_item.mid, service, session)
+                except AlreadyExistError:
+                    logger.debug(f'Staff member of new video already exist! '
+                                 f'video: {new_video}, mid: {staff_item.mid}')
+                except Exception as e:
+                    logger.error(f'Fail to add staff member when add new video! '
+                                 f'video: {new_video}, mid: {staff_item.mid}, error: {e}')
+                    raise e
+                try:
+                    commit_staff(new_video.added, aid, staff_item.mid, staff_item.title, session)
+                except AlreadyExistError:
+                    logger.debug(f'Video staff relationship of new video already exist! '
+                                 f'video: {new_video}, mid: {staff_item.mid}, title: {staff_item.title}')
+                except Exception as e:
+                    logger.error(f'Fail to add video staff relationship when add new video! '
+                                 f'video: {new_video}, mid: {staff_item.mid}, title: {staff_item.title}, error: {e}')
+                    raise e
+                added_staff_mids.append(staff_item.mid)
+        except Exception as e:
+            # rollback already committed video staff relationship
+            for mid in added_staff_mids:
+                # TODO: use new db operation which can raise exception
+                DBOperation.delete_video_staff_via_aid_mid(aid, mid, session)
+                # no need to remove already added member
+            raise e
     else:
         new_video.hasstaff = 0
 
