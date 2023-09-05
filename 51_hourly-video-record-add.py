@@ -11,7 +11,7 @@ import re
 from serverchan import sc_send_summary, sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from core import TddError
-from service import Service, ArchiveRankByPartionArchive
+from service import Service, ArchiveRankByPartionArchive, VideoView
 from job import GetPartionArchiveJob, JobStat, AddVideoRecordJob, Job
 from typing import List, Tuple, NamedTuple, Optional
 from task import update_video, add_video, AlreadyExistError
@@ -104,7 +104,9 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
             timer.start()
 
             try:
-                tdd_video_logs = update_video(aid, self.service, self.session)
+                update_video_context = {}
+                tdd_video_logs = update_video(aid, self.service, self.session, out_context=update_video_context)
+                video_view: VideoView = update_video_context['video_view']
             except Exception as e:
                 self.logger.error(f'Fail to update video info. aid: {aid}, error: {e}')
                 self.stat.condition['update_exception'] += 1
@@ -134,39 +136,32 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
                     self.stat.condition['expected_change_found'] += 1
                 else:
                     # Due to the bug of awesome api, some video may not be fetched from the batch api.
-                    # In this case, we need to retrieve video record via view api.
+                    # In this case, we need to retrieve video record from video view.
                     # So much such missing video existed, therefore, to simplify the log,
                     # we downgrade the log level from warning to debug.
                     self.logger.debug(f'Expected change not found, maybe missing video from api. aid: {aid}')
                     self.stat.condition['expected_change_not_found'] += 1
 
-                    # TODO: Use stat data from video view that fetched when update video before, instead of re-fetch.
-                    #   This is excepted to save at least half time.
-                    try:
-                        video_view = self.service.get_video_view({'aid': aid})
-                    except Exception as e2:
-                        self.logger.error(f'Fail to get video view for video record. aid: {aid}, error: {e2}')
-                        self.stat.condition['get_video_view_exception'] += 1
-                    else:
-                        new_video_record = TddVideoRecord(
-                            aid=aid,
-                            added=get_ts_s(),
-                            view=video_view.stat.view,
-                            danmaku=video_view.stat.danmaku,
-                            reply=video_view.stat.reply,
-                            favorite=video_view.stat.favorite,
-                            coin=video_view.stat.coin,
-                            share=video_view.stat.share,
-                            like=video_view.stat.like,
-                            dislike=video_view.stat.dislike,
-                            now_rank=video_view.stat.now_rank,
-                            his_rank=video_view.stat.his_rank,
-                            vt=video_view.stat.vt,
-                            vv=video_view.stat.vv,
-                        )
-                        self.video_record_queue.put(new_video_record)
-                        self.logger.info(f'Missing video record get. aid: {aid}, record: {new_video_record}')
-                        self.stat.condition['missing_video_record_get'] += 1
+                    # Parse video record from video view which already fetched before when update video.
+                    new_video_record = TddVideoRecord(
+                        aid=aid,
+                        added=get_ts_s(),
+                        view=video_view.stat.view,
+                        danmaku=video_view.stat.danmaku,
+                        reply=video_view.stat.reply,
+                        favorite=video_view.stat.favorite,
+                        coin=video_view.stat.coin,
+                        share=video_view.stat.share,
+                        like=video_view.stat.like,
+                        dislike=video_view.stat.dislike,
+                        now_rank=video_view.stat.now_rank,
+                        his_rank=video_view.stat.his_rank,
+                        vt=video_view.stat.vt,
+                        vv=video_view.stat.vv,
+                    )
+                    self.video_record_queue.put(new_video_record)
+                    self.logger.info(f'Missing video record get. aid: {aid}, record: {new_video_record}')
+                    self.stat.condition['missing_video_record_get'] += 1
 
             timer.stop()
             self.logger.debug(f'Finish check c30 need insert but not found aid. '
