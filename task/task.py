@@ -243,7 +243,7 @@ def add_video(aid: int, service: Service, session: Session, test_exist=True) -> 
     return new_video
 
 
-def update_video(aid: int, service: Service, session: Session) -> List[TddVideoLog]:
+def update_video(aid: int, service: Service, session: Session, out_context: dict = None) -> List[TddVideoLog]:
     # get current video
     # TODO: use new db operation which can raise exception
     curr_video: TddVideo = DBOperation.query_video_via_aid(aid, session)
@@ -256,6 +256,8 @@ def update_video(aid: int, service: Service, session: Session) -> List[TddVideoL
     # get video view
     try:
         video_view = service.get_video_view({'aid': aid})
+        if out_context:
+            out_context['video_view'] = video_view
     except CodeError as e:
         if e.code != curr_video.code:
             if e.code != -403:  # just due to not logged in, actually it's okay
