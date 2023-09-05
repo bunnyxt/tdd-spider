@@ -1760,21 +1760,24 @@ def run_hourly_video_record_add(time_task):
     # upstream data acquisition pipeline, c30 and c0 pipeline runner, init -> start -> join -> records
     logger.info('Now start upstream data acquisition pipelines...')
 
-    data_acquisition_pipeline_runner_list = [
-        C30PipelineRunner(time_label),
-        C0PipelineRunner(time_label),
-    ]
-    for runner in data_acquisition_pipeline_runner_list:
-        runner.start()
-    for runner in data_acquisition_pipeline_runner_list:
-        runner.join()
+    c30_runner = C30PipelineRunner(time_label)
+    c0_runner = C0PipelineRunner(time_label)
+
+    c30_runner.start()
+    c0_runner.start()
+
+    c30_runner.join()
+    c0_runner.join()
 
     records = []
-    for runner in data_acquisition_pipeline_runner_list:
-        if runner.return_record_list:
-            records += runner.return_record_list
-        else:
-            logger.error('Fail to get valid return_record_list from pipeline runner %s' % runner)
+    if c30_runner.return_record_list:
+        records += c30_runner.return_record_list
+    else:
+        logger.error('Fail to get valid return_record_list from c30 pipeline runner!')
+    if c0_runner.return_record_list:
+        records += c0_runner.return_record_list
+    else:
+        logger.error('Fail to get valid return_record_list from c0 pipeline runner!')
 
     # remove duplicate records
     logger.info('Now check duplicate records...')
@@ -1799,7 +1802,6 @@ def run_hourly_video_record_add(time_task):
         logger.warning('Finish remove duplicate records! Total %d duplicate records removed!' % removed_records_count)
 
     logger.info('Finish upstream data acquisition pipelines! %d records received' % len(records))
-    del data_acquisition_pipeline_runner_list  # release memory
 
     # downstream data analysis pipeline
     logger.info('Now start downstream data analysis pipelines...')
