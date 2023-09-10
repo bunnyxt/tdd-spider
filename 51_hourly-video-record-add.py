@@ -87,15 +87,16 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
         self.video_record_queue = video_record_queue
         self.service = service
         self.session = Session()
-        self._time_limit_s = 60 * 40  # 40 minutes
+        self._duration_limit_s = 60 * 40  # 40 minutes
 
     def process(self):
-        # TMP time limit
-        start_ts_s = get_ts_s()
+        # TMP duration limit
+        duration_limit_due_ts = get_ts_s() + self._duration_limit_s
+        self.logger.info(f'Duration limit due at {ts_s_to_str(duration_limit_due_ts)}.')
+
         while not self.aid_queue.empty():
-            current_ts_s = get_ts_s()
-            if current_ts_s - start_ts_s > self._time_limit_s:
-                self.logger.warning('Time limit reached. Exit.')
+            if get_ts_s() > duration_limit_due_ts:
+                self.logger.warning('Duration limit reached. Exit.')
                 break
 
             aid = self.aid_queue.get()
@@ -378,7 +379,7 @@ class C30PipelineRunner(Thread):
         # merge statistics counters
         get_partion_archive_job_stat_merged = sum(get_partion_archive_job_stat_list, JobStat())
 
-        self.logger.info(f'Finish get archive videos!')
+        self.logger.info('Finish get archive videos!')
         self.logger.info(get_partion_archive_job_stat_merged.get_summary())
 
         # parse archive video to record
@@ -410,8 +411,82 @@ class C30PipelineRunner(Thread):
             aid_record_dict[record.aid] = record
         self.logger.info(f'{len(aid_record_dict)} record(s) left after remove duplication.')
 
-    def check_all_zero_record(self, aid_record_dict: dict[int, RecordNew]) -> dict[int, RecordNew]:
-        pass
+    def check_all_zero_record(
+            self, aid_record_dict: dict[int, RecordNew], service: Service, duration_limit_s: int = 180
+    ) -> dict[int, RecordNew]:
+        # TODO: use multi-thread for checking all zero record
+        # check all zero record
+        self.logger.info('Now start checking all zero record...')
+        timer = Timer()
+        timer.start()
+
+        # TMP duration limit
+        duration_limit_due_ts = get_ts_s() + duration_limit_s
+        self.logger.info(f'Duration limit due at {ts_s_to_str(duration_limit_due_ts)}.')
+
+        # prepare stat
+        stat = JobStat()
+        stat.start_ts_ms = timer.start_ts_ms
+        stat.condition['all_zero_record'] = 0
+        stat.condition['all_zero_record_again'] = 0
+        stat.condition['not_all_zero_record'] = 0
+        stat.condition['fail_fetch_again'] = 0
+
+        for aid, record in aid_record_dict.items():
+            if get_ts_s() > duration_limit_due_ts:
+                self.logger.warning('Duration limit reached. Exit.')
+                break
+            stat.total_count += 1
+
+            if not is_all_zero_record(record):
+                continue
+
+            self.logger.warning(f'All zero record of video aid {aid} detected! Try get video record again...')
+            stat.condition['all_zero_record'] += 1
+
+            # get video view
+            try:
+                video_view = service.get_video_view({'aid': aid})
+            except Exception as e:
+                self.logger.warning(f'Fail to get valid video view. aid: {aid}, error: {e}')
+                stat.condition['fail_fetch_again'] += 1
+                continue
+
+            # assemble new record
+            new_record = RecordNew(
+                added=get_ts_s(),
+                aid=video_view.aid,
+                bvid=video_view.bvid.lstrip('BV'),
+                view=video_view.stat.view,
+                danmaku=video_view.stat.danmaku,
+                reply=video_view.stat.reply,
+                favorite=video_view.stat.favorite,
+                coin=video_view.stat.coin,
+                share=video_view.stat.share,
+                like=video_view.stat.like,
+                dislike=video_view.stat.dislike,
+                now_rank=video_view.stat.now_rank,
+                his_rank=video_view.stat.his_rank,
+                vt=video_view.stat.vt,
+                vv=video_view.stat.vv
+            )
+
+            if is_all_zero_record(new_record):
+                self.logger.warning('Get all zero record of video aid %d again!' % aid)
+                stat.condition['all_zero_record_again'] += 1
+                continue
+
+            # TODO: do not update aid_record_dict, add to another dict instead
+            aid_record_dict[aid] = new_record
+            self.logger.warning(f'Use new not all zero record {new_record} instead.')
+            stat.condition['not_all_zero_record'] += 1
+
+        timer.stop()
+        stat.end_ts_ms = timer.end_ts_ms
+
+        self.logger.info('Finish checking all zero record!')
+        self.logger.info(stat.get_summary())
+        return aid_record_dict
 
     def run(self):
         self.logger.info('c30 video pipeline start')
@@ -424,65 +499,7 @@ class C30PipelineRunner(Thread):
             return
 
         # TODO: migrate to check_all_zero_record
-        # check all zero record
-        self.logger.info('Now start checking all zero record...')
-        check_all_zero_record_start_ts = get_ts_s()
-        check_all_zero_record_latest_end_ts = check_all_zero_record_start_ts + 3 * 60
-        self.logger.info('Limit this process end before %s.' % ts_s_to_str(check_all_zero_record_latest_end_ts))
-        check_all_zero_record_all_zero_record_count = 0
-        check_all_zero_record_all_zero_record_again_count = 0
-        check_all_zero_record_not_all_zero_record_count = 0
-        check_all_zero_record_fail_fetch_again_count = 0
-        for aid, record in aid_record_dict.items():
-            if is_all_zero_record(record):
-                # check within this if statement in order to reduce check end time consumption
-                if get_ts_s() > check_all_zero_record_latest_end_ts:
-                    self.logger.warning('Exceed limit end time! Now break!')
-                    break
-                check_all_zero_record_all_zero_record_count += 1
-                self.logger.warning('All zero record of video aid %d detected! Try get video record again...' % aid)
-
-                # get video view
-                try:
-                    video_view = service.get_video_view({'aid': aid})
-                except Exception as e:
-                    self.logger.warning(f'Fail to get valid video view. aid: {aid}, error: {e}')
-                    check_all_zero_record_fail_fetch_again_count += 1
-                    continue
-
-                # assemble new record
-                new_record = RecordNew(
-                    added=get_ts_s(),
-                    aid=video_view.aid,
-                    bvid=video_view.bvid.lstrip('BV'),
-                    view=video_view.stat.view,
-                    danmaku=video_view.stat.danmaku,
-                    reply=video_view.stat.reply,
-                    favorite=video_view.stat.favorite,
-                    coin=video_view.stat.coin,
-                    share=video_view.stat.share,
-                    like=video_view.stat.like,
-                    dislike=video_view.stat.dislike,
-                    now_rank=video_view.stat.now_rank,
-                    his_rank=video_view.stat.his_rank,
-                    vt=video_view.stat.vt,
-                    vv=video_view.stat.vv
-                )
-
-                if is_all_zero_record(new_record):
-                    self.logger.warning('Get all zero record of video aid %d again!' % aid)
-                    check_all_zero_record_all_zero_record_again_count += 1
-                    continue
-                aid_record_dict[aid] = new_record
-                self.logger.warning('Use new not all zero record %s instead.' % str(new_record))
-                check_all_zero_record_not_all_zero_record_count += 1
-        self.logger.info(
-            'Finish checking all zero record! ' +
-            '%d all zero record found, ' % check_all_zero_record_all_zero_record_count +
-            '%d got all zero record again, ' % check_all_zero_record_all_zero_record_again_count +
-            '%d got new not all zero record, ' % check_all_zero_record_not_all_zero_record_count +
-            '%d fail to fetch again.' % check_all_zero_record_fail_fetch_again_count
-        )
+        aid_record_dict = self.check_all_zero_record(aid_record_dict, service)
 
         # get need insert aid list
         session = Session()
