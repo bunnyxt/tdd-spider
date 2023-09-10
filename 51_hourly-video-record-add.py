@@ -336,8 +336,9 @@ class C30PipelineRunner(Thread):
     def get_all_c30_video_aid_record_dict(self, service: Service, job_num: int = 60) -> Optional[dict[int, RecordNew]]:
         # get archive rank by partion
         try:
+            # special config for get_archive_rank_by_partion
             archive_rank_by_partion = service.get_archive_rank_by_partion(
-                {'tid': 30, 'pn': 1, 'ps': 50}, retry=30)  # retry more times to make sure get archive count
+                {'tid': 30, 'pn': 1, 'ps': 50}, retry=30, timeout=3, colddown_factor=0.2)
         except Exception as e:
             # TODO: throw exception
             self.logger.error(f'Fail to get archive rank by partion for calculating page num total. '

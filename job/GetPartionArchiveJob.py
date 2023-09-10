@@ -28,13 +28,9 @@ class GetPartionArchiveJob(Job):
 
             # get archive rank by partion
             try:
-                # override retry for get_archive_rank_by_partion to at least 20
-                if self.service.get_default_retry() < 20:
-                    archive_rank_by_partion = self.service.get_archive_rank_by_partion(
-                        {'tid': self.tid, 'pn': page_num, 'ps': 50}, retry=20)
-                else:
-                    archive_rank_by_partion = self.service.get_archive_rank_by_partion(
-                        {'tid': self.tid, 'pn': page_num, 'ps': 50})
+                # special config for get_archive_rank_by_partion
+                archive_rank_by_partion = self.service.get_archive_rank_by_partion(
+                    {'tid': self.tid, 'pn': page_num, 'ps': 50}, retry=20, timeout=2, colddown_factor=0.2)
             except Exception as e:
                 self.logger.error(f'Fail to get archive rank by partion. '
                                   f'tid: {self.tid}, pn: {page_num}, ps: 50, error: {e}')
