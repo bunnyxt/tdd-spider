@@ -3,7 +3,6 @@ from sqlalchemy.orm.session import Session
 from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord, \
     TddMemberLog, TddSprintVideoRecord
 from util import get_ts_s, a2b, same_pic_url
-from typing import List
 from core import TddError
 from .error import AlreadyExistError, NotExistError
 
@@ -255,14 +254,14 @@ def add_video(aid: int, service: Service, session: Session, test_exist=True) -> 
     return new_video
 
 
-def update_video(aid: int, service: Service, session: Session, out_context: dict = None) -> List[TddVideoLog]:
+def update_video(aid: int, service: Service, session: Session, out_context: dict = None) -> list[TddVideoLog]:
     # get current video
     # TODO: use new db operation which can raise exception
     curr_video: TddVideo = DBOperation.query_video_via_aid(aid, session)
     if curr_video is None:
         raise NotExistError(table='tdd_video', params={'aid': aid})
 
-    video_update_logs: List[TddVideoLog] = []
+    video_update_logs: list[TddVideoLog] = []
     bvid = a2b(aid)
 
     # get video view
@@ -485,7 +484,7 @@ def update_member(mid: int, service: Service, session: Session):
     if curr_member is None:
         raise NotExistError(table='tdd_member', params={'mid': mid})
 
-    member_update_logs: List[TddMemberLog] = []
+    member_update_logs: list[TddMemberLog] = []
 
     # get member space
     try:
