@@ -24,8 +24,13 @@ class AddLatestVideoJob(Job):
 
             # get archive rank by partion
             try:
-                archive_rank_by_partion = self.service.get_archive_rank_by_partion(
-                    {'tid': self.tid, 'pn': page_num, 'ps': 50})
+                # override retry for get_archive_rank_by_partion to at least 10
+                if self.service.get_default_retry() < 10:
+                    archive_rank_by_partion = self.service.get_archive_rank_by_partion(
+                        {'tid': self.tid, 'pn': page_num, 'ps': 50}, retry=10)
+                else:
+                    archive_rank_by_partion = self.service.get_archive_rank_by_partion(
+                        {'tid': self.tid, 'pn': page_num, 'ps': 50})
             except Exception as e:
                 self.logger.error(f'Fail to get archive rank by partion. '
                                   f'tid: {self.tid}, pn: {page_num}, ps: 50, error: {e}')
