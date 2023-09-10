@@ -410,7 +410,7 @@ class C30PipelineRunner(Thread):
         self.record_queue = record_queue
         self.logger = logging.getLogger('C30PipelineRunner')
 
-    def get_all_c30_video_aid_record_dict(self, service: Service, job_num: int = 60) -> Optional[dict[int, RecordNew]]:
+    def get_all_c30_video_aid_record_dict(self, service: Service, job_num: int = 80) -> Optional[dict[int, RecordNew]]:
         # get archive rank by partion
         try:
             # special config for get_archive_rank_by_partion
