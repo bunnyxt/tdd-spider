@@ -488,6 +488,7 @@ class C30PipelineRunner(Thread):
         for record in record_list:
             aid_record_dict[record.aid] = record
         self.logger.info(f'{len(aid_record_dict)} record(s) left after remove duplication.')
+        return aid_record_dict
 
     def check_all_zero_record(
             self, aid_record_dict: dict[int, RecordNew], service: Service, duration_limit_s: int = 180
