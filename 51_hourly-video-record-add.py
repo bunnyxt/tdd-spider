@@ -534,7 +534,7 @@ class C30PipelineRunner(Thread):
             stat.total_count += 1
 
             if is_all_zero_record(record):
-                self.logger.warning(f'All zero record of video aid {aid} detected! Try get video record again...')
+                self.logger.debug(f'All zero record of video aid {aid} detected. Try get video record again.')
                 stat.condition['all_zero_record'] += 1
 
                 # get video view
@@ -564,12 +564,12 @@ class C30PipelineRunner(Thread):
                     )
 
                     if is_all_zero_record(new_record):
-                        self.logger.warning('Get all zero record of video aid %d again!' % aid)
+                        self.logger.debug(f'All zero record of video aid {aid} detected again.')
                         stat.condition['all_zero_record_again'] += 1
                     else:
                         # not all zero record got, use new record
                         record = new_record
-                        self.logger.warning(f'Use new not all zero record {new_record} instead.')
+                        self.logger.info(f'Not all zero record {new_record} detected. Use new record instead.')
                         stat.condition['not_all_zero_record'] += 1
 
             checked_record_queue.put(record)
