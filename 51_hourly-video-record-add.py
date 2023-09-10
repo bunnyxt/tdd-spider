@@ -327,10 +327,10 @@ class C30NoNeedInsertAidsChecker(Thread):
 # TODO: refactor using Job, create a class DataAcquisitionJob,
 #  then derive from it to create C30DataAcquisitionJob and C3DataAcquisitionJob
 class C30PipelineRunner(Thread):
-    def __init__(self, time_label):
+    def __init__(self, time_label, records_queue):
         super().__init__()
         self.time_label = time_label
-        self.return_record_list = None
+        self.records_queue = records_queue
         self.logger = logging.getLogger('C30PipelineRunner')
 
     def get_all_c30_video_aid_record_dict(self, service: Service, job_num: int = 60) -> Optional[dict[int, RecordNew]]:
@@ -660,15 +660,18 @@ class C30PipelineRunner(Thread):
         self.logger.info('c30 video pipeline done! return %d records' % len(aid_record_dict))
         return_record_list = [record for record in aid_record_dict.values()]
         return_record_list.extend(missing_record_list)
-        self.return_record_list = return_record_list
+
+        for record in return_record_list:
+            self.records_queue.put(record)
+
         session.close()
 
 
 class C0PipelineRunner(Thread):
-    def __init__(self, time_label):
+    def __init__(self, time_label, records_queue):
         super().__init__()
         self.time_label = time_label
-        self.return_record_list = None
+        self.records_queue = records_queue
         self.logger = logging.getLogger('C0PipelineRunner')
 
     def run(self):
@@ -740,7 +743,9 @@ class C0PipelineRunner(Thread):
         self.logger.info('%d record(s) parsed' % len(record_list))
 
         self.logger.info('c0 video pipeline done! return %d records' % len(record_list))
-        self.return_record_list = record_list
+
+        for record in record_list:
+            self.records_queue.put(record)
 
 
 # TODO: change to record new
@@ -1788,8 +1793,10 @@ def run_hourly_video_record_add(time_task):
     # upstream data acquisition pipeline, c30 and c0 pipeline runner, init -> start -> join -> records
     logger.info('Now start upstream data acquisition pipelines...')
 
-    c30_runner = C30PipelineRunner(time_label)
-    c0_runner = C0PipelineRunner(time_label)
+    records_queue: Queue[RecordNew] = Queue()
+
+    c30_runner = C30PipelineRunner(time_label, records_queue)
+    c0_runner = C0PipelineRunner(time_label, records_queue)
 
     c30_runner.start()
     c0_runner.start()
@@ -1798,14 +1805,16 @@ def run_hourly_video_record_add(time_task):
     c0_runner.join()
 
     records = []
-    if c30_runner.return_record_list:
-        records += c30_runner.return_record_list
+    if c30_runner.records_queue:
+        while c30_runner.records_queue.qsize() > 0:
+            records.append(c30_runner.records_queue.get())
     else:
-        logger.error('Fail to get valid return_record_list from c30 pipeline runner!')
-    if c0_runner.return_record_list:
-        records += c0_runner.return_record_list
+        logger.error('Fail to get valid records_queue from c30 pipeline runner!')
+    if c0_runner.records_queue:
+        while c0_runner.records_queue.qsize() > 0:
+            records.append(c0_runner.records_queue.get())
     else:
-        logger.error('Fail to get valid return_record_list from c0 pipeline runner!')
+        logger.error('Fail to get valid records_queue from c0 pipeline runner!')
 
     # remove duplicate records
     logger.info('Now check duplicate records...')
