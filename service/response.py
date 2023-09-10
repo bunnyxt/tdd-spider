@@ -1,4 +1,4 @@
-from typing import Optional, NamedTuple, List
+from typing import Optional, NamedTuple
 
 __all__ = [
     'VideoStat',
@@ -74,7 +74,7 @@ class VideoView(NamedTuple):
     stat: VideoViewStat
     attribute: Optional[int]
     forward: Optional[int]
-    staff: Optional[List[VideoViewStaffItem]]
+    staff: Optional[list[VideoViewStaffItem]]
 
 
 class VideoTag(NamedTuple):
@@ -83,7 +83,7 @@ class VideoTag(NamedTuple):
 
 
 class VideoTags(NamedTuple):
-    tags: List[VideoTag]
+    tags: list[VideoTag]
 
 
 class MemberSpace(NamedTuple):
@@ -137,5 +137,5 @@ class ArchiveRankByPartionArchive(NamedTuple):
 
 
 class ArchiveRankByPartion(NamedTuple):
-    archives: List[ArchiveRankByPartionArchive]
+    archives: list[ArchiveRankByPartionArchive]
     page: ArchiveRankByPartionPage

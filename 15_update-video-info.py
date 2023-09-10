@@ -4,7 +4,6 @@ from serverchan import sc_send_summary
 from util import logging_init, get_week_day, fullname
 from timer import Timer
 from queue import Queue
-from typing import List
 from job import UpdateVideoJob, JobStat
 import logging
 
@@ -23,7 +22,7 @@ def update_video_info():
     service = Service(mode='worker')
 
     # get all bvids
-    all_bvids: List[str] = DBOperation.query_all_video_bvids(session)
+    all_bvids: list[str] = DBOperation.query_all_video_bvids(session)
     logger.info(f'Total {len(all_bvids)} videos got.')
 
     # add latest 5000 bvids first
@@ -61,7 +60,7 @@ def update_video_info():
         job.join()
 
     # collect statistics
-    job_stat_list: List[JobStat] = []
+    job_stat_list: list[JobStat] = []
     for job in job_list:
         job_stat_list.append(job.stat)
 

@@ -4,7 +4,6 @@ from queue import Queue
 from service import Service
 from serverchan import sc_send_summary
 from timer import Timer
-from typing import List
 from job import UpdateMemberJob, JobStat
 import logging
 
@@ -23,7 +22,7 @@ def update_member_info():
     service = Service(mode='worker', retry=20)
 
     # get all mids
-    all_mids: List[int] = DBOperation.query_all_member_mids(session)
+    all_mids: list[int] = DBOperation.query_all_member_mids(session)
     logger.info(f'Total {len(all_mids)} members got.')
 
     # add latest 1000 mids first
@@ -61,7 +60,7 @@ def update_member_info():
         job.join()
 
     # collect statistics
-    job_stat_list: List[JobStat] = []
+    job_stat_list: list[JobStat] = []
     for job in job_list:
         job_stat_list.append(job.stat)
 

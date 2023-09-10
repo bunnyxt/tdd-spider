@@ -3,7 +3,6 @@ from service import Service
 from util import logging_init, fullname
 from serverchan import sc_send_summary
 from queue import Queue
-from typing import List
 from timer import Timer
 from job import AddMemberFollowerRecordJob, JobStat
 import logging
@@ -23,7 +22,7 @@ def add_member_follower_record():
     service = Service(mode='worker')
 
     # load all mids
-    mids: List[int] = DBOperation.query_all_member_mids(session=session)
+    mids: list[int] = DBOperation.query_all_member_mids(session=session)
     logger.info(f'Total {len(mids)} members got.')
 
     # put mid into queue
@@ -48,7 +47,7 @@ def add_member_follower_record():
         job.join()
 
     # collect statistics
-    job_stat_list: List[JobStat] = []
+    job_stat_list: list[JobStat] = []
     for job in job_list:
         job_stat_list.append(job.stat)
 

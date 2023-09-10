@@ -13,7 +13,7 @@ from collections import namedtuple, defaultdict, Counter
 from core import TddError
 from service import Service, ArchiveRankByPartionArchive, VideoView
 from job import GetPartionArchiveJob, JobStat, AddVideoRecordJob, Job
-from typing import List, Tuple, NamedTuple, Optional
+from typing import NamedTuple, Optional
 from task import update_video, add_video, AlreadyExistError
 from timer import Timer
 import logging
@@ -356,7 +356,7 @@ class C30PipelineRunner(Thread):
         self.logger.info(f'{page_num_queue.qsize()} page nums put into queue.')
 
         # create archive video queue
-        archive_video_queue: Queue[Tuple[int, ArchiveRankByPartionArchive]] = Queue()
+        archive_video_queue: Queue[tuple[int, ArchiveRankByPartionArchive]] = Queue()
 
         # create jobs
         job_list = []
@@ -617,7 +617,7 @@ class C30PipelineRunner(Thread):
             job.join()
 
         # collect statistics
-        check_c30_need_insert_but_not_found_aid_job_stat_list: List[JobStat] = []
+        check_c30_need_insert_but_not_found_aid_job_stat_list: list[JobStat] = []
         for job in check_c30_need_insert_but_not_found_aid_job_list:
             check_c30_need_insert_but_not_found_aid_job_stat_list.append(job.stat)
 
@@ -636,7 +636,7 @@ class C30PipelineRunner(Thread):
                         check_c30_need_insert_but_not_found_aid_job_stat_merged)
 
         # collect missing video records
-        missing_record_list: List[RecordNew] = []
+        missing_record_list: list[RecordNew] = []
         while not missing_video_record_queue.empty():
             missing_video_record = missing_video_record_queue.get()
             missing_record_list.append(RecordNew(
@@ -709,7 +709,7 @@ class C0PipelineRunner(Thread):
             job.join()
 
         # collect statistics
-        job_stat_list: List[JobStat] = []
+        job_stat_list: list[JobStat] = []
         for job in job_list:
             job_stat_list.append(job.stat)
 
@@ -720,7 +720,7 @@ class C0PipelineRunner(Thread):
         self.logger.info(job_stat_merged.get_summary())
 
         # parse tdd video record to record
-        record_list: List[RecordNew] = []
+        record_list: list[RecordNew] = []
         while not video_record_queue.empty():
             video_record = video_record_queue.get()
             record_list.append(RecordNew(

@@ -3,7 +3,6 @@ from db import Session
 from service import Service, ArchiveRankByPartionArchive
 from queue import Queue
 from timer import Timer
-from typing import Tuple
 from util import format_ts_ms, get_ts_s
 
 __all__ = ['GetPartionArchiveJob']
@@ -11,7 +10,7 @@ __all__ = ['GetPartionArchiveJob']
 
 class GetPartionArchiveJob(Job):
     def __init__(self, name: str, tid: int, page_num_queue: Queue[int],
-                 archive_video_queue: Queue[Tuple[int, ArchiveRankByPartionArchive]], service: Service):
+                 archive_video_queue: Queue[tuple[int, ArchiveRankByPartionArchive]], service: Service):
         super().__init__(name)
         self.tid = tid
         self.page_num_queue = page_num_queue
