@@ -323,6 +323,8 @@ class C30NoNeedInsertAidsChecker(Thread):
         self.logger.warning('no_change_found_aids: %r' % result_status_dict['no_change_found_aids'])
 
 
+# TODO: refactor using Job, create a class DataAcquisitionJob,
+#  then derive from it to create C30DataAcquisitionJob and C3DataAcquisitionJob
 class C30PipelineRunner(Thread):
     def __init__(self, time_label):
         super().__init__()
@@ -330,19 +332,16 @@ class C30PipelineRunner(Thread):
         self.return_record_list = None
         self.logger = logging.getLogger('C30PipelineRunner')
 
-    def run(self):
-        self.logger.info('c30 video pipeline start')
-
-        service = Service(mode='worker')
-
+    def get_all_c30_video_aid_record_dict(self, service: Service, job_num: int = 60) -> Optional[dict[int, RecordNew]]:
         # get archive rank by partion
         try:
             archive_rank_by_partion = service.get_archive_rank_by_partion(
                 {'tid': 30, 'pn': 1, 'ps': 50}, retry=20)  # retry more times to make sure get archive count
         except Exception as e:
+            # TODO: throw exception
             self.logger.error(f'Fail to get archive rank by partion for calculating page num total. '
-                              f'tid: {50}, pn: 1, ps: 50, error: {e}')
-            return
+                              f'tid: 30, pn: 1, ps: 50, error: {e}')
+            return None
 
         # calculate page num total
         page_num_total = math.ceil(archive_rank_by_partion.page.count / 50)
@@ -358,24 +357,22 @@ class C30PipelineRunner(Thread):
         archive_video_queue: Queue[Tuple[int, ArchiveRankByPartionArchive]] = Queue()
 
         # create jobs
-        get_partion_archive_job_num = 60
-        get_partion_archive_job_list = []
-        for i in range(get_partion_archive_job_num):
-            get_partion_archive_job_list.append(
-                GetPartionArchiveJob(f'job_{i}', 30, page_num_queue, archive_video_queue, service))
+        job_list = []
+        for i in range(job_num):
+            job_list.append(GetPartionArchiveJob(f'job_{i}', 30, page_num_queue, archive_video_queue, service))
 
         # start jobs
-        for job in get_partion_archive_job_list:
+        for job in job_list:
             job.start()
-        logger.info(f'{get_partion_archive_job_num} job(s) started.')
+        logger.info(f'{job_num} job(s) started.')
 
         # wait for jobs
-        for job in get_partion_archive_job_list:
+        for job in job_list:
             job.join()
 
         # collect statistics
-        get_partion_archive_job_stat_list: List[JobStat] = []
-        for job in get_partion_archive_job_list:
+        get_partion_archive_job_stat_list: list[JobStat] = []
+        for job in job_list:
             get_partion_archive_job_stat_list.append(job.stat)
 
         # merge statistics counters
@@ -385,10 +382,10 @@ class C30PipelineRunner(Thread):
         self.logger.info(get_partion_archive_job_stat_merged.get_summary())
 
         # parse archive video to record
-        record_queue: Queue[RecordNew] = Queue()
+        record_list: list[RecordNew] = []
         while not archive_video_queue.empty():
             added, archive_video = archive_video_queue.get()
-            record_queue.put(RecordNew(
+            record_list.append(RecordNew(
                 added=added,
                 aid=archive_video.aid,
                 bvid=archive_video.bvid.lstrip('BV'),
@@ -405,15 +402,28 @@ class C30PipelineRunner(Thread):
                 vt=archive_video.stat.vt,
                 vv=archive_video.stat.vv
             ))
-        self.logger.info('%d record(s) parsed' % record_queue.qsize())
+        self.logger.info(f'{len(record_list)} record(s) parsed.')
 
-        # remove duplicate and record queue -> aid record dict
+        # remove duplication, then record list -> aid record dict
         aid_record_dict = {}
-        while not record_queue.empty():
-            record = record_queue.get()
+        for record in record_list:
             aid_record_dict[record.aid] = record
-        self.logger.info('%d record(s) left after remove duplication' % len(aid_record_dict))
+        self.logger.info(f'{len(aid_record_dict)} record(s) left after remove duplication.')
 
+    def check_all_zero_record(self, aid_record_dict: dict[int, RecordNew]) -> dict[int, RecordNew]:
+        pass
+
+    def run(self):
+        self.logger.info('c30 video pipeline start')
+
+        service = Service(mode='worker')
+
+        # TODO: use try catch instead of test None return
+        aid_record_dict = self.get_all_c30_video_aid_record_dict(service)
+        if not aid_record_dict:
+            return
+
+        # TODO: migrate to check_all_zero_record
         # check all zero record
         self.logger.info('Now start checking all zero record...')
         check_all_zero_record_start_ts = get_ts_s()
