@@ -324,13 +324,90 @@ class C30NoNeedInsertAidsChecker(Thread):
         self.logger.warning('no_change_found_aids: %r' % result_status_dict['no_change_found_aids'])
 
 
+class DataAcquisitionJob(Job):
+    def __init__(self, name: str, time_label: str, record_queue: Queue[RecordNew]):
+        super().__init__(name)
+        self.time_label = time_label
+        self.record_queue = record_queue
+
+
+class C0DataAcquisitionJob(DataAcquisitionJob):
+    def __init__(self, time_label: str, record_queue: Queue[RecordNew]):
+        super().__init__('c0', time_label, record_queue)
+
+    def process(self):
+        # get need insert aid list
+        session = Session()
+        need_insert_aid_list = get_need_insert_aid_list(self.time_label, False, session)
+        session.close()
+        self.logger.info(f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
+
+        service = Service(mode='worker')
+
+        # put aid into queue
+        aid_queue: Queue[int] = Queue()
+        for aid in need_insert_aid_list:
+            aid_queue.put(aid)
+
+        # create video record queue
+        video_record_queue: Queue[TddVideoRecord] = Queue()
+
+        # create jobs
+        job_num = 10
+        job_list = []
+        for i in range(job_num):
+            job_list.append(AddVideoRecordJob(f'job_{i}', aid_queue, video_record_queue, service))
+
+        # start jobs
+        for job in job_list:
+            job.start()
+        logger.info(f'{job_num} job(s) started.')
+
+        # wait for jobs
+        for job in job_list:
+            job.join()
+
+        # collect statistics
+        job_stat_list: list[JobStat] = []
+        for job in job_list:
+            job_stat_list.append(job.stat)
+
+        # merge statistics counters
+        job_stat_merged = sum(job_stat_list, JobStat())
+
+        self.logger.info('Finish add need insert aid list!')
+        self.logger.info(job_stat_merged.get_summary())
+
+        # parse tdd video record to record
+        while not video_record_queue.empty():
+            video_record = video_record_queue.get()
+            self.record_queue.put(RecordNew(
+                added=video_record.added,
+                aid=video_record.aid,
+                bvid=a2b(video_record.aid),
+                view=video_record.view,
+                danmaku=video_record.danmaku,
+                reply=video_record.reply,
+                favorite=video_record.favorite,
+                coin=video_record.coin,
+                share=video_record.share,
+                like=video_record.like,
+                dislike=video_record.dislike,
+                now_rank=video_record.now_rank,
+                his_rank=video_record.his_rank,
+                vt=video_record.vt,
+                vv=video_record.vv,
+            ))
+        self.logger.info(f'{self.record_queue.qsize()} record(s) parsed and returned.')
+
+
 # TODO: refactor using Job, create a class DataAcquisitionJob,
-#  then derive from it to create C30DataAcquisitionJob and C3DataAcquisitionJob
+#  then derive from it to create C30DataAcquisitionJob and C0DataAcquisitionJob
 class C30PipelineRunner(Thread):
-    def __init__(self, time_label, records_queue):
+    def __init__(self, time_label, record_queue):
         super().__init__()
         self.time_label = time_label
-        self.records_queue = records_queue
+        self.record_queue = record_queue
         self.logger = logging.getLogger('C30PipelineRunner')
 
     def get_all_c30_video_aid_record_dict(self, service: Service, job_num: int = 60) -> Optional[dict[int, RecordNew]]:
@@ -662,90 +739,90 @@ class C30PipelineRunner(Thread):
         return_record_list.extend(missing_record_list)
 
         for record in return_record_list:
-            self.records_queue.put(record)
+            self.record_queue.put(record)
 
         session.close()
 
 
-class C0PipelineRunner(Thread):
-    def __init__(self, time_label, records_queue):
-        super().__init__()
-        self.time_label = time_label
-        self.records_queue = records_queue
-        self.logger = logging.getLogger('C0PipelineRunner')
-
-    def run(self):
-        self.logger.info('c0 video pipeline start')
-
-        # get need insert aid list
-        session = Session()
-        need_insert_aid_list = get_need_insert_aid_list(self.time_label, False, session)
-        session.close()
-        self.logger.info('%d aid(s) need insert for time label %s' % (len(need_insert_aid_list), self.time_label))
-
-        service = Service(mode='worker')
-
-        # put aid into queue
-        aid_queue: Queue[int] = Queue()
-        for aid in need_insert_aid_list:
-            aid_queue.put(aid)
-
-        # create video record queue
-        video_record_queue: Queue[TddVideoRecord] = Queue()
-
-        # create jobs
-        job_num = 10
-        job_list = []
-        for i in range(job_num):
-            job_list.append(AddVideoRecordJob(f'job_{i}', aid_queue, video_record_queue, service))
-
-        # start jobs
-        for job in job_list:
-            job.start()
-        logger.info(f'{job_num} job(s) started.')
-
-        # wait for jobs
-        for job in job_list:
-            job.join()
-
-        # collect statistics
-        job_stat_list: list[JobStat] = []
-        for job in job_list:
-            job_stat_list.append(job.stat)
-
-        # merge statistics counters
-        job_stat_merged = sum(job_stat_list, JobStat())
-
-        self.logger.info(f'Finish add need insert aid list!')
-        self.logger.info(job_stat_merged.get_summary())
-
-        # parse tdd video record to record
-        record_list: list[RecordNew] = []
-        while not video_record_queue.empty():
-            video_record = video_record_queue.get()
-            record_list.append(RecordNew(
-                added=video_record.added,
-                aid=video_record.aid,
-                bvid=a2b(video_record.aid),
-                view=video_record.view,
-                danmaku=video_record.danmaku,
-                reply=video_record.reply,
-                favorite=video_record.favorite,
-                coin=video_record.coin,
-                share=video_record.share,
-                like=video_record.like,
-                dislike=video_record.dislike,
-                now_rank=video_record.now_rank,
-                his_rank=video_record.his_rank,
-                vt=video_record.vt,
-                vv=video_record.vv,
-            ))
-        self.logger.info('%d record(s) parsed' % len(record_list))
-
-        self.logger.info('c0 video pipeline done! return %d records' % len(record_list))
-
-        for record in record_list:
-            self.records_queue.put(record)
+# class C0PipelineRunner(Thread):
+#     def __init__(self, time_label, records_queue):
+#         super().__init__()
+#         self.time_label = time_label
+#         self.records_queue = records_queue
+#         self.logger = logging.getLogger('C0PipelineRunner')
+#
+#     def run(self):
+#         self.logger.info('c0 video pipeline start')
+#
+#         # get need insert aid list
+#         session = Session()
+#         need_insert_aid_list = get_need_insert_aid_list(self.time_label, False, session)
+#         session.close()
+#         self.logger.info('%d aid(s) need insert for time label %s' % (len(need_insert_aid_list), self.time_label))
+#
+#         service = Service(mode='worker')
+#
+#         # put aid into queue
+#         aid_queue: Queue[int] = Queue()
+#         for aid in need_insert_aid_list:
+#             aid_queue.put(aid)
+#
+#         # create video record queue
+#         video_record_queue: Queue[TddVideoRecord] = Queue()
+#
+#         # create jobs
+#         job_num = 10
+#         job_list = []
+#         for i in range(job_num):
+#             job_list.append(AddVideoRecordJob(f'job_{i}', aid_queue, video_record_queue, service))
+#
+#         # start jobs
+#         for job in job_list:
+#             job.start()
+#         logger.info(f'{job_num} job(s) started.')
+#
+#         # wait for jobs
+#         for job in job_list:
+#             job.join()
+#
+#         # collect statistics
+#         job_stat_list: list[JobStat] = []
+#         for job in job_list:
+#             job_stat_list.append(job.stat)
+#
+#         # merge statistics counters
+#         job_stat_merged = sum(job_stat_list, JobStat())
+#
+#         self.logger.info(f'Finish add need insert aid list!')
+#         self.logger.info(job_stat_merged.get_summary())
+#
+#         # parse tdd video record to record
+#         record_list: list[RecordNew] = []
+#         while not video_record_queue.empty():
+#             video_record = video_record_queue.get()
+#             record_list.append(RecordNew(
+#                 added=video_record.added,
+#                 aid=video_record.aid,
+#                 bvid=a2b(video_record.aid),
+#                 view=video_record.view,
+#                 danmaku=video_record.danmaku,
+#                 reply=video_record.reply,
+#                 favorite=video_record.favorite,
+#                 coin=video_record.coin,
+#                 share=video_record.share,
+#                 like=video_record.like,
+#                 dislike=video_record.dislike,
+#                 now_rank=video_record.now_rank,
+#                 his_rank=video_record.his_rank,
+#                 vt=video_record.vt,
+#                 vv=video_record.vv,
+#             ))
+#         self.logger.info('%d record(s) parsed' % len(record_list))
+#
+#         self.logger.info('c0 video pipeline done! return %d records' % len(record_list))
+#
+#         for record in record_list:
+#             self.records_queue.put(record)
 
 
 # TODO: change to record new
@@ -1796,7 +1873,7 @@ def run_hourly_video_record_add(time_task):
     records_queue: Queue[RecordNew] = Queue()
 
     c30_runner = C30PipelineRunner(time_label, records_queue)
-    c0_runner = C0PipelineRunner(time_label, records_queue)
+    c0_runner = C0DataAcquisitionJob(time_label, records_queue)
 
     c30_runner.start()
     c0_runner.start()
@@ -1805,16 +1882,16 @@ def run_hourly_video_record_add(time_task):
     c0_runner.join()
 
     records = []
-    if c30_runner.records_queue:
-        while c30_runner.records_queue.qsize() > 0:
-            records.append(c30_runner.records_queue.get())
+    if c30_runner.record_queue:
+        while c30_runner.record_queue.qsize() > 0:
+            records.append(c30_runner.record_queue.get())
     else:
-        logger.error('Fail to get valid records_queue from c30 pipeline runner!')
-    if c0_runner.records_queue:
-        while c0_runner.records_queue.qsize() > 0:
-            records.append(c0_runner.records_queue.get())
+        logger.error('Fail to get valid record_queue from c30 pipeline runner!')
+    if c0_runner.record_queue:
+        while c0_runner.record_queue.qsize() > 0:
+            records.append(c0_runner.record_queue.get())
     else:
-        logger.error('Fail to get valid records_queue from c0 pipeline runner!')
+        logger.error('Fail to get valid record_queue from c0 pipeline runner!')
 
     # remove duplicate records
     logger.info('Now check duplicate records...')
