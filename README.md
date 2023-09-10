@@ -14,14 +14,14 @@ Data acquisition program of TianDian Daily (<a href="https://tdd.bunnyxt.com">ht
 
 ## Introduction
 
-[TianDian Daily](https://tdd.bunnyxt.com) is a personal project of bunnyxt, which hopes to enhance Vocaloid China related data exchange, providing complete and easily accessible data and data visualization for everyone who interests in VC data.
+[TianDian Daily](https://tdd.bunnyxt.com) is a personal project by bunnyxt designed to elevate the exchange of Vocaloid China-related data. Our goal is to offer comprehensive, easily accessible data and intuitive visualizations for all enthusiasts interested in Vocaloid China statistics.
 
-The project is made up with three different part, connect with center database, which are: 
+The project is composed of three distinct components, all interconnected with a central database. These are:
 
 - frontend: data presentation and interaction ([tdd-frontend](https://github.com/bunnyxt/tdd-frontend))
 - backend: data access api ([tdd-backend](https://github.com/bunnyxt/tdd-backend))
 - spider: original data collection（tdd-spider）
 
-See the structure below
+See the structure below.
 
 ![TianDian Daily structure](./tdd-structure.png 'TianDian Daily structure')
