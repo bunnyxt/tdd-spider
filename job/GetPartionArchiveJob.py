@@ -28,10 +28,10 @@ class GetPartionArchiveJob(Job):
 
             # get archive rank by partion
             try:
-                # override retry for get_archive_rank_by_partion to at least 10
-                if self.service.get_default_retry() < 10:
+                # override retry for get_archive_rank_by_partion to at least 20
+                if self.service.get_default_retry() < 20:
                     archive_rank_by_partion = self.service.get_archive_rank_by_partion(
-                        {'tid': self.tid, 'pn': page_num, 'ps': 50}, retry=10)
+                        {'tid': self.tid, 'pn': page_num, 'ps': 50}, retry=20)
                 else:
                     archive_rank_by_partion = self.service.get_archive_rank_by_partion(
                         {'tid': self.tid, 'pn': page_num, 'ps': 50})

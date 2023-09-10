@@ -337,7 +337,7 @@ class C30PipelineRunner(Thread):
         # get archive rank by partion
         try:
             archive_rank_by_partion = service.get_archive_rank_by_partion(
-                {'tid': 30, 'pn': 1, 'ps': 50}, retry=20)  # retry more times to make sure get archive count
+                {'tid': 30, 'pn': 1, 'ps': 50}, retry=30)  # retry more times to make sure get archive count
         except Exception as e:
             # TODO: throw exception
             self.logger.error(f'Fail to get archive rank by partion for calculating page num total. '
