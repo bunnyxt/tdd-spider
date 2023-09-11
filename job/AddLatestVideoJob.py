@@ -26,7 +26,7 @@ class AddLatestVideoJob(Job):
             try:
                 # special config for get_archive_rank_by_partion
                 archive_rank_by_partion = self.service.get_archive_rank_by_partion(
-                    {'tid': self.tid, 'pn': page_num, 'ps': 50}, retry=20, timeout=2, colddown_factor=0.2)
+                    {'tid': self.tid, 'pn': page_num, 'ps': 50}, retry=30, timeout=1.5, colddown_factor=0.1)
             except Exception as e:
                 self.logger.error(f'Fail to get archive rank by partion. '
                                   f'tid: {self.tid}, pn: {page_num}, ps: 50, error: {e}')
