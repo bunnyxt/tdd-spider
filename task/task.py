@@ -479,7 +479,7 @@ def add_member(mid: int, service: Service, session: Session, test_exist=True):
     # get member space
     try:
         # special config for get_member_space
-        member_space = service.get_member_space({'mid': mid}, retry=30, timeout=3, colddown_factor=0.2)
+        member_space = service.get_member_space({'mid': mid}, retry=20, timeout=1.5, colddown_factor=0.1)
     except ServiceError as e:
         raise e
 
@@ -513,7 +513,7 @@ def update_member(mid: int, service: Service, session: Session):
     # get member space
     try:
         # special config for get_member_space
-        member_space = service.get_member_space({'mid': mid}, retry=30, timeout=3, colddown_factor=0.2)
+        member_space = service.get_member_space({'mid': mid}, retry=20, timeout=1.5, colddown_factor=0.1)
     except CodeError as e:
         # code maybe -404, otherwise anti-crawler triggered, raise error
         if e.code != -404:
