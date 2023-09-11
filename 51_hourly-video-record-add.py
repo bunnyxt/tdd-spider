@@ -484,17 +484,16 @@ class C30PipelineRunner(Thread):
         self.record_queue = record_queue
         self.logger = logging.getLogger('C30PipelineRunner')
 
-    def get_all_c30_video_record(self, service: Service, job_num: int = 80) -> Optional[Queue[RecordNew]]:
+    def get_all_c30_video_record_from_archive_api(self, service: Service, job_num: int = 80) -> Queue[RecordNew]:
         # get archive rank by partion
         try:
             # special config for get_archive_rank_by_partion
             archive_rank_by_partion = service.get_archive_rank_by_partion(
                 {'tid': 30, 'pn': 1, 'ps': 50}, retry=30, timeout=3, colddown_factor=0.2)
         except Exception as e:
-            # TODO: throw exception
             self.logger.error(f'Fail to get archive rank by partion for calculating page num total. '
                               f'tid: 30, pn: 1, ps: 50, error: {e}')
-            return None
+            raise e
 
         # calculate page num total
         page_num_total = math.ceil(archive_rank_by_partion.page.count / 50)
@@ -637,17 +636,10 @@ class C30PipelineRunner(Thread):
             sc_send_summary(f'{script_fullname}.check_all_zero_record', timer, job_stat_merged)
         return checked_record_queue
 
-    def run(self):
-        self.logger.info('c30 video pipeline start')
-
+    def process_comprehensive(self):
         service = Service(mode='worker')
 
-        # TODO: use try catch instead of test None return
-        record_queue = self.get_all_c30_video_record(service)
-        if not record_queue:
-            return
-
-        record_queue = self.check_all_zero_record(record_queue, service)
+        record_queue = self.get_all_c30_video_record_from_archive_api(service)
 
         # build aid record dict
         aid_record_dict: dict[int, RecordNew] = {}
@@ -658,7 +650,7 @@ class C30PipelineRunner(Thread):
         # get need insert aid list
         session = Session()
         need_insert_aid_list = get_need_insert_aid_list(self.time_label, True, session)
-        self.logger.info('%d aid(s) need insert for time label %s' % (len(need_insert_aid_list), self.time_label))
+        self.logger.info(f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
         # insert records
         self.logger.info('Now start inserting records...')
@@ -818,6 +810,92 @@ class C30PipelineRunner(Thread):
             self.record_queue.put(record)
 
         session.close()
+
+    def process_simple(self):
+        # get need insert aid list
+        session = Session()
+        need_insert_aid_list = get_need_insert_aid_list(self.time_label, True, session)
+        session.close()
+        self.logger.info(f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
+
+        service = Service(mode='worker')
+
+        # put aid into queue
+        aid_queue: Queue[int] = Queue()
+        for aid in need_insert_aid_list:
+            aid_queue.put(aid)
+
+        # create video record queue
+        video_record_queue: Queue[TddVideoRecord] = Queue()
+
+        # create jobs
+        job_num = 50
+        job_list = []
+        for i in range(job_num):
+            # TODO: add duration limit
+            job_list.append(AddVideoRecordJob(f'job_{i}', aid_queue, video_record_queue, service))
+
+        # start jobs
+        for job in job_list:
+            job.start()
+        logger.info(f'{job_num} job(s) started.')
+
+        # wait for jobs
+        for job in job_list:
+            job.join()
+
+        # collect statistics
+        job_stat_list: list[JobStat] = []
+        for job in job_list:
+            job_stat_list.append(job.stat)
+
+        # merge statistics counters
+        job_stat_merged = sum(job_stat_list, JobStat())
+
+        self.logger.info('Finish add need insert aid list!')
+        self.logger.info(job_stat_merged.get_summary())
+
+        # parse tdd video record to record
+        while not video_record_queue.empty():
+            video_record = video_record_queue.get()
+            self.record_queue.put(RecordNew(
+                added=video_record.added,
+                aid=video_record.aid,
+                bvid=a2b(video_record.aid),
+                view=video_record.view,
+                danmaku=video_record.danmaku,
+                reply=video_record.reply,
+                favorite=video_record.favorite,
+                coin=video_record.coin,
+                share=video_record.share,
+                like=video_record.like,
+                dislike=video_record.dislike,
+                now_rank=video_record.now_rank,
+                his_rank=video_record.his_rank,
+                vt=video_record.vt,
+                vv=video_record.vv,
+            ))
+        self.logger.info(f'{self.record_queue.qsize()} record(s) parsed and returned.')
+
+    def run(self):
+        self.logger.info('c30 video pipeline start')
+
+        service = Service(mode='worker')
+
+        # get archive rank by partion
+        try:
+            # special config for get_archive_rank_by_partion
+            service.get_archive_rank_by_partion(
+                {'tid': 30, 'pn': 1, 'ps': 50}, retry=30, timeout=3, colddown_factor=0.2)
+
+            # no error raised, api works fine, go comprehensive process
+            self.process_comprehensive()
+        except Exception as e:
+            self.logger.error(f'Fail to get archive rank by partion, very likely api broken. '
+                              f'tid: 30, pn: 1, ps: 50, error: {e}')
+
+            # api broken, go simple process
+            self.process_simple()
 
 
 # class C0PipelineRunner(Thread):
