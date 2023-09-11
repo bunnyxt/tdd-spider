@@ -3,24 +3,35 @@ from service import Service, CodeError
 from timer import Timer
 from queue import Queue
 from db import Session, TddVideoRecord
-from util import format_ts_ms
+from util import format_ts_ms, get_ts_s, ts_s_to_str
 from task import add_video_record_via_video_view, update_video
+from typing import Optional
 
 __all__ = ['AddVideoRecordJob']
 
 
 class AddVideoRecordJob(Job):
     def __init__(self, name: str, aid_queue: Queue[int], video_record_queue: Queue[TddVideoRecord], service: Service,
-                 update_if_code_error: bool = True):
+                 update_if_code_error: bool = True, duration_limit_s: Optional[int] = None):
         super().__init__(name)
         self.aid_queue = aid_queue
         self.video_record_queue = video_record_queue
         self.service = service
         self.session = Session()
         self.update_if_code_error = update_if_code_error
+        self.duration_limit_s = duration_limit_s
+        self.duration_limit_due_ts_s = None
 
     def process(self):
+        if self.duration_limit_s is not None:
+            self.duration_limit_due_ts_s = get_ts_s() + self.duration_limit_s
+            self.logger.info(f'Duration limit due at {ts_s_to_str(self.duration_limit_due_ts_s)}.')
+
         while not self.aid_queue.empty():
+            if self.duration_limit_due_ts_s is not None and get_ts_s() >= self.duration_limit_due_ts_s:
+                self.logger.info(f'Duration limit reached. Now exit.')
+                break
+
             aid = self.aid_queue.get()
             self.logger.debug(f'Now start add video record. aid: {aid}')
             timer = Timer()
