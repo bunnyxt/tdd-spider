@@ -28,10 +28,26 @@ class JobStat:
 
     def __add__(self, other):
         new_job_stat = JobStat()
+
+        # for time fields,
+        # use the farthest one if both are not None,
+        # otherwise use the one that is not None
         if self.start_ts_ms is not None and other.start_ts_ms is not None:
             new_job_stat.start_ts_ms = min(self.start_ts_ms, other.start_ts_ms)
+        elif self.start_ts_ms is not None:
+            new_job_stat.start_ts_ms = self.start_ts_ms
+        elif other.start_ts_ms is not None:
+            new_job_stat.start_ts_ms = other.start_ts_ms
+        if self.end_ts_ms is not None and other.end_ts_ms is not None:
             new_job_stat.end_ts_ms = max(self.end_ts_ms, other.end_ts_ms)
+        elif self.end_ts_ms is not None:
+            new_job_stat.end_ts_ms = self.end_ts_ms
+        elif other.end_ts_ms is not None:
+            new_job_stat.end_ts_ms = other.end_ts_ms
+
+        # for other fields, simply add together
         new_job_stat.total_count = self.total_count + other.total_count
         new_job_stat.total_duration_ms = self.total_duration_ms + other.total_duration_ms
         new_job_stat.condition = self.condition + other.condition
+
         return new_job_stat
