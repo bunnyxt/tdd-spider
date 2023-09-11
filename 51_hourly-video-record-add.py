@@ -858,6 +858,7 @@ class C30PipelineRunner(Thread):
         self.logger.info(job_stat_merged.get_summary())
 
         # parse tdd video record to record
+        record_cnt = 0
         while not video_record_queue.empty():
             video_record = video_record_queue.get()
             self.record_queue.put(RecordNew(
@@ -877,7 +878,8 @@ class C30PipelineRunner(Thread):
                 vt=video_record.vt,
                 vv=video_record.vv,
             ))
-        self.logger.info(f'{self.record_queue.qsize()} record(s) parsed and returned.')
+            record_cnt += 1
+        self.logger.info(f'{record_cnt} record(s) parsed and returned.')
 
     def run(self):
         self.logger.info('c30 video pipeline start')
@@ -1957,16 +1959,8 @@ def run_hourly_video_record_add(time_task):
     c0_runner.join()
 
     records = []
-    if c30_runner.record_queue:
-        while c30_runner.record_queue.qsize() > 0:
-            records.append(c30_runner.record_queue.get())
-    else:
-        logger.error('Fail to get valid record_queue from c30 pipeline runner!')
-    if c0_runner.record_queue:
-        while c0_runner.record_queue.qsize() > 0:
-            records.append(c0_runner.record_queue.get())
-    else:
-        logger.error('Fail to get valid record_queue from c0 pipeline runner!')
+    while not records_queue.empty():
+        records.append(records_queue.get())
 
     # remove duplicate records
     logger.info('Now check duplicate records...')
