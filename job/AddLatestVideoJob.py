@@ -1,7 +1,7 @@
 from .Job import Job
 from db import Session
 from service import Service
-from task import add_video, commit_video_record_via_archive_stat, AlreadyExistError
+from task import add_video, commit_video_record_via_newlist_archive_stat, AlreadyExistError
 from timer import Timer
 from util import format_ts_ms
 
@@ -24,15 +24,13 @@ class AddLatestVideoJob(Job):
 
             # get archive rank by partion
             try:
-                # special config for get_archive_rank_by_partion
-                archive_rank_by_partion = self.service.get_archive_rank_by_partion(
-                    {'tid': self.tid, 'pn': page_num, 'ps': 50}, retry=30, timeout=1.5, colddown_factor=0.1)
+                newlist = self.service.get_newlist({'rid': self.tid, 'pn': page_num, 'ps': 50})
             except Exception as e:
                 self.logger.error(f'Fail to get archive rank by partion. '
                                   f'tid: {self.tid}, pn: {page_num}, ps: 50, error: {e}')
                 self.stat.condition['get_archive_exception'] += 1
             else:
-                for archive in archive_rank_by_partion.archives:
+                for archive in newlist.archives:
                     # add video
                     try:
                         new_video = add_video(archive.aid, self.service, self.session)
@@ -47,7 +45,7 @@ class AddLatestVideoJob(Job):
 
                         # commit video record via archive stat
                         try:
-                            new_video_record = commit_video_record_via_archive_stat(archive.stat, self.session)
+                            new_video_record = commit_video_record_via_newlist_archive_stat(archive.stat, self.session)
                         except Exception as e:
                             self.logger.error(f'Fail to add video record parsed from archive stat! '
                                               f'archive: {archive}, error: {e}')
