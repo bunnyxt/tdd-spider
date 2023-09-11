@@ -832,8 +832,10 @@ class C30PipelineRunner(Thread):
         job_num = 50
         job_list = []
         for i in range(job_num):
-            # TODO: add duration limit
-            job_list.append(AddVideoRecordJob(f'job_{i}', aid_queue, video_record_queue, service))
+            job_list.append(AddVideoRecordJob(
+                f'job_{i}', aid_queue, video_record_queue, service,
+                duration_limit_s=60 * 40  # 40 minutes
+            ))
 
         # start jobs
         for job in job_list:
