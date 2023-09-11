@@ -174,6 +174,80 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
         self.session.close()
 
 
+class CheckAllZeroRecordJob(Job):
+    """
+    Check records, avoid all zero record got due to API error.
+    Once all zero record detected, try to re-fetch video record.
+    """
+
+    def __init__(self, name: str,
+                 record_queue: Queue[RecordNew], checked_record_queue: Queue[RecordNew], service: Service):
+        super().__init__(name)
+        self.record_queue = record_queue
+        self.checked_record_queue = checked_record_queue
+        self.service = service
+        self._duration_limit_s = 60 * 3  # 3 minutes
+
+    def process(self):
+        # TMP duration limit
+        duration_limit_due_ts = get_ts_s() + self._duration_limit_s
+        self.logger.info(f'Duration limit due at {ts_s_to_str(duration_limit_due_ts)}.')
+
+        while not self.record_queue.empty():
+            if get_ts_s() > duration_limit_due_ts:
+                self.logger.warning('Duration limit reached. Exit.')
+                break
+
+            record = self.record_queue.get()
+            timer = Timer()
+            timer.start()
+
+            if is_all_zero_record(record):
+                self.logger.debug(f'All zero record of video aid {record.aid} detected. Try get video record again.')
+                self.stat.condition['all_zero_record'] += 1
+
+                # get video view
+                try:
+                    video_view = self.service.get_video_view({'aid': record.aid})
+                except Exception as e:
+                    self.logger.warning(f'Fail to get valid video view. aid: {record.aid}, error: {e}')
+                    self.stat.condition['fail_fetch_again'] += 1
+                else:
+                    # assemble new record
+                    new_record = RecordNew(
+                        added=get_ts_s(),
+                        aid=video_view.aid,
+                        bvid=video_view.bvid.lstrip('BV'),
+                        view=video_view.stat.view,
+                        danmaku=video_view.stat.danmaku,
+                        reply=video_view.stat.reply,
+                        favorite=video_view.stat.favorite,
+                        coin=video_view.stat.coin,
+                        share=video_view.stat.share,
+                        like=video_view.stat.like,
+                        dislike=video_view.stat.dislike,
+                        now_rank=video_view.stat.now_rank,
+                        his_rank=video_view.stat.his_rank,
+                        vt=video_view.stat.vt,
+                        vv=video_view.stat.vv
+                    )
+
+                    if is_all_zero_record(new_record):
+                        self.logger.debug(f'All zero record of video aid {record.aid} detected again.')
+                        self.stat.condition['all_zero_record_again'] += 1
+                    else:
+                        # not all zero record got, use new record
+                        record = new_record
+                        self.logger.info(f'Not all zero record {new_record} detected. Use new record instead.')
+                        self.stat.condition['not_all_zero_record'] += 1
+
+            self.checked_record_queue.put(record)
+
+            timer.stop()
+            self.stat.total_count += 1
+            self.stat.total_duration_ms += timer.get_duration_ms()
+
+
 # class C30NeedAddButNotFoundAidsChecker(Thread):
 #     def __init__(self, need_insert_but_record_not_found_aid_list):
 #         super().__init__()
@@ -497,101 +571,70 @@ class C30PipelineRunner(Thread):
         return record_queue
 
     def check_all_zero_record(
-            self, record_queue: Queue[RecordNew], service: Service, duration_limit_s: int = 180
+            self, record_queue: Queue[RecordNew], service: Service, job_num: int = 50
     ) -> Queue[RecordNew]:
-        # TODO: use multi-thread for checking all zero record
-        # check all zero record
         self.logger.info('Now start checking all zero record...')
         timer = Timer()
         timer.start()
 
-        # TMP duration limit
-        duration_limit_due_ts = get_ts_s() + duration_limit_s
-        self.logger.info(f'Duration limit due at {ts_s_to_str(duration_limit_due_ts)}.')
-
-        # TMP record_queue length
+        # write down record_queue length
         record_queue_len = record_queue.qsize()
+        self.logger.info(f'Will check {record_queue_len} record(s).')
 
         # prepare checked record queue
         checked_record_queue: Queue[RecordNew] = Queue()
 
-        # prepare stat
+        # create jobs
+        job_list = []
+        for i in range(job_num):
+            job_list.append(CheckAllZeroRecordJob(f'job_{i}', record_queue, checked_record_queue, service))
+
+        # start jobs
+        for job in job_list:
+            job.start()
+        logger.info(f'{job_num} job(s) started.')
+
+        # wait for jobs
+        for job in job_list:
+            job.join()
+
+        # collect statistics
+        job_stat_list: list[JobStat] = []
+        for job in job_list:
+            job_stat_list.append(job.stat)
+
+        # merge statistics counters with pre-initialized stat
         stat = JobStat()
-        stat.start_ts_ms = timer.start_ts_ms
         stat.condition['all_zero_record'] = 0
+        stat.condition['fail_fetch_again'] = 0
         stat.condition['all_zero_record_again'] = 0
         stat.condition['not_all_zero_record'] = 0
-        stat.condition['fail_fetch_again'] = 0
-
-        # check record one by one, with duration limit
-        while not record_queue.empty():
-            if get_ts_s() > duration_limit_due_ts:
-                self.logger.warning('Duration limit reached. Exit.')
-                break
-
-            record = record_queue.get()
-            aid = record.aid
-            stat.total_count += 1
-
-            if is_all_zero_record(record):
-                self.logger.debug(f'All zero record of video aid {aid} detected. Try get video record again.')
-                stat.condition['all_zero_record'] += 1
-
-                # get video view
-                try:
-                    video_view = service.get_video_view({'aid': aid})
-                except Exception as e:
-                    self.logger.warning(f'Fail to get valid video view. aid: {aid}, error: {e}')
-                    stat.condition['fail_fetch_again'] += 1
-                else:
-                    # assemble new record
-                    new_record = RecordNew(
-                        added=get_ts_s(),
-                        aid=video_view.aid,
-                        bvid=video_view.bvid.lstrip('BV'),
-                        view=video_view.stat.view,
-                        danmaku=video_view.stat.danmaku,
-                        reply=video_view.stat.reply,
-                        favorite=video_view.stat.favorite,
-                        coin=video_view.stat.coin,
-                        share=video_view.stat.share,
-                        like=video_view.stat.like,
-                        dislike=video_view.stat.dislike,
-                        now_rank=video_view.stat.now_rank,
-                        his_rank=video_view.stat.his_rank,
-                        vt=video_view.stat.vt,
-                        vv=video_view.stat.vv
-                    )
-
-                    if is_all_zero_record(new_record):
-                        self.logger.debug(f'All zero record of video aid {aid} detected again.')
-                        stat.condition['all_zero_record_again'] += 1
-                    else:
-                        # not all zero record got, use new record
-                        record = new_record
-                        self.logger.info(f'Not all zero record {new_record} detected. Use new record instead.')
-                        stat.condition['not_all_zero_record'] += 1
-
-            checked_record_queue.put(record)
-
-        timer.stop()
-        stat.end_ts_ms = timer.end_ts_ms
+        job_stat_merged = sum(job_stat_list, stat)
 
         # add remaining record to checked record queue
         while not record_queue.empty():
             checked_record_queue.put(record_queue.get())
 
-        # TMP checked_record_queue length
+        # write down checked_record_queue length
         checked_record_queue_len = checked_record_queue.qsize()
-
-        # TMP assert record_queue_len == checked_record_queue_len
+        self.logger.info(f'Got {checked_record_queue_len} record(s) after check.')
         if record_queue_len != checked_record_queue_len:
-            self.logger.error(f'TMP record_queue_len != checked_record_queue_len. '
-                              f'record_queue_len: {record_queue_len}, '
-                              f'checked_record_queue_len: {checked_record_queue_len}')
+            self.logger.error(f'Records number not match after check! '
+                              f'before: {record_queue_len}, after: {checked_record_queue_len}')
 
+        # write down records number into stat condition
+        job_stat_merged.condition['record_queue_len'] = record_queue_len
+        job_stat_merged.condition['checked_record_queue_len'] = checked_record_queue_len
+
+        timer.stop()
+
+        # summary
         self.logger.info('Finish checking all zero record!')
-        self.logger.info(stat.get_summary())
+        self.logger.info(timer.get_summary())
+        self.logger.info(job_stat_merged.get_summary())
+        if job_stat_merged.condition['record_queue_len'] != job_stat_merged.condition['checked_record_queue_len'] \
+                or job_stat_merged.condition['not_all_zero_record'] > 0:
+            sc_send_summary(f'{script_fullname}.check_all_zero_record', timer, job_stat_merged)
         return checked_record_queue
 
     def run(self):
