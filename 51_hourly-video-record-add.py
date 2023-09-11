@@ -11,8 +11,8 @@ import re
 from serverchan import sc_send_summary, sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from core import TddError
-from service import Service, ArchiveRankByPartionArchive, VideoView
-from job import GetPartionArchiveJob, JobStat, AddVideoRecordJob, Job
+from service import Service, NewlistArchive, VideoView
+from job import GetNewlistJob, JobStat, AddVideoRecordJob, Job
 from typing import NamedTuple, Optional
 from task import update_video, add_video, AlreadyExistError
 from timer import Timer
@@ -484,19 +484,17 @@ class C30PipelineRunner(Thread):
         self.record_queue = record_queue
         self.logger = logging.getLogger('C30PipelineRunner')
 
-    def get_all_c30_video_record_from_archive_api(self, service: Service, job_num: int = 80) -> Queue[RecordNew]:
-        # get archive rank by partion
+    def get_all_c30_video_record_from_newlist_api(self, service: Service, job_num: int = 80) -> Queue[RecordNew]:
+        # get newlist
         try:
-            # special config for get_archive_rank_by_partion
-            archive_rank_by_partion = service.get_archive_rank_by_partion(
-                {'tid': 30, 'pn': 1, 'ps': 50}, retry=30, timeout=3, colddown_factor=0.2)
+            new_list = service.get_newlist({'rid': 30, 'pn': 1, 'ps': 50})
         except Exception as e:
             self.logger.error(f'Fail to get archive rank by partion for calculating page num total. '
                               f'tid: 30, pn: 1, ps: 50, error: {e}')
             raise e
 
         # calculate page num total
-        page_num_total = math.ceil(archive_rank_by_partion.page.count / 50)
+        page_num_total = math.ceil(new_list.page.count / 50)
         self.logger.info(f'Archive page num total calculated. page_num_total: {page_num_total}')
 
         # put page num into queue
@@ -506,12 +504,12 @@ class C30PipelineRunner(Thread):
         self.logger.info(f'{page_num_queue.qsize()} page nums put into queue.')
 
         # create archive video queue
-        archive_video_queue: Queue[tuple[int, ArchiveRankByPartionArchive]] = Queue()
+        archive_video_queue: Queue[tuple[int, NewlistArchive]] = Queue()
 
         # create jobs
         job_list = []
         for i in range(job_num):
-            job_list.append(GetPartionArchiveJob(f'job_{i}', 30, page_num_queue, archive_video_queue, service))
+            job_list.append(GetNewlistJob(f'job_{i}', 30, page_num_queue, archive_video_queue, service))
 
         # start jobs
         for job in job_list:
@@ -523,15 +521,15 @@ class C30PipelineRunner(Thread):
             job.join()
 
         # collect statistics
-        get_partion_archive_job_stat_list: list[JobStat] = []
+        job_stat_list: list[JobStat] = []
         for job in job_list:
-            get_partion_archive_job_stat_list.append(job.stat)
+            job_stat_list.append(job.stat)
 
         # merge statistics counters
-        get_partion_archive_job_stat_merged = sum(get_partion_archive_job_stat_list, JobStat())
+        job_stat_merged = sum(job_stat_list, JobStat())
 
         self.logger.info('Finish get archive videos!')
-        self.logger.info(get_partion_archive_job_stat_merged.get_summary())
+        self.logger.info(job_stat_merged.get_summary())
 
         # parse archive video to record
         record_list: list[RecordNew] = []
@@ -639,7 +637,7 @@ class C30PipelineRunner(Thread):
     def process_comprehensive(self):
         service = Service(mode='worker')
 
-        record_queue = self.get_all_c30_video_record_from_archive_api(service)
+        record_queue = self.get_all_c30_video_record_from_newlist_api(service)
 
         # build aid record dict
         aid_record_dict: dict[int, RecordNew] = {}
@@ -886,17 +884,15 @@ class C30PipelineRunner(Thread):
 
         service = Service(mode='worker')
 
-        # get archive rank by partion
+        # get newlist
         try:
-            # special config for get_archive_rank_by_partion
-            service.get_archive_rank_by_partion(
-                {'tid': 30, 'pn': 1, 'ps': 50}, retry=30, timeout=3, colddown_factor=0.2)
+            service.get_newlist({'rid': 30, 'pn': 1, 'ps': 50})
 
             # no error raised, api works fine, go comprehensive process
             self.process_comprehensive()
         except Exception as e:
-            self.logger.error(f'Fail to get archive rank by partion, very likely api broken. '
-                              f'tid: 30, pn: 1, ps: 50, error: {e}')
+            self.logger.error(f'Fail to get newlist, very likely api broken. '
+                              f'rid: 30, pn: 1, ps: 50, error: {e}')
 
             # api broken, go simple process
             self.process_simple()
