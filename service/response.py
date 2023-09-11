@@ -8,7 +8,7 @@ __all__ = [
     'MemberRelation',
     'ArchiveRankByPartionPage', 'ArchiveRankByPartionArchiveStat', 'ArchiveRankByPartionArchive',
     'ArchiveRankByPartion',
-    'NewlistPage', 'NewlistArchiveStat', 'NewlistArchive', 'Newlist',
+    'NewlistPage', 'NewlistArchiveStat', 'NewlistArchiveOwner', 'NewlistArchive', 'Newlist',
 ]
 
 
@@ -164,6 +164,12 @@ class NewlistArchiveStat(NamedTuple):
     vv: int
 
 
+class NewlistArchiveOwner(NamedTuple):
+    mid: int
+    name: str
+    face: str
+
+
 class NewlistArchive(NamedTuple):
     aid: int
     videos: int
@@ -174,8 +180,8 @@ class NewlistArchive(NamedTuple):
     title: str
     stat: NewlistArchiveStat
     bvid: str
-    description: str
-    mid: int
+    desc: str
+    owner: NewlistArchiveOwner
 
 
 class Newlist(NamedTuple):

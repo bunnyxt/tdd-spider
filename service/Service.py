@@ -12,7 +12,7 @@ from .response import \
     MemberSpace, \
     MemberRelation, \
     ArchiveRankByPartionPage, ArchiveRankByPartionArchiveStat, ArchiveRankByPartionArchive, ArchiveRankByPartion, \
-    NewlistPage, NewlistArchiveStat, NewlistArchive, Newlist
+    NewlistPage, NewlistArchiveStat, NewlistArchiveOwner, NewlistArchive, Newlist
 import logging
 
 logger = logging.getLogger('Service')
@@ -848,8 +848,7 @@ class Service:
                 raise FormatError('newlist', params, response,
                                   'Response data archives item should be a dict.')
             # data archives item should contain keys
-            for key in ['aid', 'videos', 'tid', 'tname', 'copyright', 'pic', 'title', 'stat', 'bvid', 'description',
-                        'mid']:
+            for key in ['aid', 'videos', 'tid', 'tname', 'copyright', 'pic', 'title', 'stat', 'bvid', 'desc', 'owner']:
                 if key not in data_archives_item.keys():
                     raise FormatError('newlist', params, response,
                                       f'Response data archives item should contain key {key}.')
@@ -863,6 +862,15 @@ class Service:
                     if key2 not in data_archives_item['stat'].keys():
                         raise FormatError('newlist', params, response,
                                           f'Response data archives item stat should contain key {key2}.')
+                # data archives item owner should be a dict
+                if type(data_archives_item['owner']) != dict:
+                    raise FormatError('newlist', params, response,
+                                      'Response data archives item owner should be a dict.')
+                # data archives item stat should contain keys
+                for key2 in ['mid', 'name', 'face']:
+                    if key2 not in data_archives_item['owner'].keys():
+                        raise FormatError('newlist', params, response,
+                                          f'Response data archives item owner should contain key {key2}.')
         # data page should be a dict
         if type(response['data']['page']) != dict:
             raise FormatError('newlist', params, response, 'Response data page should be a dict.')
@@ -904,8 +912,12 @@ class Service:
                     vv=data_archives_item['stat']['vv']
                 ),
                 bvid=data_archives_item['bvid'],
-                description=data_archives_item['description'],
-                mid=data_archives_item['mid'],
+                desc=data_archives_item['desc'],
+                owner=NewlistArchiveOwner(
+                    mid=data_archives_item['owner']['mid'],
+                    name=data_archives_item['owner']['name'],
+                    face=data_archives_item['owner']['face']
+                ),
             ))
         return Newlist(
             archives=newlistArchives,
