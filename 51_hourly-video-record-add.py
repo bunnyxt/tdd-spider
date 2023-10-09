@@ -81,10 +81,10 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
     - ...
     """
 
-    def __init__(self, name: str, aid_queue: Queue[int], video_record_queue: Queue[TddVideoRecord], service: Service):
+    def __init__(self, name: str, aid_queue: Queue[int], record_queue: Queue[RecordNew], service: Service):
         super().__init__(name)
         self.aid_queue = aid_queue
-        self.video_record_queue = video_record_queue
+        self.record_queue = record_queue
         self.service = service
         self.session = Session()
         self._duration_limit_s = 60 * 40  # 40 minutes
@@ -143,10 +143,11 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
                     self.logger.debug(f'Expected change not found, maybe missing video from api. aid: {aid}')
                     self.stat.condition['expected_change_not_found'] += 1
 
-                    # Parse video record from video view which already fetched before when update video.
-                    new_video_record = TddVideoRecord(
-                        aid=aid,
+                    # Parse record from video view which already fetched before when update video.
+                    new_record = RecordNew(
                         added=get_ts_s(),
+                        aid=aid,
+                        bvid=video_view.bvid.lstrip('BV'),
                         view=video_view.stat.view,
                         danmaku=video_view.stat.danmaku,
                         reply=video_view.stat.reply,
@@ -160,8 +161,8 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
                         vt=video_view.stat.vt,
                         vv=video_view.stat.vv,
                     )
-                    self.video_record_queue.put(new_video_record)
-                    self.logger.info(f'Missing video record get. aid: {aid}, record: {new_video_record}')
+                    self.record_queue.put(new_record)
+                    self.logger.info(f'Missing video record get. aid: {aid}, record: {new_record}')
                     self.stat.condition['missing_video_record_get'] += 1
 
             timer.stop()
@@ -651,12 +652,9 @@ class C30PipelineRunner(Thread):
         self.logger.info(f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
         # insert records
+        # TODO: extract to util funtion start
         self.logger.info('Now start inserting records...')
         # use sql directly, combine 1000 records into one sql to execute and commit
-        # TODO: remove old record
-        # sql_prefix = 'insert into ' \
-        #              'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
-        #              'values '
         sql_prefix = 'insert into ' \
                      'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`, ' \
                      'dislike, now_rank, his_rank, vt, vv) ' \
@@ -669,11 +667,6 @@ class C30PipelineRunner(Thread):
             if not record:
                 need_insert_but_record_not_found_aid_list.append(aid)
                 continue
-            # TODO: remove old record
-            # sql += '(%d, %d, %d, %d, %d, %d, %d, %d, %d), ' % (
-            #     record.added, record.aid,
-            #     record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like
-            # )
             sql += '(%d, %d, %d, %d, %d, %d, %d, %d, %d, %s, %s, %s, %s, %s), ' % (
                 record.added, record.aid,
                 record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like,
@@ -702,6 +695,7 @@ class C30PipelineRunner(Thread):
         self.logger.info('%d / %d done' % (len(need_insert_aid_list), len(need_insert_aid_list)))
         self.logger.info('Finish inserting records! %d records added, %d aids left' % (
             len(need_insert_aid_list), len(need_insert_but_record_not_found_aid_list)))
+        # TODO: extract to util funtion end
 
         # check need insert but not found aid list
         # # these aids should have record in aid_record_dict, but not found at present
@@ -724,7 +718,7 @@ class C30PipelineRunner(Thread):
                          f'put into queue.')
 
         # create missing video record queue
-        missing_video_record_queue: Queue[TddVideoRecord] = Queue()
+        missing_record_queue: Queue[RecordNew] = Queue()
 
         # create jobs
         check_c30_need_insert_but_not_found_aid_job_num = min(
@@ -733,7 +727,7 @@ class C30PipelineRunner(Thread):
         for i in range(check_c30_need_insert_but_not_found_aid_job_num):
             check_c30_need_insert_but_not_found_aid_job_list.append(
                 CheckC30NeedInsertButNotFoundAidsJob(
-                    f'job_{i}', need_insert_but_not_found_aid_queue, missing_video_record_queue, service))
+                    f'job_{i}', need_insert_but_not_found_aid_queue, missing_record_queue, service))
 
         # start jobs
         for job in check_c30_need_insert_but_not_found_aid_job_list:
@@ -780,25 +774,49 @@ class C30PipelineRunner(Thread):
 
         # collect missing video records
         missing_record_list: list[RecordNew] = []
-        while not missing_video_record_queue.empty():
-            missing_video_record = missing_video_record_queue.get()
-            missing_record_list.append(RecordNew(
-                added=missing_video_record.added,
-                aid=missing_video_record.aid,
-                bvid=a2b(missing_video_record.aid),
-                view=missing_video_record.view,
-                danmaku=missing_video_record.danmaku,
-                reply=missing_video_record.reply,
-                favorite=missing_video_record.favorite,
-                coin=missing_video_record.coin,
-                share=missing_video_record.share,
-                like=missing_video_record.like,
-                dislike=missing_video_record.dislike,
-                now_rank=missing_video_record.now_rank,
-                his_rank=missing_video_record.his_rank,
-                vt=missing_video_record.vt,
-                vv=missing_video_record.vv
-            ))
+        while not missing_record_queue.empty():
+            missing_record_list.append(missing_record_queue.get())
+
+        # insert missing records
+        # TODO: extract to util funtion start
+        self.logger.info('Now start inserting missing records...')
+        # use sql directly, combine 1000 records into one sql to execute and commit
+        sql_prefix = 'insert into ' \
+                     'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`, ' \
+                     'dislike, now_rank, his_rank, vt, vv) ' \
+                     'values '
+        sql = sql_prefix
+        log_gap = 1000 * max(1, (len(missing_record_list) // 1000 // 10))
+        for idx, record in enumerate(missing_record_list, 1):
+            sql += '(%d, %d, %d, %d, %d, %d, %d, %d, %d, %s, %s, %s, %s, %s), ' % (
+                record.added, record.aid,
+                record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like,
+                null_or_str(record.dislike), null_or_str(record.now_rank), null_or_str(record.his_rank),
+                null_or_str(record.vt), null_or_str(record.vv)
+            )
+            if idx % 1000 == 0:
+                sql = sql[:-2]  # remove ending comma and space
+                try:
+                    session.execute(sql)
+                    session.commit()
+                except Exception as e:
+                    self.logger.error('Fail to execute sql: %s...%s' % (sql[:100], sql[-100:]))
+                    self.logger.error('Exception: %s' % str(e))
+                sql = sql_prefix
+                if idx % log_gap == 0:
+                    self.logger.info('%d / %d done' % (idx, len(missing_record_list)))
+        if sql != sql_prefix:
+            sql = sql[:-2]  # remove ending comma and space
+            try:
+                session.execute(sql)
+                session.commit()
+            except Exception as e:
+                self.logger.error('Fail to execute sql: %s...%s' % (sql[:100], sql[-100:]))
+                self.logger.error('Exception: %s' % str(e))
+        self.logger.info('%d / %d done' % (len(missing_record_list), len(missing_record_list)))
+        self.logger.info('Finish inserting missing records! %d records added, %d aids left' % (
+            len(missing_record_list), len(need_insert_but_record_not_found_aid_list)))
+        # TODO: extract to util funtion end
 
         self.logger.info('c30 video pipeline done! return %d records' % len(aid_record_dict))
         return_record_list = [record for record in aid_record_dict.values()]
