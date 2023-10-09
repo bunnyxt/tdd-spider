@@ -10,7 +10,7 @@ def get_engine():
     db_args = get_db_args()
     conn_str = "mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8mb4".format(
         db_args['user'], db_args['password'], db_args['host'], db_args['port'], db_args['dbname'])  # mysql
-    eng = create_engine(conn_str, pool_recycle=7200, pool_size=20, max_overflow=50)
+    eng = create_engine(conn_str, pool_recycle=7200, pool_size=25, max_overflow=75)
     return eng
 
 
