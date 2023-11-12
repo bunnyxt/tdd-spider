@@ -108,11 +108,11 @@ def commit_video_record_via_archive_stat(stat: ArchiveRankByPartionArchiveStat, 
     return new_video_record
 
 
-def commit_video_record_via_newlist_archive_stat(stat: NewlistArchiveStat, session: Session) -> TddVideoRecord:
+def commit_video_record_via_newlist_archive_stat(stat: NewlistArchiveStat, added: int, session: Session) -> TddVideoRecord:
     # assemble video record
     new_video_record = TddVideoRecord(
         aid=stat.aid,
-        added=get_ts_s(),
+        added=added,
         view=-1 if stat.view == '--' else stat.view,
         danmaku=stat.danmaku,
         reply=stat.reply,
