@@ -1,9 +1,11 @@
 from .Job import Job
+from .JobStat import JobStat
 from db import Session
-from service import Service
-from task import add_video, commit_video_record_via_newlist_archive_stat, AlreadyExistError
+from service import Service, NewlistArchive
 from timer import Timer
-from util import format_ts_ms
+from GetNewlistArchiveJob import GetNewlistArchiveJob
+from AddVideoFromArchiveJob import AddVideoFromArchiveJob
+from queue import Queue
 
 __all__ = ['AddLatestVideoJob']
 
@@ -17,49 +19,65 @@ class AddLatestVideoJob(Job):
         self.session = Session()
 
     def process(self):
+        self.logger.debug(f'Now start adding latest video from archive page...')
+        timer = Timer()
+        timer.start()
+
+        # prepare page num queue
+        page_num_queue = Queue[int]()
+
+        # put page num
         for page_num in range(1, self.latest_page_num + 1):
-            self.logger.debug(f'Now start add latest video from archive page. page_num: {page_num}')
-            timer = Timer()
-            timer.start()
+            page_num_queue.put(page_num)
+        self.logger.debug(f'Page num queue prepared. page_num_queue: {page_num_queue}')
 
-            # get archive rank by partion
-            try:
-                newlist = self.service.get_newlist({'rid': self.tid, 'pn': page_num, 'ps': 50})
-            except Exception as e:
-                self.logger.error(f'Fail to get archive rank by partion. '
-                                  f'tid: {self.tid}, pn: {page_num}, ps: 50, error: {e}')
-                self.stat.condition['get_archive_exception'] += 1
-            else:
-                for archive in newlist.archives:
-                    # add video
-                    try:
-                        new_video = add_video(archive.aid, self.service, self.session)
-                    except AlreadyExistError:
-                        self.logger.debug(f'Video parsed from archive already exist! archive: {archive}')
-                    except Exception as e:
-                        self.logger.error(f'Fail to add video parsed from archive! archive: {archive}, error: {e}')
-                        self.stat.condition['add_video_exception'] += 1
-                    else:
-                        self.logger.info(f'New video parsed from archive added! video: {new_video}')
-                        self.stat.condition['new_video'] += 1
+        # prepare archive video queue
+        archive_video_queue = Queue[tuple[int, NewlistArchive]]()
 
-                        # commit video record via archive stat
-                        try:
-                            new_video_record = commit_video_record_via_newlist_archive_stat(archive.stat, self.session)
-                        except Exception as e:
-                            self.logger.error(f'Fail to add video record parsed from archive stat! '
-                                              f'archive: {archive}, error: {e}')
-                            self.stat.condition['commit_video_record_exception'] += 1
-                        else:
-                            self.logger.info(f'New video record parsed from archive stat committed! '
-                                             f'video record: {new_video_record}')
-                        self.stat.condition['new_video_record'] += 1
+        # create get newlist archive job
+        get_newlist_archive_job = GetNewlistArchiveJob(
+            'job_tid_30', self.tid, page_num_queue, archive_video_queue, self.service)
 
-            timer.stop()
-            self.logger.debug(f'Finish add latest video from archive page. '
-                              f'page_num: {page_num}, duration: {format_ts_ms(timer.get_duration_ms())}')
-            self.stat.total_count += 1
-            self.stat.total_duration_ms += timer.get_duration_ms()
+        # create add video from archive jobs
+        add_video_from_archive_job_num = 10
+        add_video_from_archive_job_list = []
+        for i in range(add_video_from_archive_job_num):
+            add_video_from_archive_job_list.append(AddVideoFromArchiveJob(
+                f'job_{i}', archive_video_queue, self.service))
+
+        # start get newlist archive job
+        get_newlist_archive_job.start()
+        self.logger.debug(f'1 get newlist archive job started.')
+
+        # start add video from archive jobs
+        for job in add_video_from_archive_job_list:
+            job.start()
+        self.logger.debug(f'{add_video_from_archive_job_num} add video from archive jobs started.')
+
+        # wait for get newlist archive job
+        get_newlist_archive_job.join()
+
+        # wait for add video from archive jobs
+        for job in add_video_from_archive_job_list:
+            job.join()
+
+        # collect statistic
+        get_newlist_archive_job_stat = get_newlist_archive_job.stat
+        add_video_from_archive_job_stat_list: list[JobStat] = []
+        for job in add_video_from_archive_job_list:
+            add_video_from_archive_job_stat_list.append(job.stat)
+
+        # merge statistic
+        add_video_from_archive_job_stat_merged = sum(add_video_from_archive_job_stat_list, JobStat())
+
+        timer.stop()
+
+        # generate new job stat
+        self.stat.start_ts_ms = timer.start_ts_ms
+        self.stat.end_ts_ms = timer.end_ts_ms
+        self.stat.total_count = add_video_from_archive_job_stat_merged.total_count
+        self.stat.total_duration_ms = add_video_from_archive_job_stat_merged.total_duration_ms
+        self.stat.condition = get_newlist_archive_job_stat.condition + add_video_from_archive_job_stat_merged.condition
 
     def cleanup(self):
         self.session.close()
