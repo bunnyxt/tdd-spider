@@ -12,7 +12,7 @@ from serverchan import sc_send_summary, sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from core import TddError
 from service import Service, NewlistArchive, VideoView
-from job import GetNewlistJob, JobStat, AddVideoRecordJob, Job
+from job import GetNewlistArchiveJob, JobStat, AddVideoRecordJob, Job
 from typing import NamedTuple, Optional
 from task import update_video, add_video, AlreadyExistError
 from timer import Timer
@@ -510,7 +510,7 @@ class C30PipelineRunner(Thread):
         # create jobs
         job_list = []
         for i in range(job_num):
-            job_list.append(GetNewlistJob(f'job_{i}', 30, page_num_queue, archive_video_queue, service))
+            job_list.append(GetNewlistArchiveJob(f'job_{i}', 30, page_num_queue, archive_video_queue, service))
 
         # start jobs
         for job in job_list:

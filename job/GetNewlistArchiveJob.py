@@ -5,10 +5,10 @@ from queue import Queue
 from timer import Timer
 from util import format_ts_ms, get_ts_s
 
-__all__ = ['GetNewlistJob']
+__all__ = ['GetNewlistArchiveJob']
 
 
-class GetNewlistJob(Job):
+class GetNewlistArchiveJob(Job):
     def __init__(self, name: str, tid: int, page_num_queue: Queue[int],
                  archive_video_queue: Queue[tuple[int, NewlistArchive]], service: Service):
         super().__init__(name)
