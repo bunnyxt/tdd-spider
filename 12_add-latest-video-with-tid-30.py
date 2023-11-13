@@ -27,7 +27,7 @@ def add_latest_video_with_tid_30():
     # put page num
     for page_num in range(1, latest_page_num + 1):
         page_num_queue.put(page_num)
-    logger.info(f'Page num queue prepared. page_num_queue: {page_num_queue}')
+    logger.info(f'Page num queue from 1 to {latest_page_num} prepared.')
 
     # prepare archive video queue
     archive_video_queue = Queue[tuple[int, NewlistArchive]]()
@@ -35,30 +35,34 @@ def add_latest_video_with_tid_30():
     # create get newlist archive job
     get_newlist_archive_job = GetNewlistArchiveJob('job_tid_30', tid, page_num_queue, archive_video_queue, service)
 
+    # start get newlist archive job
+    get_newlist_archive_job.start()
+    logger.info(f'1 get newlist archive job started.')
+
+    # wait for get newlist archive job
+    get_newlist_archive_job.join()
+
+    # collect statistic
+    get_newlist_archive_job_stat = get_newlist_archive_job.stat
+
+    logger.info(f'{archive_video_queue.qsize()} archive(s) from newlist archive pages fetched.')
+
     # create add video from archive jobs
     add_video_from_archive_job_num = 10
     add_video_from_archive_job_list = []
     for i in range(add_video_from_archive_job_num):
         add_video_from_archive_job_list.append(AddVideoFromArchiveJob(f'job_{i}', archive_video_queue, service))
 
-    # start get newlist archive job
-    get_newlist_archive_job.start()
-    logger.info(f'1 get newlist archive job started.')
-
     # start add video from archive jobs
     for job in add_video_from_archive_job_list:
         job.start()
     logger.info(f'{add_video_from_archive_job_num} add video from archive jobs started.')
-
-    # wait for get newlist archive job
-    get_newlist_archive_job.join()
 
     # wait for add video from archive jobs
     for job in add_video_from_archive_job_list:
         job.join()
 
     # collect statistic
-    get_newlist_archive_job_stat = get_newlist_archive_job.stat
     add_video_from_archive_job_stat_list: list[JobStat] = []
     for job in add_video_from_archive_job_list:
         add_video_from_archive_job_stat_list.append(job.stat)
