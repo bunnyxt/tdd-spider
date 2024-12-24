@@ -60,11 +60,14 @@ def get_need_insert_aid_list(time_label, is_tid_30, session):
         return DBOperation.query_all_update_video_aids(is_tid_30, session)
 
     # add 1 hour aids
-    aid_list = DBOperation.query_freq_update_video_aids(2, is_tid_30, session)  # freq = 2
+    aid_list = DBOperation.query_freq_update_video_aids(
+        2, is_tid_30, session)  # freq = 2
 
     if time_label in ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00']:
         # add 4 hour aids
-        aid_list += DBOperation.query_freq_update_video_aids(1, is_tid_30, session)  # freq = 1
+        # freq = 1
+        aid_list += DBOperation.query_freq_update_video_aids(
+            1, is_tid_30, session)
 
     return aid_list
 
@@ -92,7 +95,8 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
     def process(self):
         # TMP duration limit
         duration_limit_due_ts = get_ts_s() + self._duration_limit_s
-        self.logger.info(f'Duration limit due at {ts_s_to_str(duration_limit_due_ts)}.')
+        self.logger.info(
+            f'Duration limit due at {ts_s_to_str(duration_limit_due_ts)}.')
 
         while not self.aid_queue.empty():
             if get_ts_s() > duration_limit_due_ts:
@@ -100,21 +104,26 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
                 break
 
             aid = self.aid_queue.get()
-            self.logger.debug(f'Now check c30 need insert but not found aid. aid: {aid}')
+            self.logger.debug(
+                f'Now check c30 need insert but not found aid. aid: {aid}')
             timer = Timer()
             timer.start()
 
             try:
                 update_video_context = {}
-                tdd_video_logs = update_video(aid, self.service, self.session, out_context=update_video_context)
+                tdd_video_logs = update_video(
+                    aid, self.service, self.session, out_context=update_video_context)
                 video_view: VideoView = update_video_context['video_view']
             except Exception as e:
-                self.logger.error(f'Fail to update video info. aid: {aid}, error: {e}')
+                self.logger.error(
+                    f'Fail to update video info. aid: {aid}, error: {e}')
                 self.stat.condition['update_exception'] += 1
             else:
                 for log in tdd_video_logs:
-                    self.logger.info(f'Update video info. aid: {aid}, attr: {log.attr}, {log.oldval} -> {log.newval}')
-                self.logger.debug(f'{len(tdd_video_logs)} log(s) found. aid: {aid}')
+                    self.logger.info(
+                        f'Update video info. aid: {aid}, attr: {log.attr}, {log.oldval} -> {log.newval}')
+                self.logger.debug(
+                    f'{len(tdd_video_logs)} log(s) found. aid: {aid}')
                 self.stat.condition[f'{len(tdd_video_logs)}_update'] += 1
 
                 log_attr_log_dict = {log.attr: log for log in tdd_video_logs}
@@ -140,7 +149,8 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
                     # In this case, we need to retrieve video record from video view.
                     # So much such missing video existed, therefore, to simplify the log,
                     # we downgrade the log level from warning to debug.
-                    self.logger.debug(f'Expected change not found, maybe missing video from api. aid: {aid}')
+                    self.logger.debug(
+                        f'Expected change not found, maybe missing video from api. aid: {aid}')
                     self.stat.condition['expected_change_not_found'] += 1
 
                     # Parse record from video view which already fetched before when update video.
@@ -162,7 +172,8 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
                         vv=video_view.stat.vv,
                     )
                     self.record_queue.put(new_record)
-                    self.logger.info(f'Missing video record get. aid: {aid}, record: {new_record}')
+                    self.logger.info(
+                        f'Missing video record get. aid: {aid}, record: {new_record}')
                     self.stat.condition['missing_video_record_get'] += 1
 
             timer.stop()
@@ -192,7 +203,8 @@ class CheckAllZeroRecordJob(Job):
     def process(self):
         # TMP duration limit
         duration_limit_due_ts = get_ts_s() + self._duration_limit_s
-        self.logger.info(f'Duration limit due at {ts_s_to_str(duration_limit_due_ts)}.')
+        self.logger.info(
+            f'Duration limit due at {ts_s_to_str(duration_limit_due_ts)}.')
 
         while not self.record_queue.empty():
             if get_ts_s() > duration_limit_due_ts:
@@ -204,14 +216,17 @@ class CheckAllZeroRecordJob(Job):
             timer.start()
 
             if is_all_zero_record(record):
-                self.logger.debug(f'All zero record of video aid {record.aid} detected. Try get video record again.')
+                self.logger.debug(
+                    f'All zero record of video aid {record.aid} detected. Try get video record again.')
                 self.stat.condition['all_zero_record'] += 1
 
                 # get video view
                 try:
-                    video_view = self.service.get_video_view({'aid': record.aid})
+                    video_view = self.service.get_video_view(
+                        {'aid': record.aid})
                 except Exception as e:
-                    self.logger.warning(f'Fail to get valid video view. aid: {record.aid}, error: {e}')
+                    self.logger.warning(
+                        f'Fail to get valid video view. aid: {record.aid}, error: {e}')
                     self.stat.condition['fail_fetch_again'] += 1
                 else:
                     # assemble new record
@@ -234,12 +249,14 @@ class CheckAllZeroRecordJob(Job):
                     )
 
                     if is_all_zero_record(new_record):
-                        self.logger.debug(f'All zero record of video aid {record.aid} detected again.')
+                        self.logger.debug(
+                            f'All zero record of video aid {record.aid} detected again.')
                         self.stat.condition['all_zero_record_again'] += 1
                     else:
                         # not all zero record got, use new record
                         record = new_record
-                        self.logger.info(f'Not all zero record {new_record} detected. Use new record instead.')
+                        self.logger.info(
+                            f'Not all zero record {new_record} detected. Use new record instead.')
                         self.stat.condition['not_all_zero_record'] += 1
 
             self.checked_record_queue.put(record)
@@ -358,7 +375,8 @@ class C30NoNeedInsertAidsChecker(Thread):
                 self.logger.debug('Video aid %d already exists' % aid)
                 video_already_exist_flag = True
             except TddError as e:
-                self.logger.warning('Fail to add video aid %d. Exception caught. Detail: %s' % (aid, e))
+                self.logger.warning(
+                    'Fail to add video aid %d. Exception caught. Detail: %s' % (aid, e))
             else:
                 self.logger.info('Add new video %s' % new_video)
                 result_status_dict['add_new_video_aids'].append(aid)
@@ -368,10 +386,12 @@ class C30NoNeedInsertAidsChecker(Thread):
                 try:
                     tdd_video_logs = update_video(aid, service, session)
                 except TddError as e2:
-                    self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+                    self.logger.warning(
+                        'Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
                     result_status_dict['fail_aids'].append(aid)
                 except Exception as e2:
-                    self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
+                    self.logger.error(
+                        'Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
                     result_status_dict['fail_aids'].append(aid)
                 else:
                     # init change flags
@@ -387,16 +407,20 @@ class C30NoNeedInsertAidsChecker(Thread):
                     if code_change_flag:
                         result_status_dict['code_change_aids'].append(aid)
                     else:
-                        self.logger.warning('No code change found for video aid %d, need further check' % aid)
+                        self.logger.warning(
+                            'No code change found for video aid %d, need further check' % aid)
                         result_status_dict['no_change_found_aids'].append(aid)
 
             if idx % 10 == 0:
-                self.logger.info('%d / %d done' % (idx, len(self.no_need_insert_aid_list)))
-        self.logger.info('%d / %d done' % (len(self.no_need_insert_aid_list), len(self.no_need_insert_aid_list)))
+                self.logger.info('%d / %d done' %
+                                 (idx, len(self.no_need_insert_aid_list)))
+        self.logger.info(
+            '%d / %d done' % (len(self.no_need_insert_aid_list), len(self.no_need_insert_aid_list)))
         self.logger.info('Finish checking no need insert records! %s' %
                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
         self.logger.warning('fail_aids: %r' % result_status_dict['fail_aids'])
-        self.logger.warning('no_change_found_aids: %r' % result_status_dict['no_change_found_aids'])
+        self.logger.warning('no_change_found_aids: %r' %
+                            result_status_dict['no_change_found_aids'])
 
 
 class DataAcquisitionJob(Job):
@@ -413,9 +437,11 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
     def process(self):
         # get need insert aid list
         session = Session()
-        need_insert_aid_list = get_need_insert_aid_list(self.time_label, False, session)
+        need_insert_aid_list = get_need_insert_aid_list(
+            self.time_label, False, session)
         session.close()
-        self.logger.info(f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
+        self.logger.info(
+            f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
         service = Service(mode='worker')
 
@@ -431,7 +457,8 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
         job_num = 10
         job_list = []
         for i in range(job_num):
-            job_list.append(AddVideoRecordJob(f'job_{i}', aid_queue, video_record_queue, service))
+            job_list.append(AddVideoRecordJob(
+                f'job_{i}', aid_queue, video_record_queue, service))
 
         # start jobs
         for job in job_list:
@@ -473,7 +500,8 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
                 vt=video_record.vt,
                 vv=video_record.vv,
             ))
-        self.logger.info(f'{self.record_queue.qsize()} record(s) parsed and returned.')
+        self.logger.info(
+            f'{self.record_queue.qsize()} record(s) parsed and returned.')
 
 
 # TODO: refactor using Job, create a class DataAcquisitionJob,
@@ -496,7 +524,8 @@ class C30PipelineRunner(Thread):
 
         # calculate page num total
         page_num_total = math.ceil(new_list.page.count / 50)
-        self.logger.info(f'Archive page num total calculated. page_num_total: {page_num_total}')
+        self.logger.info(
+            f'Archive page num total calculated. page_num_total: {page_num_total}')
 
         # put page num into queue
         page_num_queue: Queue[int] = Queue()
@@ -510,7 +539,8 @@ class C30PipelineRunner(Thread):
         # create jobs
         job_list = []
         for i in range(job_num):
-            job_list.append(GetNewlistArchiveJob(f'job_{i}', 30, page_num_queue, archive_video_queue, service))
+            job_list.append(GetNewlistArchiveJob(
+                f'job_{i}', 30, page_num_queue, archive_video_queue, service))
 
         # start jobs
         for job in job_list:
@@ -560,7 +590,8 @@ class C30PipelineRunner(Thread):
         for record in record_list:
             aid_record_dict[record.aid] = record
         record_list_after_remove_duplication = list(aid_record_dict.values())
-        self.logger.info(f'{len(record_list_after_remove_duplication)} record(s) left after remove duplication.')
+        self.logger.info(
+            f'{len(record_list_after_remove_duplication)} record(s) left after remove duplication.')
 
         # build record queue and return
         record_queue: Queue[RecordNew] = Queue()
@@ -585,7 +616,8 @@ class C30PipelineRunner(Thread):
         # create jobs
         job_list = []
         for i in range(job_num):
-            job_list.append(CheckAllZeroRecordJob(f'job_{i}', record_queue, checked_record_queue, service))
+            job_list.append(CheckAllZeroRecordJob(
+                f'job_{i}', record_queue, checked_record_queue, service))
 
         # start jobs
         for job in job_list:
@@ -615,7 +647,8 @@ class C30PipelineRunner(Thread):
 
         # write down checked_record_queue length
         checked_record_queue_len = checked_record_queue.qsize()
-        self.logger.info(f'Got {checked_record_queue_len} record(s) after check.')
+        self.logger.info(
+            f'Got {checked_record_queue_len} record(s) after check.')
         if record_queue_len != checked_record_queue_len:
             self.logger.error(f'Records number not match after check! '
                               f'before: {record_queue_len}, after: {checked_record_queue_len}')
@@ -632,7 +665,8 @@ class C30PipelineRunner(Thread):
         self.logger.info(job_stat_merged.get_summary())
         if job_stat_merged.condition['record_queue_len'] != job_stat_merged.condition['checked_record_queue_len'] \
                 or job_stat_merged.condition['not_all_zero_record'] > 0:
-            sc_send_summary(f'{script_fullname}.check_all_zero_record', timer, job_stat_merged)
+            sc_send_summary(
+                f'{script_fullname}.check_all_zero_record', timer, job_stat_merged)
         return checked_record_queue
 
     def process_comprehensive(self):
@@ -648,8 +682,10 @@ class C30PipelineRunner(Thread):
 
         # get need insert aid list
         session = Session()
-        need_insert_aid_list = get_need_insert_aid_list(self.time_label, True, session)
-        self.logger.info(f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
+        need_insert_aid_list = get_need_insert_aid_list(
+            self.time_label, True, session)
+        self.logger.info(
+            f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
         # insert records
         # TODO: extract to util funtion start
@@ -670,7 +706,8 @@ class C30PipelineRunner(Thread):
             sql += '(%d, %d, %d, %d, %d, %d, %d, %d, %d, %s, %s, %s, %s, %s), ' % (
                 record.added, record.aid,
                 record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like,
-                null_or_str(record.dislike), null_or_str(record.now_rank), null_or_str(record.his_rank),
+                null_or_str(record.dislike), null_or_str(
+                    record.now_rank), null_or_str(record.his_rank),
                 null_or_str(record.vt), null_or_str(record.vv)
             )
             if idx % 1000 == 0:
@@ -679,20 +716,24 @@ class C30PipelineRunner(Thread):
                     session.execute(sql)
                     session.commit()
                 except Exception as e:
-                    self.logger.error('Fail to execute sql: %s...%s' % (sql[:100], sql[-100:]))
+                    self.logger.error(
+                        'Fail to execute sql: %s...%s' % (sql[:100], sql[-100:]))
                     self.logger.error('Exception: %s' % str(e))
                 sql = sql_prefix
                 if idx % log_gap == 0:
-                    self.logger.info('%d / %d done' % (idx, len(need_insert_aid_list)))
+                    self.logger.info('%d / %d done' %
+                                     (idx, len(need_insert_aid_list)))
         if sql != sql_prefix:
             sql = sql[:-2]  # remove ending comma and space
             try:
                 session.execute(sql)
                 session.commit()
             except Exception as e:
-                self.logger.error('Fail to execute sql: %s...%s' % (sql[:100], sql[-100:]))
+                self.logger.error('Fail to execute sql: %s...%s' %
+                                  (sql[:100], sql[-100:]))
                 self.logger.error('Exception: %s' % str(e))
-        self.logger.info('%d / %d done' % (len(need_insert_aid_list), len(need_insert_aid_list)))
+        self.logger.info('%d / %d done' %
+                         (len(need_insert_aid_list), len(need_insert_aid_list)))
         self.logger.info('Finish inserting records! %d records added, %d aids left' % (
             len(need_insert_aid_list), len(need_insert_but_record_not_found_aid_list)))
         # TODO: extract to util funtion end
@@ -732,7 +773,8 @@ class C30PipelineRunner(Thread):
         # start jobs
         for job in check_c30_need_insert_but_not_found_aid_job_list:
             job.start()
-        logger.info(f'{check_c30_need_insert_but_not_found_aid_job_num} job(s) started.')
+        logger.info(
+            f'{check_c30_need_insert_but_not_found_aid_job_num} job(s) started.')
 
         # check no need insert records
         # if time label is 04:00, we need to add all video records into tdd_video_record table,
@@ -743,10 +785,14 @@ class C30PipelineRunner(Thread):
         # - some video has -403 code, awesome api will also get these video, login session not required
         # - ...
         if self.time_label == '04:00':
-            no_need_insert_aid_list = list(set(aid_record_dict.keys()) - set(need_insert_aid_list))
-            self.logger.info('%d c30 no need insert records got' % len(no_need_insert_aid_list))
-            self.logger.info('Now start a branch thread for checking need no need insert aids...')
-            c30_no_need_insert_aids_checker = C30NoNeedInsertAidsChecker(no_need_insert_aid_list)
+            no_need_insert_aid_list = list(
+                set(aid_record_dict.keys()) - set(need_insert_aid_list))
+            self.logger.info('%d c30 no need insert records got' %
+                             len(no_need_insert_aid_list))
+            self.logger.info(
+                'Now start a branch thread for checking need no need insert aids...')
+            c30_no_need_insert_aids_checker = C30NoNeedInsertAidsChecker(
+                no_need_insert_aid_list)
             c30_no_need_insert_aids_checker.start()
 
         # wait for jobs
@@ -754,16 +800,19 @@ class C30PipelineRunner(Thread):
             job.join()
 
         # collect statistics
-        check_c30_need_insert_but_not_found_aid_job_stat_list: list[JobStat] = []
+        check_c30_need_insert_but_not_found_aid_job_stat_list: list[JobStat] = [
+        ]
         for job in check_c30_need_insert_but_not_found_aid_job_list:
-            check_c30_need_insert_but_not_found_aid_job_stat_list.append(job.stat)
+            check_c30_need_insert_but_not_found_aid_job_stat_list.append(
+                job.stat)
 
         # merge statistics counters
         check_c30_need_insert_but_not_found_aid_job_stat_merged = sum(
             check_c30_need_insert_but_not_found_aid_job_stat_list, JobStat())
 
         self.logger.info(f'Finish check c30 need insert but not found aid!')
-        self.logger.info(check_c30_need_insert_but_not_found_aid_job_stat_merged.get_summary())
+        self.logger.info(
+            check_c30_need_insert_but_not_found_aid_job_stat_merged.get_summary())
         check_c30_need_insert_but_not_found_aid_timer = Timer()
         check_c30_need_insert_but_not_found_aid_timer.start_ts_ms \
             = check_c30_need_insert_but_not_found_aid_job_stat_merged.start_ts_ms
@@ -791,7 +840,8 @@ class C30PipelineRunner(Thread):
             sql += '(%d, %d, %d, %d, %d, %d, %d, %d, %d, %s, %s, %s, %s, %s), ' % (
                 record.added, record.aid,
                 record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like,
-                null_or_str(record.dislike), null_or_str(record.now_rank), null_or_str(record.his_rank),
+                null_or_str(record.dislike), null_or_str(
+                    record.now_rank), null_or_str(record.his_rank),
                 null_or_str(record.vt), null_or_str(record.vv)
             )
             if idx % 1000 == 0:
@@ -800,25 +850,30 @@ class C30PipelineRunner(Thread):
                     session.execute(sql)
                     session.commit()
                 except Exception as e:
-                    self.logger.error('Fail to execute sql: %s...%s' % (sql[:100], sql[-100:]))
+                    self.logger.error(
+                        'Fail to execute sql: %s...%s' % (sql[:100], sql[-100:]))
                     self.logger.error('Exception: %s' % str(e))
                 sql = sql_prefix
                 if idx % log_gap == 0:
-                    self.logger.info('%d / %d done' % (idx, len(missing_record_list)))
+                    self.logger.info('%d / %d done' %
+                                     (idx, len(missing_record_list)))
         if sql != sql_prefix:
             sql = sql[:-2]  # remove ending comma and space
             try:
                 session.execute(sql)
                 session.commit()
             except Exception as e:
-                self.logger.error('Fail to execute sql: %s...%s' % (sql[:100], sql[-100:]))
+                self.logger.error('Fail to execute sql: %s...%s' %
+                                  (sql[:100], sql[-100:]))
                 self.logger.error('Exception: %s' % str(e))
-        self.logger.info('%d / %d done' % (len(missing_record_list), len(missing_record_list)))
+        self.logger.info('%d / %d done' %
+                         (len(missing_record_list), len(missing_record_list)))
         self.logger.info('Finish inserting missing records! %d records added, %d aids left' % (
             len(missing_record_list), len(need_insert_but_record_not_found_aid_list)))
         # TODO: extract to util funtion end
 
-        self.logger.info('c30 video pipeline done! return %d records' % len(aid_record_dict))
+        self.logger.info(
+            'c30 video pipeline done! return %d records' % len(aid_record_dict))
         return_record_list = [record for record in aid_record_dict.values()]
         return_record_list.extend(missing_record_list)
 
@@ -830,9 +885,11 @@ class C30PipelineRunner(Thread):
     def process_simple(self):
         # get need insert aid list
         session = Session()
-        need_insert_aid_list = get_need_insert_aid_list(self.time_label, True, session)
+        need_insert_aid_list = get_need_insert_aid_list(
+            self.time_label, True, session)
         session.close()
-        self.logger.info(f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
+        self.logger.info(
+            f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
         service = Service(mode='worker')
 
@@ -930,7 +987,8 @@ class RecordsSaveToFileRunner(Thread):
     def run(self):
         self.logger.info('Now start saving records to file...')
         current_filename_path = self.data_folder + self.current_filename
-        self.logger.info('will save %d records into file %s' % (len(self.records), current_filename_path))
+        self.logger.info('will save %d records into file %s' %
+                         (len(self.records), current_filename_path))
         with open(current_filename_path, 'w') as f:
             f.write('added,aid,bvid,view,danmaku,reply,favorite,coin,share,like\n')
             for idx, record in enumerate(self.records, 1):
@@ -939,8 +997,10 @@ class RecordsSaveToFileRunner(Thread):
                     record.coin, record.share, record.like))
                 if idx % 20000 == 0:
                     self.logger.info('%d / %d done' % (idx, len(self.records)))
-            self.logger.info('%d / %d done' % (len(self.records), len(self.records)))
-        self.logger.info('Finish save %d records into file %s!' % (len(self.records), current_filename_path))
+            self.logger.info('%d / %d done' %
+                             (len(self.records), len(self.records)))
+        self.logger.info('Finish save %d records into file %s!' %
+                         (len(self.records), current_filename_path))
 
         # TODO ugly design, should be separated into another class
         if self.time_label == '23:00':
@@ -950,7 +1010,8 @@ class RecordsSaveToFileRunner(Thread):
                 day_prefix_path = self.data_folder + day_prefix
 
                 # pack today file
-                self.logger.info('pack %s*.csv into %s.tar.gz' % (day_prefix_path, day_prefix_path))
+                self.logger.info('pack %s*.csv into %s.tar.gz' %
+                                 (day_prefix_path, day_prefix_path))
                 pack_result = os.popen(
                     'cd %s && mkdir %s && cp %s*.csv %s && tar -zcvf %s.tar.gz %s && rm -r %s && cd ..' % (
                         self.data_folder, day_prefix, day_prefix, day_prefix, day_prefix, day_prefix, day_prefix
@@ -960,16 +1021,19 @@ class RecordsSaveToFileRunner(Thread):
                     self.logger.info(line.rstrip('\n'))
 
                 # get 3 day before filename prefix
-                day_prefix_3d_before = ts_s_to_str(get_ts_s() - 3 * 24 * 60 * 60)[:10]
+                day_prefix_3d_before = ts_s_to_str(
+                    get_ts_s() - 3 * 24 * 60 * 60)[:10]
                 day_prefix_3d_before_path = self.data_folder + day_prefix_3d_before
 
                 # remove 3 day before csv file
                 self.logger.info('remove %s*.csv' % day_prefix_3d_before_path)
-                pack_result = os.popen('rm %s*.csv' % day_prefix_3d_before_path)
+                pack_result = os.popen('rm %s*.csv' %
+                                       day_prefix_3d_before_path)
                 for line in pack_result:
                     self.logger.info(line.rstrip('\n'))
             except Exception as e:
-                self.logger.error('Error occur when executing packing files shell scripts. Detail: %s' % e)
+                self.logger.error(
+                    'Error occur when executing packing files shell scripts. Detail: %s' % e)
             else:
                 self.logger.info('Finish execute packing files shell scripts!')
 
@@ -1005,32 +1069,44 @@ class RecordsSaveToDbRunner(Thread):
             sql = sql[:-2]  # remove ending comma and space
             session.execute(sql)
             session.commit()
-        self.logger.info('%d / %d done' % (len(self.records), len(self.records)))
+        self.logger.info('%d / %d done' %
+                         (len(self.records), len(self.records)))
         session.close()
         self.logger.info('Finish save %d records into db!' % len(self.records))
 
         # TODO ugly design, should be separated into another class
         if self.time_label == '23:00':
             try:
-                session.execute('drop table if exists tdd_video_record_hourly_4')
+                session.execute(
+                    'drop table if exists tdd_video_record_hourly_4')
                 self.logger.info('drop table tdd_video_record_hourly_4')
 
-                session.execute('rename table tdd_video_record_hourly_3 to tdd_video_record_hourly_4')
-                self.logger.info('rename table tdd_video_record_hourly_3 to tdd_video_record_hourly_4')
+                session.execute(
+                    'rename table tdd_video_record_hourly_3 to tdd_video_record_hourly_4')
+                self.logger.info(
+                    'rename table tdd_video_record_hourly_3 to tdd_video_record_hourly_4')
 
-                session.execute('rename table tdd_video_record_hourly_2 to tdd_video_record_hourly_3')
-                self.logger.info('rename table tdd_video_record_hourly_2 to tdd_video_record_hourly_3')
+                session.execute(
+                    'rename table tdd_video_record_hourly_2 to tdd_video_record_hourly_3')
+                self.logger.info(
+                    'rename table tdd_video_record_hourly_2 to tdd_video_record_hourly_3')
 
-                session.execute('rename table tdd_video_record_hourly to tdd_video_record_hourly_2')
-                self.logger.info('rename table tdd_video_record_hourly to tdd_video_record_hourly_2')
+                session.execute(
+                    'rename table tdd_video_record_hourly to tdd_video_record_hourly_2')
+                self.logger.info(
+                    'rename table tdd_video_record_hourly to tdd_video_record_hourly_2')
 
-                session.execute('create table tdd_video_record_hourly like tdd_video_record_hourly_2')
-                self.logger.info('create table tdd_video_record_hourly like tdd_video_record_hourly_2')
+                session.execute(
+                    'create table tdd_video_record_hourly like tdd_video_record_hourly_2')
+                self.logger.info(
+                    'create table tdd_video_record_hourly like tdd_video_record_hourly_2')
             except Exception as e:
                 session.rollback()
-                self.logger.error('Error occur when executing change tdd_video_record_hourly table. Detail: %s' % e)
+                self.logger.error(
+                    'Error occur when executing change tdd_video_record_hourly table. Detail: %s' % e)
             else:
-                self.logger.info('Finish change tdd_video_record_hourly table!')
+                self.logger.info(
+                    'Finish change tdd_video_record_hourly table!')
 
 
 # TODO: change to record new
@@ -1048,43 +1124,57 @@ class RecentRecordsAnalystRunner(Thread):
         # record_start and record_end should be namedtuple Record
         timespan = record_end.added - record_start.added
         if timespan == 0:
-            raise ZeroDivisionError('timespan between two records should not be zero')
+            raise ZeroDivisionError(
+                'timespan between two records should not be zero')
         return RecordSpeed(
             start_ts=record_start.added,
             end_ts=record_end.added,
             timespan=timespan,
             per_seconds=per_seconds,
-            view=(record_end.view - record_start.view) / timespan * per_seconds,
-            danmaku=(record_end.danmaku - record_start.danmaku) / timespan * per_seconds,
-            reply=(record_end.reply - record_start.reply) / timespan * per_seconds,
-            favorite=(record_end.favorite - record_start.favorite) / timespan * per_seconds,
-            coin=(record_end.coin - record_start.coin) / timespan * per_seconds,
-            share=(record_end.share - record_start.share) / timespan * per_seconds,
+            view=(record_end.view - record_start.view) /
+            timespan * per_seconds,
+            danmaku=(record_end.danmaku - record_start.danmaku) /
+            timespan * per_seconds,
+            reply=(record_end.reply - record_start.reply) /
+            timespan * per_seconds,
+            favorite=(record_end.favorite - record_start.favorite) /
+            timespan * per_seconds,
+            coin=(record_end.coin - record_start.coin) /
+            timespan * per_seconds,
+            share=(record_end.share - record_start.share) /
+            timespan * per_seconds,
             like=(record_end.like - record_start.like) / timespan * per_seconds
         )
 
     def _calc_record_speed_ratio(self, record_speed_start, record_speed_end, inf_magic_num=99999999):
         # record_speed_start and record_speed_end should be namedtuple RecordSpeedRatio
         return RecordSpeedRatio(
-            view=(record_speed_end.view - record_speed_start.view) / record_speed_start.view
+            view=(record_speed_end.view - record_speed_start.view) /
+            record_speed_start.view
             if record_speed_start.view != 0 else inf_magic_num * 1
             if (record_speed_end.view - record_speed_start.view) > 0 else -1,
-            danmaku=(record_speed_end.danmaku - record_speed_start.danmaku) / record_speed_start.danmaku
+            danmaku=(record_speed_end.danmaku -
+                     record_speed_start.danmaku) / record_speed_start.danmaku
             if record_speed_start.danmaku != 0 else inf_magic_num * 1
             if (record_speed_end.danmaku - record_speed_start.danmaku) > 0 else -1,
-            reply=(record_speed_end.reply - record_speed_start.reply) / record_speed_start.reply
+            reply=(record_speed_end.reply - record_speed_start.reply) /
+            record_speed_start.reply
             if record_speed_start.reply != 0 else inf_magic_num * 1
             if (record_speed_end.reply - record_speed_start.reply) > 0 else -1,
-            favorite=(record_speed_end.favorite - record_speed_start.favorite) / record_speed_start.favorite
+            favorite=(record_speed_end.favorite -
+                      record_speed_start.favorite) / record_speed_start.favorite
             if record_speed_start.favorite != 0 else inf_magic_num * 1
             if (record_speed_end.favorite - record_speed_start.favorite) > 0 else -1,
-            coin=(record_speed_end.coin - record_speed_start.coin) / record_speed_start.coin
+            coin=(record_speed_end.coin - record_speed_start.coin) /
+            record_speed_start.coin
             if record_speed_start.coin != 0 else inf_magic_num * 1
             if (record_speed_end.coin - record_speed_start.coin) > 0 else -1,
-            share=(record_speed_end.share - record_speed_start.share) / record_speed_start.share
+            share=(record_speed_end.share - record_speed_start.share) /
+            record_speed_start.share
             if record_speed_start.share != 0 else inf_magic_num * 1
             if (record_speed_end.share - record_speed_start.share) > 0 else -1,
-            like=(record_speed_end.like - record_speed_start.like) / record_speed_start.like
+            like=(record_speed_end.like - record_speed_start.like) /
+            record_speed_start.like
             if record_speed_start.like != 0 else inf_magic_num * 1
             if (record_speed_end.like - record_speed_start.like) > 0 else -1,
             inf_magic_num=inf_magic_num
@@ -1129,9 +1219,11 @@ class RecentRecordsAnalystRunner(Thread):
         # get recent records filenames
         filenames = os.listdir(self.data_folder)
         if self.current_filename in filenames:
-            filenames.remove(self.current_filename)  # remove current filename to avoid duplicate
+            # remove current filename to avoid duplicate
+            filenames.remove(self.current_filename)
         recent_records_filenames = sorted(
-            list(filter(lambda file: re.search(r'^\d{4}-\d{2}-\d{2} \d{2}:00\.csv$', file), filenames)),
+            list(filter(lambda file: re.search(
+                r'^\d{4}-\d{2}-\d{2} \d{2}:00\.csv$', file), filenames)),
             key=lambda x: str_to_ts_s(x[:-4] + ':00')
         )[-self.recent_file_num:]
 
@@ -1150,14 +1242,16 @@ class RecentRecordsAnalystRunner(Thread):
                         line_arr = line.rstrip('\n').split(',')
                         # 'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'
                         record = Record(int(line_arr[0]), int(line_arr[1]), line_arr[2],
-                                        int(line_arr[3]), int(line_arr[4]), int(line_arr[5]), int(line_arr[6]),
+                                        int(line_arr[3]), int(line_arr[4]), int(
+                                            line_arr[5]), int(line_arr[6]),
                                         int(line_arr[7]), int(line_arr[8]), int(line_arr[9]))
                         aid_recent_records_dict[record.aid].append(record)
                         file_records += 1
                     except Exception as e:
                         self.logger.warning('Fail to parse line %s into record, exception occurred, detail: %s' % (
                             line, e))
-                self.logger.info('%d records loaded from file %s' % (file_records, filename))
+                self.logger.info('%d records loaded from file %s' %
+                                 (file_records, filename))
                 total_records += file_records
 
         # add this round records
@@ -1180,7 +1274,8 @@ class RecentRecordsAnalystRunner(Thread):
                 continue
             aid_pubdate_dict[aid] = pubdate
         del aid_pubdate_list
-        self.logger.info('Finish get valid pubdate from %d videos!' % len(aid_pubdate_dict))
+        self.logger.info('Finish get valid pubdate from %d videos!' %
+                         len(aid_pubdate_dict))
 
         # check recent records
         self.logger.info('Now check recent records...')
@@ -1189,10 +1284,12 @@ class RecentRecordsAnalystRunner(Thread):
             # get pubdate from aid_pubdate_dict
             pubdate = aid_pubdate_dict.get(aid, None)
             if pubdate is None:
-                self.logger.warning('Fail to get pubdate of video aid %d, continue' % aid)
+                self.logger.warning(
+                    'Fail to get pubdate of video aid %d, continue' % aid)
                 result_status_dict['no_valid_pubdate'].append(aid)
                 continue
-            pubdate_record = Record(pubdate, aid, a2b(aid), 0, 0, 0, 0, 0, 0, 0)
+            pubdate_record = Record(
+                pubdate, aid, a2b(aid), 0, 0, 0, 0, 0, 0, 0)
 
             records.sort(key=lambda r: r.added)  # sort by added
 
@@ -1200,7 +1297,8 @@ class RecentRecordsAnalystRunner(Thread):
             # ensure at least 3 records
             if len(records) <= 2:
                 # very common and not harmful to system, set to debug level is enough
-                self.logger.debug('Records len of video aid %d less than 3, continue' % aid)
+                self.logger.debug(
+                    'Records len of video aid %d less than 3, continue' % aid)
                 result_status_dict['records_len_less_than_3'].append(aid)
                 continue
 
@@ -1231,10 +1329,13 @@ class RecentRecordsAnalystRunner(Thread):
                 speed_now = self._calc_record_speed(records[-2], records[-1])
                 speed_last = self._calc_record_speed(records[-3], records[-2])
                 speed_period = self._calc_record_speed(records[0], records[-1])
-                speed_overall = self._calc_record_speed(pubdate_record, records[-1])
+                speed_overall = self._calc_record_speed(
+                    pubdate_record, records[-1])
             except ZeroDivisionError:
-                self.logger.warning('Zero timespan between adjacent records of video aid %d detected, continue' % aid)
-                result_status_dict['zero_timespan_between_adjacent_records'].append(aid)
+                self.logger.warning(
+                    'Zero timespan between adjacent records of video aid %d detected, continue' % aid)
+                result_status_dict['zero_timespan_between_adjacent_records'].append(
+                    aid)
                 continue
 
             # calc record speed ratio
@@ -1254,7 +1355,8 @@ class RecentRecordsAnalystRunner(Thread):
                         period_range=speed_period.timespan, speed_period=speed_period[idx2],
                         speed_overall=speed_overall[idx2],
                         this_record=records[-1], last_record=records[-2],
-                        description='unexpected drop detected, speed now of prop %s is %.2f, < -10' % (prop, value)
+                        description='unexpected drop detected, speed now of prop %s is %.2f, < -10' % (
+                            prop, value)
                     )
                     self.logger.info('Found unexpected drop of video aid %d, description: %s' % (
                         aid, change_obj.description))
@@ -1268,7 +1370,8 @@ class RecentRecordsAnalystRunner(Thread):
                 if value > 2 and speed_now[idx2 + 4] > 50:
                     change_obj = self._assemble_record_abnormal_change(
                         added=records[-1].added, aid=aid, attr=prop,
-                        speed_now=speed_now[idx2 + 4], speed_last=speed_last[idx2 + 4],
+                        speed_now=speed_now[idx2 +
+                                            4], speed_last=speed_last[idx2 + 4],
                         speed_now_incr_rate=speed_ratio[idx2],
                         period_range=speed_period.timespan, speed_period=speed_period[idx2 + 4],
                         speed_overall=speed_overall[idx2 + 4],
@@ -1291,11 +1394,13 @@ class RecentRecordsAnalystRunner(Thread):
                     aid, e))
 
             if idx % 10000 == 0:
-                self.logger.info('%d / %d done' % (idx, len(aid_recent_records_dict)))
-        self.logger.info('%d / %d done' % (len(aid_recent_records_dict), len(aid_recent_records_dict)))
+                self.logger.info('%d / %d done' %
+                                 (idx, len(aid_recent_records_dict)))
+        self.logger.info(
+            '%d / %d done' % (len(aid_recent_records_dict), len(aid_recent_records_dict)))
 
         session.close()
-        self.logger.info('Finish analysing recent records! %s' %
+        self.logger.info('Finish analyzing recent records! %s' %
                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
 
 
@@ -1311,20 +1416,24 @@ class RecentActivityFreqUpdateRunner(Thread):
             now_ts = get_ts_s()
             last_1d_ts = now_ts - 1 * 24 * 60 * 60
             last_7d_ts = now_ts - 7 * 24 * 60 * 60
-            session.execute('update tdd_video set recent = 0 where added < %d' % last_7d_ts)
+            session.execute(
+                'update tdd_video set recent = 0 where added < %d' % last_7d_ts)
             session.execute('update tdd_video set recent = 1 where added >= %d && added < %d' % (
                 last_7d_ts, last_1d_ts))
-            session.execute('update tdd_video set recent = 2 where added >= %d' % last_1d_ts)
+            session.execute(
+                'update tdd_video set recent = 2 where added >= %d' % last_1d_ts)
             session.commit()
             self.logger.info('Finish update recent field!')
         except Exception as e:
-            self.logger.info('Fail to update recent field. Exception caught. Detail: %s' % e)
+            self.logger.info(
+                'Fail to update recent field. Exception caught. Detail: %s' % e)
             session.rollback()
 
     def _update_activity(self, session, active_threshold=1000, hot_threshold=5000):
         self.logger.info('Now start update activity field...')
         try:
-            this_week_ts_begin = int(time.mktime(time.strptime(str(datetime.date.today()), '%Y-%m-%d'))) + 4 * 60 * 60
+            this_week_ts_begin = int(time.mktime(time.strptime(
+                str(datetime.date.today()), '%Y-%m-%d'))) + 4 * 60 * 60
             this_week_ts_end = this_week_ts_begin + 30 * 60
             this_week_results = session.execute(
                 'select r.`aid`, `view` from tdd_video_record r join tdd_video v on r.aid = v.aid ' +
@@ -1360,7 +1469,8 @@ class RecentActivityFreqUpdateRunner(Thread):
             diff_records = {}
             for aid in this_week_records.keys():
                 if aid in last_week_record_keys:
-                    diff_records[aid] = this_week_records[aid] - last_week_records[aid]
+                    diff_records[aid] = this_week_records[aid] - \
+                        last_week_records[aid]
                 else:
                     diff_records[aid] = this_week_records[aid]
 
@@ -1374,15 +1484,18 @@ class RecentActivityFreqUpdateRunner(Thread):
 
             session.execute('update tdd_video set activity = 0')
             for aid in active_aids:
-                session.execute('update tdd_video set activity = 1 where aid = %d' % aid)
+                session.execute(
+                    'update tdd_video set activity = 1 where aid = %d' % aid)
             for aid in hot_aids:
-                session.execute('update tdd_video set activity = 2 where aid = %d' % aid)
+                session.execute(
+                    'update tdd_video set activity = 2 where aid = %d' % aid)
             session.commit()
 
             self.logger.info('Finish update activity field! %d active videos and %d hot videos set.' % (
                 len(active_aids), len(hot_aids)))
         except Exception as e:
-            self.logger.info('Fail to update activity field. Exception caught. Detail: %s' % e)
+            self.logger.info(
+                'Fail to update activity field. Exception caught. Detail: %s' % e)
             session.rollback()
 
     def _update_freq(self, session):
@@ -1390,573 +1503,32 @@ class RecentActivityFreqUpdateRunner(Thread):
         try:
             session.execute('update tdd_video set freq = 0')
             session.execute('update tdd_video set freq = 1 where activity = 1')
-            session.execute('update tdd_video set freq = 2 where activity = 2 || recent = 1')
+            session.execute(
+                'update tdd_video set freq = 2 where activity = 2 || recent = 1')
             session.commit()
             self.logger.info('Finish update freq field!')
         except Exception as e:
-            self.logger.info('Fail to update freq field. Exception caught. Detail: %s' % e)
+            self.logger.info(
+                'Fail to update freq field. Exception caught. Detail: %s' % e)
             session.rollback()
 
     def run(self):
-        self.logger.info('Now start updating recent, activity, freq fields of video...')
+        self.logger.info(
+            'Now start updating recent, activity, freq fields of video...')
         session = Session()
         self._update_recent(session)
         if self.time_label == '04:00':
             self._update_activity(session)
         self._update_freq(session)
         session.close()
-        self.logger.info('Finish update recent, activity, freq fields of video!')
-
-
-# TODO: update after all-video hourly task fixed
-class RankWeeklyUpdateRunner(Thread):
-    def __init__(self, records, time_task):
-        super().__init__()
-        self.records = records
-        self.time_task = time_task
-        self.time_label = time_task[-5:]
-        self.logger = logging.getLogger('RankWeeklyUpdateRunner')
-
-    def run(self):
-        self.logger.info('Now start updating rank weekly...')
-        session = Session()
-
-        # TODO check why the following two db query need at least 1 min to finish and optimize it
-
-        # get record base dict
-        # bvid -> added, view, danmaku, reply, favorite, coin, share, like
-        bvid_base_record_dict = DBOperation.query_video_record_rank_weekly_base_dict(session)
-        # change format to Record namedtuple
-        for bvid, record in bvid_base_record_dict.items():
-            bvid_base_record_dict[bvid] = Record(
-                record[0], b2a(bvid), bvid, record[1], record[2], record[3], record[4], record[5], record[6], record[7])
-        self.logger.info('bvid_base_record_dict with %d records got from db' % len(bvid_base_record_dict))
-
-        # get videos (page), pubdate dict
-        # bvid -> videos, pubdate, maybe have None
-        bvid_videos_pubdate_dict = DBOperation.query_video_videos_pubdate_dict(session)
-        self.logger.info('bvid_videos_pubdate_dict with %d videos got from db' % len(bvid_videos_pubdate_dict))
-
-        # make current issue list
-        self.logger.info('Now create video increment list...')
-        video_increment_list = []
-        base_records_begin_ts = min(map(lambda r: r.added, bvid_base_record_dict.values()))
-        for idx, record in enumerate(self.records, 1):
-            bvid = record.bvid
-            try:
-                # get videos (page) and pubdate
-                page, pubdate = bvid_videos_pubdate_dict.get(bvid, (None, None))
-                if pubdate is None or page is None or page < 1:
-                    self.logger.warning('Invalid pubdate %s or page %s of video bvid %s detected, continue' % (
-                        str(pubdate), str(page), bvid))
-                    continue
-
-                # get base record
-                base_record = bvid_base_record_dict.get(bvid, None)
-                if base_record is None:
-                    # fail to get base record, check pubdate
-                    if pubdate >= base_records_begin_ts:
-                        # new video, published in this week, set base_record.added to pubdate
-                        base_record = Record(pubdate, record.aid, record.bvid, 0, 0, 0, 0, 0, 0, 0)
-                    else:
-                        # old video, published before this week, should have base record, so here mush be an error
-                        self.logger.warning('Fail to get base record of old video bvid %s, continue' % bvid)
-                        # TODO need to insert the nearest into base
-                        continue
-
-                # calc delta
-                d_view = record.view - base_record.view  # maybe occur -1?
-                d_danmaku = record.danmaku - base_record.danmaku
-                d_reply = record.reply - base_record.reply
-                d_favorite = record.favorite - base_record.favorite
-                d_coin = record.coin - base_record.coin
-                d_share = record.share - base_record.share
-                d_like = record.like - base_record.like
-
-                # calc point
-                point, xiua, xiub = zk_calc(d_view, d_danmaku, d_reply, d_favorite, page=page)
-
-                # append to video increment list
-                video_increment_list.append((
-                    bvid, base_record.added, record.added,
-                    record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like,
-                    d_view, d_danmaku, d_reply, d_favorite, d_coin, d_share, d_like,
-                    point, xiua, xiub))
-            except Exception as e:
-                self.logger.warning('Fail to create increment of video bvid %s. Exception caught. Detail: %s' % (
-                    bvid, e))
-            finally:
-                if idx % 10000 == 0:
-                    self.logger.info('%d / %d done' % (idx, len(self.records)))
-        self.logger.info('%d / %d done' % (len(self.records), len(self.records)))
-        self.logger.info('Finish create video increment list with %d increments!' % len(video_increment_list))
-
-        # sort via point
-        video_increment_list.sort(key=lambda x: (x[17], x[10]))  # TODO if point equals?
-        video_increment_list.reverse()
-        self.logger.info('Finish sort video increment list!')
-
-        # select top 10000
-        video_increment_top_list = video_increment_list[:10000]
-
-        # update sql
-        self.logger.info('Now execute update sql...')
-        try:
-            drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_weekly_current_tmp'
-            session.execute(drop_tmp_table_sql)
-            self.logger.info(drop_tmp_table_sql)
-
-            create_tmp_table_sql = 'create table tdd_video_record_rank_weekly_current_tmp ' + \
-                                   'like tdd_video_record_rank_weekly_current'
-            session.execute(create_tmp_table_sql)
-            self.logger.info(create_tmp_table_sql)
-
-            for rank, c in enumerate(video_increment_top_list, 1):
-                sql = 'insert into tdd_video_record_rank_weekly_current_tmp values(' \
-                      '"%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
-                      (c[0], c[1], c[2],
-                       c[3], c[4], c[5], c[6], c[7], c[8], c[9],
-                       c[10], c[11], c[12], c[13], c[14], c[15], c[16],
-                       c[17], c[18], c[19],
-                       rank)
-                session.execute(sql)
-            session.commit()
-            self.logger.info('Top 10000 increments added to tdd_video_record_rank_weekly_current_tmp!')
-
-            drop_old_table_sql = 'drop table if exists tdd_video_record_rank_weekly_current'
-            session.execute(drop_old_table_sql)
-            self.logger.info(drop_old_table_sql)
-
-            rename_tmp_table_sql = 'rename table tdd_video_record_rank_weekly_current_tmp to ' + \
-                                   'tdd_video_record_rank_weekly_current'
-            session.execute(rename_tmp_table_sql)
-            self.logger.info(rename_tmp_table_sql)
-        except Exception as e:
-            self.logger.error('Fail to execute update sql! Exception caught. Detail: %s' % e)
-            session.rollback()
-        self.logger.info('Finish execute update sql!')
-
-        self.logger.info('Now update color...')
-        color_dict = {
-            10: 'incr_view',
-            11: 'incr_danmaku',
-            12: 'incr_reply',
-            13: 'incr_favorite',
-            14: 'incr_coin',
-            15: 'incr_share',
-            16: 'incr_like',
-            17: 'point',
-        }
-        for prop_idx, prop in color_dict.items():
-            prop_list = sorted(list(map(lambda x: x[prop_idx], video_increment_top_list)))
-            # a
-            value = float(prop_list[5000])
-            session.execute('update tdd_video_record_rank_weekly_current_color set a = %f ' % value +
-                            'where property = "%s"' % prop)
-            # b
-            value = float(prop_list[9000])
-            session.execute('update tdd_video_record_rank_weekly_current_color set b = %f ' % value +
-                            'where property = "%s"' % prop)
-            # c
-            value = float(prop_list[9900])
-            session.execute('update tdd_video_record_rank_weekly_current_color set c = %f ' % value +
-                            'where property = "%s"' % prop)
-            session.commit()
-            # d
-            value = float(prop_list[9990])
-            session.execute('update tdd_video_record_rank_weekly_current_color set d = %f ' % value +
-                            'where property = "%s"' % prop)
-            session.commit()
-        self.logger.info('Finish update color!')
-
-        if self.time_label == '03:00' and get_week_day() == 5:
-            self.logger.info('Now archive this week data and start a new week...')
-            try:
-                # calc archive overview
-                ts_str = ts_s_to_str(get_ts_s())
-                end_ts = str_to_ts_s(ts_str[:11] + '03:00:00')
-                start_ts = end_ts - 7 * 24 * 60 * 60
-                issue_num = (start_ts - 1599850800) // (7 * 24 * 60 * 60) + 424
-                arch_name = 'W' + ts_str[:4] + ts_str[5:7] + ts_str[8:10] + ' - #' + str(issue_num)
-                session.execute(
-                    'insert into tdd_video_record_rank_weekly_archive_overview (`name`, start_ts, end_ts) ' +
-                    'values ("%s", %d, %d)' % (arch_name, start_ts, end_ts))
-                session.commit()
-                self.logger.info('Archive overview saved to db! name: %s, start_ts: %d (%s), end_ts: %d (%s)' % (
-                    arch_name, start_ts, ts_s_to_str(start_ts), end_ts, ts_s_to_str(end_ts)
-                ))
-
-                # get arch id
-                result = session.execute('select `id` from tdd_video_record_rank_weekly_archive_overview ' +
-                                         'where `name` = "%s"' % arch_name)
-                arch_id = 0
-                for r in result:
-                    arch_id = int(r[0])
-                self.logger.info('Archive arch id is %d.' % arch_id)
-
-                # archive increments, just like add current increments, just add 1 more column called arch_id
-                self.logger.info('Now archiving increments...')
-                for rank, c in enumerate(video_increment_top_list, 1):
-                    sql = 'insert into tdd_video_record_rank_weekly_archive values(' \
-                          '%d, "%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
-                          (arch_id, c[0], c[1], c[2],
-                           c[3], c[4], c[5], c[6], c[7], c[8], c[9],
-                           c[10], c[11], c[12], c[13], c[14], c[15], c[16],
-                           c[17], c[18], c[19],
-                           rank)
-                    session.execute(sql)
-                session.commit()
-                self.logger.info('Finish archive current top 10000 increments!')
-
-                # archive color
-                self.logger.info('Now archiving color...')
-                result = session.execute('select * from tdd_video_record_rank_weekly_current_color')
-                for r in result:
-                    prop = str(r[0])
-                    a = float(r[1])
-                    b = float(r[2])
-                    c = float(r[3])
-                    d = float(r[4])
-                    session.execute('insert into tdd_video_record_rank_weekly_archive_color values(' +
-                                    '%d, "%s", %f, %f, %f, %f)' % (arch_id, prop, a, b, c, d))
-                session.commit()
-                self.logger.info('Finish archive color!')
-
-                # update base
-                self.logger.info('Now updating base...')
-                drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base_tmp'
-                session.execute(drop_tmp_table_sql)
-                self.logger.info(drop_tmp_table_sql)
-
-                hour_start_ts = str_to_ts_s(ts_s_to_str(get_ts_s())[:11] + '03:00:00')
-                create_tmp_table_sql = 'create table tdd_video_record_rank_weekly_base_tmp ' + \
-                                       'select * from tdd_video_record_hourly where added >= %d' % hour_start_ts
-                session.execute(create_tmp_table_sql)  # create table from tdd_video_record_hourly
-                self.logger.info(create_tmp_table_sql)
-
-                # WARNING some c0 videos not have records since this is 03:00 round, not 04:00, which includes all
-                # so we need to add c0
-                # of cause, some c30 videos maybe not have their records this round due to some error
-                # but we do not consider it here, since in 04:00 this will also happen
-                # we will handle it at another place
-                result = session.execute('select aid from tdd_video where tid != 30 and code = 0 and state = 0')
-                all_c0_video_aid_list = [r[0] for r in result]
-                result = session.execute('select bvid from tdd_video_record_rank_weekly_base_tmp')
-                all_video_aid_in_base_tmp_list = [b2a(r[0]) for r in result]
-                no_base_c0_video_aid_list = list(set(all_c0_video_aid_list) - set(all_video_aid_in_base_tmp_list))
-                self.logger.info('%d no base c0 video found, now add base record for them...'
-                                 % len(no_base_c0_video_aid_list))
-                fail_aids = []
-                success_aids = []
-                service = Service(mode='worker')
-                for idx, aid in enumerate(no_base_c0_video_aid_list, 1):
-                    # get video view
-                    try:
-                        video_view = service.get_video_view({'aid': aid})
-                    except Exception as e:
-                        self.logger.warning(f'Fail to get valid video view. aid: {aid}, error: {e}')
-                        continue
-
-                    # add record to base
-                    add_record_to_base_sql = 'insert into tdd_video_record_rank_weekly_base_tmp values ' + \
-                                             '(%d, \'%s\', %d, %d, %d, %d, %d, %d, %d)' \
-                                             % (get_ts_s(), a2b(aid),
-                                                video_view.stat.view,
-                                                video_view.stat.danmaku, video_view.stat.reply,
-                                                video_view.stat.favorite, video_view.stat.coin,
-                                                video_view.stat.share, video_view.stat.like)
-                    session.execute(add_record_to_base_sql)
-                    success_aids.append(aid)
-                    if idx % 10 == 0:
-                        self.logger.info('%d / %d done' % (idx, len(no_base_c0_video_aid_list)))
-                        session.commit()
-                self.logger.info('%d / %d done' % (len(no_base_c0_video_aid_list), len(no_base_c0_video_aid_list)))
-                session.commit()
-                self.logger.info('Finish adding no base c0 video base records! %d records added, %d aids fail'
-                                 % (len(success_aids), len(fail_aids)))
-                self.logger.warning('fail_aids: %r' % fail_aids)
-
-                drop_old_table_sql = 'drop table if exists tdd_video_record_rank_weekly_base'
-                session.execute(drop_old_table_sql)
-                self.logger.info(drop_old_table_sql)
-
-                rename_tmp_table_sql = 'rename table tdd_video_record_rank_weekly_base_tmp to ' + \
-                                       'tdd_video_record_rank_weekly_base'
-                session.execute(rename_tmp_table_sql)
-                self.logger.info(rename_tmp_table_sql)
-                self.logger.info('Finish update base!')
-            except Exception as e:
-                session.rollback()
-                self.logger.warning(
-                    'Fail to archive this week data and start a new week. Exception caught. Detail: %s' % e)
-            else:
-                self.logger.info('Finish archive this week data and start a new week!')
-
-        session.close()
-        self.logger.info('Finish update rank weekly!')
-
-
-# TODO: update after all-video hourly task fixed
-class RankMonthlyUpdateRunner(Thread):
-    def __init__(self, records, time_task):
-        super().__init__()
-        self.records = records
-        self.time_task = time_task
-        self.time_label = time_task[-5:]
-        self.day_num = time_task[8:10]  # ADD
-        self.logger = logging.getLogger('RankMonthlyUpdateRunner')  # change
-
-    def run(self):
-        self.logger.info('Now start updating rank monthly...')  # change
-        session = Session()
-
-        # TODO check why the following two db query need at least 1 min to finish and optimize it
-
-        # get record base dict
-        # bvid -> added, view, danmaku, reply, favorite, coin, share, like
-        bvid_base_record_dict = DBOperation.query_video_record_rank_monthly_base_dict(session)  # CHANGE
-        # change format to Record namedtuple
-        for bvid, record in bvid_base_record_dict.items():
-            bvid_base_record_dict[bvid] = Record(
-                record[0], b2a(bvid), bvid, record[1], record[2], record[3], record[4], record[5], record[6], record[7])
-        self.logger.info('bvid_base_record_dict with %d records got from db' % len(bvid_base_record_dict))
-
-        # get videos (page), pubdate dict
-        # bvid -> videos, pubdate, maybe have None
-        bvid_videos_pubdate_dict = DBOperation.query_video_videos_pubdate_dict(session)
-        self.logger.info('bvid_videos_pubdate_dict with %d videos got from db' % len(bvid_videos_pubdate_dict))
-
-        # make current issue list
-        self.logger.info('Now create video increment list...')
-        video_increment_list = []
-        base_records_begin_ts = min(map(lambda r: r.added, bvid_base_record_dict.values()))
-        for idx, record in enumerate(self.records, 1):
-            bvid = record.bvid
-            try:
-                # get videos (page) and pubdate
-                page, pubdate = bvid_videos_pubdate_dict.get(bvid, (None, None))
-                if pubdate is None or page is None or page < 1:
-                    self.logger.warning('Invalid pubdate %s or page %s of video bvid %s detected, continue' % (
-                        str(pubdate), str(page), bvid))
-                    continue
-
-                # get base record
-                base_record = bvid_base_record_dict.get(bvid, None)
-                if base_record is None:
-                    # fail to get base record, check pubdate
-                    if pubdate >= base_records_begin_ts:
-                        # new video, published in this month, set base_record.added to pubdate  # CHANGE
-                        base_record = Record(pubdate, record.aid, record.bvid, 0, 0, 0, 0, 0, 0, 0)
-                    else:
-                        # old video, published before this month, should have base record, so here mush be an error  # CHANGE
-                        self.logger.warning('Fail to get base record of old video bvid %s, continue' % bvid)
-                        # TODO need to insert the nearest into base
-                        continue
-
-                # calc delta
-                d_view = record.view - base_record.view  # maybe occur -1?
-                d_danmaku = record.danmaku - base_record.danmaku
-                d_reply = record.reply - base_record.reply
-                d_favorite = record.favorite - base_record.favorite
-                d_coin = record.coin - base_record.coin
-                d_share = record.share - base_record.share
-                d_like = record.like - base_record.like
-
-                # calc point
-                point, xiua, xiub = zk_calc(d_view, d_danmaku, d_reply, d_favorite, page=page)
-
-                # append to video increment list
-                video_increment_list.append((
-                    bvid, base_record.added, record.added,
-                    record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like,
-                    d_view, d_danmaku, d_reply, d_favorite, d_coin, d_share, d_like,
-                    point, xiua, xiub))
-            except Exception as e:
-                self.logger.warning('Fail to create increment of video bvid %s. Exception caught. Detail: %s' % (
-                    bvid, e))
-            finally:
-                if idx % 10000 == 0:
-                    self.logger.info('%d / %d done' % (idx, len(self.records)))
-        self.logger.info('%d / %d done' % (len(self.records), len(self.records)))
-        self.logger.info('Finish create video increment list with %d increments!' % len(video_increment_list))
-
-        # sort via point
-        video_increment_list.sort(key=lambda x: (x[17], x[10]))  # TODO if point equals?
-        video_increment_list.reverse()
-        self.logger.info('Finish sort video increment list!')
-
-        # select top 10000
-        video_increment_top_list = video_increment_list[:10000]
-
-        # update sql
-        self.logger.info('Now execute update sql...')
-        try:
-            drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_monthly_current_tmp'  # CHANGE
-            session.execute(drop_tmp_table_sql)
-            self.logger.info(drop_tmp_table_sql)
-
-            create_tmp_table_sql = 'create table tdd_video_record_rank_monthly_current_tmp ' + \
-                                   'like tdd_video_record_rank_monthly_current'  # CHANGE
-            session.execute(create_tmp_table_sql)
-            self.logger.info(create_tmp_table_sql)
-
-            for rank, c in enumerate(video_increment_top_list, 1):
-                sql = 'insert into tdd_video_record_rank_monthly_current_tmp values(' \
-                      '"%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
-                      (c[0], c[1], c[2],
-                       c[3], c[4], c[5], c[6], c[7], c[8], c[9],
-                       c[10], c[11], c[12], c[13], c[14], c[15], c[16],
-                       c[17], c[18], c[19],
-                       rank)  # CHANGE
-                session.execute(sql)
-            session.commit()
-            self.logger.info('Top 10000 increments added to tdd_video_record_rank_monthly_current_tmp!')  # CHANGE
-
-            drop_old_table_sql = 'drop table if exists tdd_video_record_rank_monthly_current'  # CHANGE
-            session.execute(drop_old_table_sql)
-            self.logger.info(drop_old_table_sql)
-
-            rename_tmp_table_sql = 'rename table tdd_video_record_rank_monthly_current_tmp to ' + \
-                                   'tdd_video_record_rank_monthly_current'  # CHANGE
-            session.execute(rename_tmp_table_sql)
-            self.logger.info(rename_tmp_table_sql)
-        except Exception as e:
-            self.logger.error('Fail to execute update sql! Exception caught. Detail: %s' % e)
-            session.rollback()
-        self.logger.info('Finish execute update sql!')
-
-        self.logger.info('Now update color...')
-        color_dict = {
-            10: 'incr_view',
-            11: 'incr_danmaku',
-            12: 'incr_reply',
-            13: 'incr_favorite',
-            14: 'incr_coin',
-            15: 'incr_share',
-            16: 'incr_like',
-            17: 'point',
-        }
-        for prop_idx, prop in color_dict.items():
-            prop_list = sorted(list(map(lambda x: x[prop_idx], video_increment_top_list)))
-            # a
-            value = float(prop_list[5000])
-            session.execute('update tdd_video_record_rank_monthly_current_color set a = %f ' % value +
-                            'where property = "%s"' % prop)  # CHANGE
-            # b
-            value = float(prop_list[9000])
-            session.execute('update tdd_video_record_rank_monthly_current_color set b = %f ' % value +
-                            'where property = "%s"' % prop)  # CHANGE
-            # c
-            value = float(prop_list[9900])
-            session.execute('update tdd_video_record_rank_monthly_current_color set c = %f ' % value +
-                            'where property = "%s"' % prop)  # CHANGE
-            session.commit()
-            # d
-            value = float(prop_list[9990])
-            session.execute('update tdd_video_record_rank_monthly_current_color set d = %f ' % value +
-                            'where property = "%s"' % prop)  # CHANGE
-            session.commit()
-        self.logger.info('Finish update color!')
-
-        if self.time_label == '04:00' and self.day_num == '01':  # CHANGE
-            self.logger.info('Now archive this month data and start a new month...')  # CHANGE
-            try:
-                # calc archive overview
-                ts_str = ts_s_to_str(get_ts_s())
-                end_ts = str_to_ts_s(ts_str[:11] + '04:00:00')  # CHANGE
-                # CHANGE
-                # get last month day 01 time 04:00:00
-                this_year_num = int(ts_str[:4])
-                this_month_num = int(ts_str[5:7])
-                if this_month_num == 0:
-                    last_year_num = this_year_num - 1
-                    last_month_num = 12
-                else:
-                    last_year_num = this_year_num
-                    last_month_num = this_month_num - 1
-                last_month_str = str(last_month_num) if last_month_num > 9 else '0' + str(last_month_num)
-                start_ts_str = str(last_year_num) + '-' + last_month_str + '-01 04:00:00'
-                start_ts = str_to_ts_s(start_ts_str)
-                arch_name = 'M' + ts_str[:4] + ts_str[5:7] + ts_str[8:10]
-                session.execute(
-                    'insert into tdd_video_record_rank_monthly_archive_overview (`name`, start_ts, end_ts) ' +
-                    'values ("%s", %d, %d)' % (arch_name, start_ts, end_ts))  # CHANGE
-                session.commit()
-                self.logger.info('Archive overview saved to db! name: %s, start_ts: %d (%s), end_ts: %d (%s)' % (
-                    arch_name, start_ts, ts_s_to_str(start_ts), end_ts, ts_s_to_str(end_ts)
-                ))
-
-                # get arch id
-                result = session.execute('select `id` from tdd_video_record_rank_monthly_archive_overview ' +
-                                         'where `name` = "%s"' % arch_name)  # CHANGE
-                arch_id = 0
-                for r in result:
-                    arch_id = int(r[0])
-                self.logger.info('Archive arch id is %d.' % arch_id)
-
-                # archive increments, just like add current increments, just add 1 more column called arch_id
-                self.logger.info('Now archiving increments...')
-                for rank, c in enumerate(video_increment_top_list, 1):
-                    sql = 'insert into tdd_video_record_rank_monthly_archive values(' \
-                          '%d, "%s", %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %f, %f, %f, %d)' % \
-                          (arch_id, c[0], c[1], c[2],
-                           c[3], c[4], c[5], c[6], c[7], c[8], c[9],
-                           c[10], c[11], c[12], c[13], c[14], c[15], c[16],
-                           c[17], c[18], c[19],
-                           rank)  # CHANGE
-                    session.execute(sql)
-                session.commit()
-                self.logger.info('Finish archive current top 10000 increments!')
-
-                # archive color
-                self.logger.info('Now archiving color...')
-                result = session.execute('select * from tdd_video_record_rank_monthly_current_color')  # CHANGE
-                for r in result:
-                    prop = str(r[0])
-                    a = float(r[1])
-                    b = float(r[2])
-                    c = float(r[3])
-                    d = float(r[4])
-                    session.execute('insert into tdd_video_record_rank_monthly_archive_color values(' +
-                                    '%d, "%s", %f, %f, %f, %f)' % (arch_id, prop, a, b, c, d))  # CHANGE
-                session.commit()
-                self.logger.info('Finish archive color!')
-
-                # update base
-                self.logger.info('Now updating base...')
-                drop_tmp_table_sql = 'drop table if exists tdd_video_record_rank_monthly_base_tmp'  # CHANGE
-                session.execute(drop_tmp_table_sql)
-                self.logger.info(drop_tmp_table_sql)
-
-                hour_start_ts = str_to_ts_s(ts_s_to_str(get_ts_s())[:11] + '04:00:00')  # CHANGE
-                create_tmp_table_sql = 'create table tdd_video_record_rank_monthly_base_tmp ' + \
-                                       'select * from tdd_video_record_hourly where added >= %d' % hour_start_ts  # CHANGE
-                session.execute(create_tmp_table_sql)  # create table from tdd_video_record_hourly
-                self.logger.info(create_tmp_table_sql)
-
-                drop_old_table_sql = 'drop table if exists tdd_video_record_rank_monthly_base'  # CHANGE
-                session.execute(drop_old_table_sql)
-                self.logger.info(drop_old_table_sql)
-
-                rename_tmp_table_sql = 'rename table tdd_video_record_rank_monthly_base_tmp to ' + \
-                                       'tdd_video_record_rank_monthly_base'  # CHANGE
-                session.execute(rename_tmp_table_sql)
-                self.logger.info(rename_tmp_table_sql)
-                self.logger.info('Finish update base!')
-            except Exception as e:
-                session.rollback()
-                self.logger.warning(
-                    'Fail to archive this month data and start a new month. Exception caught. Detail: %s' % e)  # CHANGE
-            else:
-                self.logger.info('Finish archive this month data and start a new month!')  # CHANGE
-
-        session.close()
-        self.logger.info('Finish update rank monthly!')  # CHANGE
+        self.logger.info(
+            'Finish update recent, activity, freq fields of video!')
 
 
 def run_hourly_video_record_add(time_task):
     time_label = time_task[-5:]  # current time, ex: 19:00
-    logger.info('Now start hourly video record add, time label: %s..' % time_label)
+    logger.info(
+        'Now start hourly video record add, time label: %s..' % time_label)
 
     # upstream data acquisition pipeline, c30 and c0 pipeline runner, init -> start -> join -> records
     logger.info('Now start upstream data acquisition pipelines...')
@@ -1979,7 +1551,8 @@ def run_hourly_video_record_add(time_task):
     # remove duplicate records
     logger.info('Now check duplicate records...')
     duplicate_records_item_list = list(
-        filter(lambda item: item[1] > 1, Counter(map(lambda r: r.bvid, records)).items())
+        filter(lambda item: item[1] > 1, Counter(
+            map(lambda r: r.bvid, records)).items())
     )  # bvid -> count of records of video with this bvid
     if len(duplicate_records_item_list) == 0:
         logger.info('No duplicate records detected!')
@@ -1991,14 +1564,17 @@ def run_hourly_video_record_add(time_task):
         for bvid, count in duplicate_records_item_list:
             logger.warning(f'Video bvid {bvid} have total {count} records.')
             for record in sorted(
-                    filter(lambda r: r.bvid == bvid, records),  # records from video with the same bvid
+                    # records from video with the same bvid
+                    filter(lambda r: r.bvid == bvid, records),
                     key=lambda r: r.added  # sorted by added, asc
             )[1:]:  # remain the first one, i.e. the earliest record
                 records.remove(record)
                 removed_records_count += 1
-        logger.warning(f'Finish remove duplicate records! Total {removed_records_count} duplicate records removed.')
+        logger.warning(
+            f'Finish remove duplicate records! Total {removed_records_count} duplicate records removed.')
 
-    logger.info(f'Finish upstream data acquisition pipelines! {len(records)} records received')
+    logger.info(
+        f'Finish upstream data acquisition pipelines! {len(records)} records received')
 
     # downstream data analysis pipeline
     logger.info('Now start downstream data analysis pipelines...')
@@ -2007,8 +1583,6 @@ def run_hourly_video_record_add(time_task):
         RecordsSaveToDbRunner(records, time_label),
         RecentRecordsAnalystRunner(records, time_task),
         RecentActivityFreqUpdateRunner(time_label),
-        # RankWeeklyUpdateRunner(records, time_task),
-        # RankMonthlyUpdateRunner(records, time_task),
     ]
     for runner in data_analysis_pipeline_runner_list:
         runner.start()
@@ -2024,7 +1598,8 @@ def hourly_video_record_add():
     timer = Timer()
     timer.start()
 
-    time_task = f'{get_ts_s_str()[:13]}:00'  # current time task, ex: 2013-01-31 19:00
+    # current time task, ex: 2013-01-31 19:00
+    time_task = f'{get_ts_s_str()[:13]}:00'
     logger.info(f'Time task: {time_task}')
 
     try:
@@ -2032,7 +1607,8 @@ def hourly_video_record_add():
     except Exception as e:
         message = f'Exception occurred when running hourly video record add! time task: {time_task}, error: {e}'
         logger.critical(message)
-        sc_send_critical(script_fullname, message, __file__, get_current_line_no())
+        sc_send_critical(script_fullname, message,
+                         __file__, get_current_line_no())
         exit(1)
 
     timer.stop()
@@ -2049,6 +1625,7 @@ def main():
 
 if __name__ == '__main__':
     # current time task, only number, ex: 201301311900
-    time_task_simple = f'{get_ts_s_str()[:13]}:00'.replace('-', '').replace(' ', '').replace(':', '')
+    time_task_simple = f'{get_ts_s_str()[:13]}:00'.replace(
+        '-', '').replace(' ', '').replace(':', '')
     logging_init(file_prefix=f'{script_id}_{time_task_simple}')
     main()
