@@ -28,6 +28,7 @@ class AddVideoFromArchiveJob(Job):
                 new_video = add_video(archive.aid, self.service, self.session)
             except AlreadyExistError:
                 self.logger.debug(f'Video presented in archives already exist! archive: {archive}')
+                self.stat.condition['already_exist_video'] += 1
             except Exception as e:
                 self.logger.error(f'Fail to add video parsed from archive! archive: {archive}, error: {e}')
                 self.stat.condition['add_video_exception'] += 1
