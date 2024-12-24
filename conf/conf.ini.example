@@ -5,12 +5,6 @@ host = localhost
 port = 3306
 dbname = tdd
 
-[library]
-cookie = '_luo_session=qwertyuiop'
-
-[bilibili]
-cookie = your bilibili cookie
-
 [serverchan]
 sckey = your sckey
 

@@ -1,19 +1,21 @@
+# macOS
 .DS_Store
 
-venv/
-
+# IDE
 .idea/
 
-*.csv
-
+# python
+venv/
+venv-3.11/
 __pycache__/
-
-log/
-data/
-
-library/
-test*
 .ipynb_checkpoints/
 
+# files
+log/
+data/
+*.csv
+test*
+
+# config
 conf/conf.ini
 service/endpoints.json
