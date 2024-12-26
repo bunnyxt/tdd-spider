@@ -1,5 +1,5 @@
 from .basic import Base
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, BigInteger
+from sqlalchemy import Column, Integer, String, ForeignKey, BigInteger
 from sqlalchemy.dialects.mysql import LONGTEXT, TINYINT, DOUBLE
 
 __all__ = ['TddVideo', 'TddMember', 'TddVideoStaff', 'TddVideoRecord', 'TddMemberFollowerRecord', 'TddStatDaily',
@@ -13,9 +13,10 @@ class TddVideo(Base):
 
     __tablename__ = 'tdd_video'
 
-    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False,
+                unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
-    aid = Column(Integer, nullable=False, unique=True)
+    aid = Column(BigInteger, nullable=False, unique=True)
     bvid = Column(String(10), nullable=False)
     videos = Column(Integer, default=None)
     tid = Column(Integer, default=None)
@@ -27,7 +28,8 @@ class TddVideo(Base):
     desc = Column(LONGTEXT, default=None)
     tags = Column(String(500), default=None)
     mid = Column(Integer, default=None)
-    code = Column(Integer, nullable=False, default=0)  # TODO how to enable nullable=False and have default value
+    # TODO how to enable nullable=False and have default value
+    code = Column(Integer, nullable=False, default=0)
     attribute = Column(Integer)
     state = Column(Integer)
     forward = Column(Integer)
@@ -41,7 +43,8 @@ class TddVideo(Base):
     freq = Column(TINYINT, nullable=False, default=0)  #
     activity = Column(TINYINT, nullable=False, default=0)  #
     recent = Column(TINYINT, nullable=False, default=0)  #
-    laststat = Column(BigInteger, ForeignKey('tdd_video_record.id'), default=None)
+    laststat = Column(BigInteger, ForeignKey(
+        'tdd_video_record.id'), default=None)
 
     def __repr__(self):
         return "<TddVideo(aid=%d,title=%s)>" % (self.aid, self.title)
@@ -52,14 +55,16 @@ class TddMember(Base):
 
     __tablename__ = 'tdd_member'
 
-    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False,
+                unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     mid = Column(Integer, nullable=False, unique=True)
     sex = Column(String(20), nullable=False)
     name = Column(String(100), nullable=False)
     face = Column(String(200), nullable=False)
     sign = Column(String(500), nullable=False, default='')  #
-    code = Column(Integer, nullable=False, default=0)  # TODO how to enable nullable=False and have default value
+    # TODO how to enable nullable=False and have default value
+    code = Column(Integer, nullable=False, default=0)
     video_count = Column(Integer, nullable=False, default=0)
     last_video = Column(BigInteger)  # fk
     last_total_stat = Column(BigInteger)  # fk
@@ -74,9 +79,10 @@ class TddVideoStaff(Base):
 
     __tablename__ = 'tdd_video_staff'
 
-    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False,
+                unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
-    aid = Column(Integer, nullable=False)
+    aid = Column(BigInteger, nullable=False)
     bvid = Column(String(10), nullable=False)
     mid = Column(Integer, nullable=False)
     title = Column(String(30), nullable=False)
@@ -92,10 +98,12 @@ class TddVideoRecord(Base):
 
     __tablename__ = 'tdd_video_record'
 
-    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False,
+                unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
-    aid = Column(Integer, nullable=False)
-    view = Column(Integer, nullable=False)  # maybe '--' from api, set -1 instead
+    aid = Column(BigInteger, nullable=False)
+    # maybe '--' from api, set -1 instead
+    view = Column(Integer, nullable=False)
     danmaku = Column(Integer, nullable=False)
     reply = Column(Integer, nullable=False)
     favorite = Column(Integer, nullable=False)
@@ -120,7 +128,8 @@ class TddMemberFollowerRecord(Base):
 
     __tablename__ = 'tdd_member_follower_record'
 
-    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False,
+                unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     mid = Column(Integer, nullable=False)
     follower = Column(Integer, nullable=False)
@@ -136,7 +145,8 @@ class TddStatDaily(Base):
 
     __tablename__ = 'tdd_stat_daily'
 
-    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False,
+                unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     video_count = Column(BigInteger, nullable=False)
     member_count = Column(BigInteger, nullable=False)
@@ -152,9 +162,10 @@ class TddVideoLog(Base):
 
     __tablename__ = 'tdd_video_log'
 
-    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False,
+                unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
-    aid = Column(Integer, nullable=False)
+    aid = Column(BigInteger, nullable=False)
     bvid = Column(String(10), nullable=False)
     attr = Column(String(30), nullable=False)
     oldval = Column(LONGTEXT)
@@ -177,7 +188,8 @@ class TddMemberLog(Base):
 
     __tablename__ = 'tdd_member_log'
 
-    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False,
+                unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     mid = Column(Integer, nullable=False)
     attr = Column(String(30), nullable=False)
@@ -200,11 +212,13 @@ class TddMemberTotalStatRecord(Base):
 
     __tablename__ = 'tdd_member_total_stat_record'
 
-    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False,
+                unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
     mid = Column(Integer, nullable=False)
     video_count = Column(Integer, nullable=False)
-    view = Column(Integer, nullable=False)  # maybe '--' from api, set -1 instead
+    # maybe '--' from api, set -1 instead
+    view = Column(Integer, nullable=False)
     danmaku = Column(Integer, nullable=False)
     reply = Column(Integer, nullable=False)
     favorite = Column(Integer, nullable=False)
@@ -233,9 +247,10 @@ class TddTaskVisitVideoRecord(Base):
 
     __tablename__ = 'tdd_task_visit_video_record'
 
-    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False,
+                unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
-    aid = Column(Integer, nullable=False)
+    aid = Column(BigInteger, nullable=False)
     userid = Column(BigInteger, nullable=False)
     status = Column(TINYINT, nullable=False)
 
@@ -248,9 +263,10 @@ class TddVideoRecordAbnormalChange(Base):
 
     __tablename__ = 'tdd_video_record_abnormal_change'
 
-    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False,
+                unique=True, autoincrement=True)
     added = Column(Integer, nullable=False)
-    aid = Column(Integer, nullable=False)
+    aid = Column(BigInteger, nullable=False)
     attr = Column(String, nullable=False)
     speed_now = Column(DOUBLE, nullable=False)
     speed_last = Column(DOUBLE, nullable=False)
@@ -288,9 +304,10 @@ class TddSprintVideoRecord(Base):
 
     __tablename__ = 'tdd_sprint_video_record'
 
-    id = Column(BigInteger, primary_key=True, nullable=False, unique=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, nullable=False,
+                unique=True, autoincrement=True)
     added = Column(Integer, default=None)
-    aid = Column(Integer, default=None)
+    aid = Column(BigInteger, default=None)
     view = Column(Integer, default=None)  # maybe '--' from api, set -1 instead
     danmaku = Column(Integer, default=None)
     reply = Column(Integer, default=None)
