@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Optional, Callable, Literal
 from .error import ResponseError, FormatError, CodeError
 from .response import \
-    VideoStat, \
     VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, \
     VideoTag, VideoTags, \
+    MemberCard, \
     MemberSpace, \
     MemberRelation, \
     ArchiveRankByPartionPage, ArchiveRankByPartionArchiveStat, ArchiveRankByPartionArchive, ArchiveRankByPartion, \
@@ -47,7 +47,8 @@ class Service:
             logger.critical('Invalid JSON format in endpoints.json.')
             exit(1)
         except Exception as e:
-            logger.critical(f'An unexpected error occurred when load and parse endpoints.json file. {e}')
+            logger.critical(
+                f'An unexpected error occurred when load and parse endpoints.json file. {e}')
             exit(1)
 
         # define User Agent list
@@ -140,7 +141,8 @@ class Service:
             # colddown for retry
             if trial > 1:
                 # fluctuation range 0.75 ~ 1.25
-                time.sleep((trial - 1) * (random.random() * 0.5 + 0.75) * colddown_factor)
+                time.sleep((trial - 1) * (random.random()
+                           * 0.5 + 0.75) * colddown_factor)
 
             # get proxy
             proxies = None
@@ -152,7 +154,8 @@ class Service:
 
             # try to get response
             try:
-                r = requests.get(url, params=params, headers=headers, timeout=timeout, proxies=proxies)
+                r = requests.get(url, params=params, headers=headers,
+                                 timeout=timeout, proxies=proxies)
             except requests.exceptions.RequestException as e:
                 logger.debug(
                     f'Fail to get response. '
@@ -210,7 +213,8 @@ class Service:
         try:
             url = self.endpoints['get_video_view']['direct']
             if mode == 'worker':
-                url = random.choice(self.endpoints['get_video_view']['workers'])
+                url = random.choice(
+                    self.endpoints['get_video_view']['workers'])
         except KeyError:
             logger.critical('Endpoint "get_video_view" not found.')
             exit(1)
@@ -227,41 +231,50 @@ class Service:
         # response should contain keys
         for key in ['code', 'message', 'ttl']:
             if key not in response.keys():
-                raise FormatError('video_view', params, response, f'Response should contain key {key}.')
+                raise FormatError('video_view', params, response,
+                                  f'Response should contain key {key}.')
         # response code should be 0
         if response['code'] != 0:
             raise CodeError('video_view', params, response, response['code'])
         # response data should be a dict
         if type(response['data']) != dict:
-            raise FormatError('video_view', params, response, 'Response data should be a dict.')
+            raise FormatError('video_view', params, response,
+                              'Response data should be a dict.')
         # data should contain keys
         for key in ['bvid', 'aid', 'videos', 'tid', 'tname', 'copyright', 'pic', 'title', 'pubdate', 'ctime', 'desc',
                     'state', 'duration', 'owner', 'stat']:
             if key not in response['data'].keys():
-                raise FormatError('video_view', params, response, f'Response data should contain key {key}.')
+                raise FormatError('video_view', params, response,
+                                  f'Response data should contain key {key}.')
         # response data owner should be a dict
         if type(response['data']['owner']) != dict:
-            raise FormatError('video_view', params, response, 'Response data owner should be a dict.')
+            raise FormatError('video_view', params, response,
+                              'Response data owner should be a dict.')
         # data owner should contain keys
         for key in ['mid', 'name', 'face']:
             if key not in response['data']['owner'].keys():
-                raise FormatError('video_view', params, response, f'Response data owner should contain key {key}.')
+                raise FormatError('video_view', params, response,
+                                  f'Response data owner should contain key {key}.')
         # response data stat should be a dict
         if type(response['data']['stat']) != dict:
-            raise FormatError('video_view', params, response, 'Response data stat should be a dict.')
+            raise FormatError('video_view', params, response,
+                              'Response data stat should be a dict.')
         # data stat should contain keys
         for key in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
                     'dislike']:
             if key not in response['data']['stat'].keys():
-                raise FormatError('video_view', params, response, f'Response data stat should contain key {key}.')
+                raise FormatError('video_view', params, response,
+                                  f'Response data stat should contain key {key}.')
         # response data staff should be a list if exists
         if 'staff' in response['data'].keys():
             if type(response['data']['staff']) != list:
-                raise FormatError('video_view', params, response, 'Response data staff should be a list.')
+                raise FormatError('video_view', params, response,
+                                  'Response data staff should be a list.')
             # staff item should be a dict
             for staff_item in response['data']['staff']:
                 if type(staff_item) != dict:
-                    raise FormatError('video_view', params, response, 'Response data staff item should be a dict.')
+                    raise FormatError(
+                        'video_view', params, response, 'Response data staff item should be a dict.')
                 # staff item should contain keys
                 for key in ['mid', 'title', 'name', 'face']:
                     if key not in staff_item.keys():
@@ -343,14 +356,16 @@ class Service:
         try:
             url = self.endpoints['get_video_tags']['direct']
             if mode == 'worker':
-                url = random.choice(self.endpoints['get_video_tags']['workers'])
+                url = random.choice(
+                    self.endpoints['get_video_tags']['workers'])
         except KeyError:
             logger.critical('Endpoint "get_video_tags" not found.')
             exit(1)
 
         # define parser
         def parser(text: str) -> Optional[dict]:
-            logger.debug(f'Try to parse video tags response text. text: {text}.')
+            logger.debug(
+                f'Try to parse video tags response text. text: {text}.')
             parsed_response = None
             try:
                 parsed_response = json.loads(text)
@@ -359,7 +374,8 @@ class Service:
             if parsed_response is not None:
                 code = parsed_response['code']
                 if code in [-500, -504]:
-                    logger.debug(f'Status code {code} found. Server timeout occurred, return None for retry.')
+                    logger.debug(
+                        f'Status code {code} found. Server timeout occurred, return None for retry.')
                     parsed_response = None
             return parsed_response
 
@@ -375,22 +391,26 @@ class Service:
         # response should contain keys
         for key in ['code', 'message', 'ttl']:
             if key not in response.keys():
-                raise FormatError('video_tags', params, response, f'Response should contain key {key}.')
+                raise FormatError('video_tags', params, response,
+                                  f'Response should contain key {key}.')
         # response code should be 0
         if response['code'] != 0:
             raise CodeError('video_tags', params, response, response['code'])
         # response data should be a list
         if type(response['data']) != list:
-            raise FormatError('video_tags', params, response, 'Response data should be a list.')
+            raise FormatError('video_tags', params, response,
+                              'Response data should be a list.')
         # for each data item
         for data_item in response['data']:
             # data item should be a dict
             if type(data_item) != dict:
-                raise FormatError('video_tags', params, response, 'Response data item should be a dict.')
+                raise FormatError('video_tags', params, response,
+                                  'Response data item should be a dict.')
             # data item should contain keys
             for key in ['tag_id', 'tag_name']:
                 if key not in data_item.keys():
-                    raise FormatError('video_tags', params, response, f'Response data item should contain key {key}.')
+                    raise FormatError('video_tags', params, response,
+                                      f'Response data item should contain key {key}.')
 
         # assemble data
         videoTags = VideoTags(tags=[])
@@ -400,6 +420,82 @@ class Service:
                 tag_name=data_item['tag_name']
             ))
         return videoTags
+
+    def get_member_card(
+            self, params: dict = None, headers: dict = None,
+            retry: int = None, timeout: float = None, colddown_factor: float = None,
+            mode: RequestMode = None, get_proxy_url: Callable = None
+    ) -> MemberRelation:
+        """
+        params: { mid: int }
+        mode: 'direct' | 'worker' | 'proxy'
+        """
+        # config mode and get_proxy_url
+        mode = mode if mode is not None else self._mode
+        get_proxy_url = get_proxy_url if get_proxy_url is not None else self._get_proxy_url
+
+        # validate params
+        if mode not in ['direct', 'worker', 'proxy']:
+            logger.critical(f'Invalid request mode: {mode}.')
+            exit(1)
+        if mode == 'proxy' and get_proxy_url is None:
+            logger.critical('Proxy mode requires get_proxy_url function.')
+            exit(1)
+
+        # get endpoint url
+        try:
+            url = self.endpoints['get_member_card']['direct']
+            if mode == 'worker':
+                url = random.choice(
+                    self.endpoints['get_member_card']['workers'])
+        except KeyError:
+            logger.critical('Endpoint "get_member_card" not found.')
+            exit(1)
+
+        # get response
+        response = self._get(url, params=params, headers=headers,
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
+                             get_proxy_url=get_proxy_url if mode == 'proxy' else None)
+        if response is None:
+            raise ResponseError('member_card', params)
+
+        # validate format
+
+        # response should contain keys
+        for key in ['code', 'message', 'ttl']:
+            if key not in response.keys():
+                raise FormatError('member_card', params, response,
+                                  f'Response should contain key {key}.')
+        # response code should be 0
+        if response['code'] != 0:
+            raise CodeError('member_card', params, response, response['code'])
+        # response data should be a dict
+        if type(response['data']) != dict:
+            raise FormatError('member_card', params, response,
+                              'Response data should be a dict.')
+        # data should contain keys
+        for key in ['card']:
+            if key not in response['data'].keys():
+                raise FormatError('member_card', params, response,
+                                  f'Response data should contain key {key}.')
+        # data card should be a dict
+        if type(response['data']['card']) != dict:
+            raise FormatError('member_card', params, response,
+                              'Response data card should be a dict.')
+        # data card should contain keys
+        for key in ['mid', 'name', 'sex', 'face', 'sign']:
+            if key not in response['data']['card'].keys():
+                raise FormatError('member_card', params, response,
+                                  f'Response data card should contain key {key}.')
+
+        # assemble data
+        return MemberCard(
+            mid=response['data']['card']['mid'],
+            name=response['data']['card']['name'],
+            sex=response['data']['card']['sex'],
+            face=response['data']['card']['face'],
+            sign=response['data']['card']['sign']
+        )
 
     def get_member_space(
             self, params: dict = None, headers: dict = None,
@@ -426,19 +522,22 @@ class Service:
         try:
             url = self.endpoints['get_member_space']['direct']
             if mode == 'worker':
-                url = random.choice(self.endpoints['get_member_space']['workers'])
+                url = random.choice(
+                    self.endpoints['get_member_space']['workers'])
         except KeyError:
             logger.critical('Endpoint "get_member_space" not found.')
             exit(1)
 
         # define parser
         def parser(text: str) -> Optional[dict]:
-            logger.debug(f'Try to parse member space response text. text: {text}.')
+            logger.debug(
+                f'Try to parse member space response text. text: {text}.')
             parsed_response = None
             try:
                 parsed_response = json.loads(text)
             except json.JSONDecodeError:
-                logger.debug(f'Fail to decode text to json. Try to parse two jsons.')
+                logger.debug(
+                    f'Fail to decode text to json. Try to parse two jsons.')
                 split_index = text.find('}{')
                 if split_index == -1:
                     logger.debug('Fail to parse two jsons. Return None.')
@@ -456,7 +555,8 @@ class Service:
             if parsed_response is not None:
                 code = parsed_response['code']
                 if code in [-401, -799]:
-                    logger.debug(f'Status code {code} found. Anti-crawler triggered, return None for retry.')
+                    logger.debug(
+                        f'Status code {code} found. Anti-crawler triggered, return None for retry.')
                     parsed_response = None
             return parsed_response
 
@@ -472,17 +572,20 @@ class Service:
         # response should contain keys
         for key in ['code', 'message', 'ttl']:
             if key not in response.keys():
-                raise FormatError('member_space', params, response, f'Response should contain key {key}.')
+                raise FormatError('member_space', params, response,
+                                  f'Response should contain key {key}.')
         # response code should be 0
         if response['code'] != 0:
             raise CodeError('member_space', params, response, response['code'])
         # response data should be a dict
         if type(response['data']) != dict:
-            raise FormatError('member_space', params, response, 'Response data should be a dict.')
+            raise FormatError('member_space', params, response,
+                              'Response data should be a dict.')
         # data should contain keys
         for key in ['mid', 'name', 'sex', 'face', 'sign']:
             if key not in response['data'].keys():
-                raise FormatError('member_space', params, response, f'Response data should contain key {key}.')
+                raise FormatError('member_space', params, response,
+                                  f'Response data should contain key {key}.')
 
         # assemble data
         return MemberSpace(
@@ -518,7 +621,8 @@ class Service:
         try:
             url = self.endpoints['get_member_relation']['direct']
             if mode == 'worker':
-                url = random.choice(self.endpoints['get_member_relation']['workers'])
+                url = random.choice(
+                    self.endpoints['get_member_relation']['workers'])
         except KeyError:
             logger.critical('Endpoint "get_member_relation" not found.')
             exit(1)
@@ -535,17 +639,21 @@ class Service:
         # response should contain keys
         for key in ['code', 'message', 'ttl']:
             if key not in response.keys():
-                raise FormatError('member_relation', params, response, f'Response should contain key {key}.')
+                raise FormatError('member_relation', params,
+                                  response, f'Response should contain key {key}.')
         # response code should be 0
         if response['code'] != 0:
-            raise CodeError('member_relation', params, response, response['code'])
+            raise CodeError('member_relation', params,
+                            response, response['code'])
         # response data should be a dict
         if type(response['data']) != dict:
-            raise FormatError('member_relation', params, response, 'Response data should be a dict.')
+            raise FormatError('member_relation', params,
+                              response, 'Response data should be a dict.')
         # data should contain keys
         for key in ['mid', 'following', 'follower']:
             if key not in response['data'].keys():
-                raise FormatError('member_relation', params, response, f'Response data should contain key {key}.')
+                raise FormatError('member_relation', params, response,
+                                  f'Response data should contain key {key}.')
 
         # assemble data
         return MemberRelation(
@@ -579,14 +687,17 @@ class Service:
         try:
             url = self.endpoints['get_archive_rank_by_partion']['direct']
             if mode == 'worker':
-                url = random.choice(self.endpoints['get_archive_rank_by_partion']['workers'])
+                url = random.choice(
+                    self.endpoints['get_archive_rank_by_partion']['workers'])
         except KeyError:
-            logger.critical('Endpoint "get_archive_rank_by_partion" not found.')
+            logger.critical(
+                'Endpoint "get_archive_rank_by_partion" not found.')
             exit(1)
 
         # define parser
         def parser(text: str) -> Optional[dict]:
-            logger.debug(f'Try to parse archive rank by partion response text. text: {text}.')
+            logger.debug(
+                f'Try to parse archive rank by partion response text. text: {text}.')
             parsed_response = None
             try:
                 parsed_response = json.loads(text)
@@ -595,7 +706,8 @@ class Service:
             if parsed_response is not None:
                 code = parsed_response['code']
                 if code in [-40002]:
-                    logger.debug(f'Status code {code} found. Server timeout occurred, return None for retry.')
+                    logger.debug(
+                        f'Status code {code} found. Server timeout occurred, return None for retry.')
                     parsed_response = None
             return parsed_response
 
@@ -611,13 +723,16 @@ class Service:
         # response should contain keys
         for key in ['code', 'message']:
             if key not in response.keys():
-                raise FormatError('archive_rank_by_partion', params, response, f'Response should contain key {key}.')
+                raise FormatError('archive_rank_by_partion', params,
+                                  response, f'Response should contain key {key}.')
         # response code should be 0
         if response['code'] != 0:
-            raise CodeError('archive_rank_by_partion', params, response, response['code'])
+            raise CodeError('archive_rank_by_partion', params,
+                            response, response['code'])
         # response data should be a dict
         if type(response['data']) != dict:
-            raise FormatError('archive_rank_by_partion', params, response, 'Response data should be a dict.')
+            raise FormatError('archive_rank_by_partion', params,
+                              response, 'Response data should be a dict.')
         # data should contain keys
         for key in ['archives', 'page']:
             if key not in response['data'].keys():
@@ -625,7 +740,8 @@ class Service:
                                   f'Response data should contain key {key}.')
         # data archives should be a list
         if type(response['data']['archives']) != list:
-            raise FormatError('archive_rank_by_partion', params, response, 'Response data archives should be a list.')
+            raise FormatError('archive_rank_by_partion', params,
+                              response, 'Response data archives should be a list.')
         # for each data archives item
         for data_archives_item in response['data']['archives']:
             # data archives item should be a dict
@@ -650,7 +766,8 @@ class Service:
                                           f'Response data archives item stat should contain key {key2}.')
         # data page should be a dict
         if type(response['data']['page']) != dict:
-            raise FormatError('archive_rank_by_partion', params, response, 'Response data page should be a dict.')
+            raise FormatError('archive_rank_by_partion', params,
+                              response, 'Response data page should be a dict.')
         # data page should contain keys
         for key in ['count', 'num', 'size']:
             if key not in response['data']['page'].keys():
@@ -738,7 +855,8 @@ class Service:
             if parsed_response is not None:
                 code = parsed_response['code']
                 if code in [-40002]:
-                    logger.debug(f'Status code {code} found. Server timeout occurred, return None for retry.')
+                    logger.debug(
+                        f'Status code {code} found. Server timeout occurred, return None for retry.')
                     parsed_response = None
             return parsed_response
 
@@ -754,13 +872,15 @@ class Service:
         # response should contain keys
         for key in ['code', 'message']:
             if key not in response.keys():
-                raise FormatError('newlist', params, response, f'Response should contain key {key}.')
+                raise FormatError('newlist', params, response,
+                                  f'Response should contain key {key}.')
         # response code should be 0
         if response['code'] != 0:
             raise CodeError('newlist', params, response, response['code'])
         # response data should be a dict
         if type(response['data']) != dict:
-            raise FormatError('newlist', params, response, 'Response data should be a dict.')
+            raise FormatError('newlist', params, response,
+                              'Response data should be a dict.')
         # data should contain keys
         for key in ['archives', 'page']:
             if key not in response['data'].keys():
@@ -768,7 +888,8 @@ class Service:
                                   f'Response data should contain key {key}.')
         # data archives should be a list
         if type(response['data']['archives']) != list:
-            raise FormatError('newlist', params, response, 'Response data archives should be a list.')
+            raise FormatError('newlist', params, response,
+                              'Response data archives should be a list.')
         # for each data archives item
         for data_archives_item in response['data']['archives']:
             # data archives item should be a dict
@@ -801,7 +922,8 @@ class Service:
                                           f'Response data archives item owner should contain key {key2}.')
         # data page should be a dict
         if type(response['data']['page']) != dict:
-            raise FormatError('newlist', params, response, 'Response data page should be a dict.')
+            raise FormatError('newlist', params, response,
+                              'Response data page should be a dict.')
         # data page should contain keys
         for key in ['count', 'num', 'size']:
             if key not in response['data']['page'].keys():

@@ -9,6 +9,11 @@
     "workers": [
     ]
   },
+  "get_member_card": {
+    "direct": "https://api.bilibili.com/x/web-interface/card",
+    "workers": [
+    ]
+  },
   "get_member_space": {
     "direct": "http://api.bilibili.com/x/space/acc/info",
     "workers": [

@@ -450,8 +450,8 @@ def add_member(mid: int, service: Service, session: Session, test_exist=True):
 
     # get member space
     try:
-        # special config for get_member_space
-        member_space = service.get_member_space(
+        # special config for get_member_card
+        member_card = service.get_member_card(
             {'mid': mid}, retry=20, timeout=1.5, colddown_factor=0.1)
     except ServiceError as e:
         raise e
@@ -460,10 +460,10 @@ def add_member(mid: int, service: Service, session: Session, test_exist=True):
     new_member = TddMember(
         mid=mid,
         added=get_ts_s(),
-        sex=member_space.sex,
-        name=member_space.name,
-        face=member_space.face,
-        sign=member_space.sign,
+        sex=member_card.sex,
+        name=member_card.name,
+        face=member_card.face,
+        sign=member_card.sign,
         code=0
     )
 
@@ -485,8 +485,8 @@ def update_member(mid: int, service: Service, session: Session):
 
     # get member space
     try:
-        # special config for get_member_space
-        member_space = service.get_member_space(
+        # special config for get_member_card
+        member_card = service.get_member_card(
             {'mid': mid}, retry=20, timeout=1.5, colddown_factor=0.1)
     except CodeError as e:
         # code maybe -404, otherwise anti-crawler triggered, raise error
@@ -509,29 +509,29 @@ def update_member(mid: int, service: Service, session: Session):
                              'code', curr_member.code, 0))
             curr_member.code = 0
         # sex
-        if member_space.sex != curr_member.sex:
+        if member_card.sex != curr_member.sex:
             member_update_logs.append(
                 TddMemberLog(added, mid,
-                             'sex', curr_member.sex, member_space.sex))
-            curr_member.sex = member_space.sex
+                             'sex', curr_member.sex, member_card.sex))
+            curr_member.sex = member_card.sex
         # name
-        if member_space.name != curr_member.name:
+        if member_card.name != curr_member.name:
             member_update_logs.append(
                 TddMemberLog(added, mid,
-                             'name', curr_member.name, member_space.name))
-            curr_member.name = member_space.name
+                             'name', curr_member.name, member_card.name))
+            curr_member.name = member_card.name
         # face
-        if not same_pic_url(member_space.face, curr_member.face):
+        if not same_pic_url(member_card.face, curr_member.face):
             member_update_logs.append(
                 TddMemberLog(added, mid,
-                             'face', curr_member.face, member_space.face))
-            curr_member.face = member_space.face
+                             'face', curr_member.face, member_card.face))
+            curr_member.face = member_card.face
         # sign
-        if member_space.sign != curr_member.sign:
+        if member_card.sign != curr_member.sign:
             member_update_logs.append(
                 TddMemberLog(added, mid,
-                             'sign', curr_member.sign, member_space.sign))
-            curr_member.sign = member_space.sign
+                             'sign', curr_member.sign, member_card.sign))
+            curr_member.sign = member_card.sign
 
     # commit changes
     try:

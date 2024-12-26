@@ -1,31 +1,15 @@
 from typing import Optional, NamedTuple
 
 __all__ = [
-    'VideoStat',
     'VideoViewOwner', 'VideoViewStat', 'VideoViewStaffItem', 'VideoView',
     'VideoTag', 'VideoTags',
+    'MemberCard',
     'MemberSpace',
     'MemberRelation',
     'ArchiveRankByPartionPage', 'ArchiveRankByPartionArchiveStat', 'ArchiveRankByPartionArchive',
     'ArchiveRankByPartion',
     'NewlistPage', 'NewlistArchiveStat', 'NewlistArchiveOwner', 'NewlistArchive', 'Newlist',
 ]
-
-
-class VideoStat(NamedTuple):
-    aid: int
-    view: int
-    danmaku: int
-    reply: int
-    favorite: int
-    coin: int
-    share: int
-    now_rank: int
-    his_rank: int
-    like: int
-    dislike: int
-    vt: int
-    vv: int
 
 
 class VideoViewOwner(NamedTuple):
@@ -85,6 +69,14 @@ class VideoTag(NamedTuple):
 
 class VideoTags(NamedTuple):
     tags: list[VideoTag]
+
+
+class MemberCard(NamedTuple):
+    mid: int
+    name: str
+    sex: str
+    face: str
+    sign: str
 
 
 class MemberSpace(NamedTuple):
