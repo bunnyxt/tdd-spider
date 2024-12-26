@@ -1,9 +1,4 @@
 {
-  "get_video_stat": {
-    "direct": "http://api.bilibili.com/archive_stat/stat",
-    "workers": [
-    ]
-  },
   "get_video_view": {
     "direct": "http://api.bilibili.com/x/web-interface/view",
     "workers": [

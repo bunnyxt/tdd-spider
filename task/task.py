@@ -10,44 +10,12 @@ import logging
 
 logger = logging.getLogger('task')
 
-__all__ = ['add_video_record', 'add_video_record_via_video_view',
+__all__ = ['add_video_record_via_video_view',
            'commit_video_record_via_archive_stat', 'commit_video_record_via_newlist_archive_stat',
            'add_sprint_video_record_via_video_view',
            'add_video', 'update_video',
            'add_member', 'update_member', 'commit_staff', 'add_member_follower_record',
            'get_video_tags_str']
-
-
-def add_video_record(aid: int, service: Service, session: Session) -> TddVideoRecord:
-    # get video stat
-    try:
-        video_stat = service.get_video_stat({'aid': aid})
-    except ServiceError as e:
-        raise e
-
-    # assemble video record
-    new_video_record = TddVideoRecord(
-        aid=aid,
-        added=get_ts_s(),
-        view=-1 if video_stat.view == '--' else video_stat.view,
-        danmaku=video_stat.danmaku,
-        reply=video_stat.reply,
-        favorite=video_stat.favorite,
-        coin=video_stat.coin,
-        share=video_stat.share,
-        like=video_stat.like,
-        dislike=video_stat.dislike,
-        now_rank=video_stat.now_rank,
-        his_rank=video_stat.his_rank,
-        vt=video_stat.vt,
-        vv=video_stat.vv,
-    )
-
-    # add to db
-    # TODO: use new db operation which can raise exception
-    DBOperation.add(new_video_record, session)
-
-    return new_video_record
 
 
 def add_video_record_via_video_view(aid: int, service: Service, session: Session) -> TddVideoRecord:
@@ -242,7 +210,8 @@ def add_video(aid: int, service: Service, session: Session, test_exist=True) -> 
                                  f'video: {new_video}, mid: {staff_item.mid}, error: {e}')
                     raise e
                 try:
-                    commit_staff(new_video.added, aid, staff_item.mid, staff_item.title, session)
+                    commit_staff(new_video.added, aid,
+                                 staff_item.mid, staff_item.title, session)
                 except AlreadyExistError:
                     logger.debug(f'Video staff relationship of new video already exist! '
                                  f'video: {new_video}, mid: {staff_item.mid}, title: {staff_item.title}')
@@ -428,7 +397,8 @@ def update_video(aid: int, service: Service, session: Session, out_context: dict
                                        f'aid: {aid}, mid: {staff_item.mid}, error: {e}')
                     # add staff
                     try:
-                        new_staff = commit_staff(added, aid, staff_item.mid, staff_item.title, session)
+                        new_staff = commit_staff(
+                            added, aid, staff_item.mid, staff_item.title, session)
                     except TddError as e:
                         logger.warning(f'Fail to add new staff! '
                                        f'aid: {aid}, mid: {staff_item.mid}, title: {staff_item.title}, error: {e}')
@@ -438,7 +408,8 @@ def update_video(aid: int, service: Service, session: Session, out_context: dict
                                         'staff', None, f'mid: {new_staff.mid}; title: {new_staff.title}'))
             # remove staff left in old_staff_list
             for curr_staff_item in curr_staff_list:
-                DBOperation.delete_video_staff_via_id(curr_staff_item.id, session)
+                DBOperation.delete_video_staff_via_id(
+                    curr_staff_item.id, session)
                 video_update_logs.append(
                     TddVideoLog(added, aid, bvid,
                                 'staff', f'mid: {curr_staff_item.mid}; title: {curr_staff_item.title}', None))
@@ -456,7 +427,8 @@ def update_video(aid: int, service: Service, session: Session, out_context: dict
     try:
         session.commit()
     except Exception as e:
-        logger.error(f'Fail to commit changes! object: {curr_video}, error: {e}')
+        logger.error(
+            f'Fail to commit changes! object: {curr_video}, error: {e}')
         session.rollback()
         raise e
 
@@ -479,7 +451,8 @@ def add_member(mid: int, service: Service, session: Session, test_exist=True):
     # get member space
     try:
         # special config for get_member_space
-        member_space = service.get_member_space({'mid': mid}, retry=20, timeout=1.5, colddown_factor=0.1)
+        member_space = service.get_member_space(
+            {'mid': mid}, retry=20, timeout=1.5, colddown_factor=0.1)
     except ServiceError as e:
         raise e
 
@@ -513,7 +486,8 @@ def update_member(mid: int, service: Service, session: Session):
     # get member space
     try:
         # special config for get_member_space
-        member_space = service.get_member_space({'mid': mid}, retry=20, timeout=1.5, colddown_factor=0.1)
+        member_space = service.get_member_space(
+            {'mid': mid}, retry=20, timeout=1.5, colddown_factor=0.1)
     except CodeError as e:
         # code maybe -404, otherwise anti-crawler triggered, raise error
         if e.code != -404:
@@ -563,7 +537,8 @@ def update_member(mid: int, service: Service, session: Session):
     try:
         session.commit()
     except Exception as e:
-        logger.error(f'Fail to commit changes! object: {curr_member}, error: {e}')
+        logger.error(
+            f'Fail to commit changes! object: {curr_member}, error: {e}')
         session.rollback()
         raise e
 
@@ -583,7 +558,8 @@ def commit_staff(added: int, aid: int, mid: int, title: str, session: Session, t
         staff = DBOperation.query_video_staff_via_aid_mid(aid, mid, session)
         if staff is not None:
             # staff already exist
-            raise AlreadyExistError(table='video_staff', params={'aid': aid, 'mid': mid})
+            raise AlreadyExistError(table='video_staff', params={
+                                    'aid': aid, 'mid': mid})
 
     # assemble staff
     new_staff = TddVideoStaff(
