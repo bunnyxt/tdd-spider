@@ -21,7 +21,7 @@ def b2a(bvid: str) -> int:
     :param bvid: bvid string without BV prefix
     :return: aid
     """
-    bvid = bvid[1:]
+    bvid = bvid[PREFIX_LEN-2:]
     tmp = 0
     for i in range(CODE_LEN):
         idx = ALPHABET.index(bvid[DECODE_MAP[i]])
