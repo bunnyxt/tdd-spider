@@ -3,14 +3,16 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from conf import get_db_args
 
-__all__ = ['engine', 'Base', 'Session', 'create_all', 'drop_all', 'update_engine']
+__all__ = ['engine', 'Base', 'Session',
+           'create_all', 'drop_all', 'update_engine']
 
 
 def get_engine():
     db_args = get_db_args()
     conn_str = "mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8mb4".format(
         db_args['user'], db_args['password'], db_args['host'], db_args['port'], db_args['dbname'])  # mysql
-    eng = create_engine(conn_str, pool_recycle=7200, pool_size=25, max_overflow=75)
+    eng = create_engine(conn_str, pool_recycle=3600, pool_size=50,
+                        max_overflow=150, pool_timeout=60, pool_pre_ping=True)
     return eng
 
 
