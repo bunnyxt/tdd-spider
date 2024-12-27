@@ -11,7 +11,7 @@ logger = logging.getLogger('serverchan')
 
 __all__ = ['sc_send', 'sc_send_summary', 'sc_send_critical']
 
-send_url = f'http://sc.ftqq.com/{get_sckey()}.send'
+send_url = f'http://sctapi.ftqq.com/{get_sckey()}.send'
 
 
 def sc_send(text: str, desp: Optional[str] = None):
@@ -24,7 +24,8 @@ def sc_send(text: str, desp: Optional[str] = None):
 
     try:
         # send message
-        r = requests.post(send_url, headers={'Content-Type': 'application/json'}, data=json.dumps(message))
+        r = requests.post(send_url, headers={
+                          'Content-Type': 'application/json'}, data=json.dumps(message))
         r.raise_for_status()
 
         # check response
@@ -32,11 +33,14 @@ def sc_send(text: str, desp: Optional[str] = None):
         if type(response) == dict \
                 and 'data' in response.keys() and type(response['data']) == dict \
                 and 'errno' in response['data'].keys() and response['data']['errno'] == 0:
-            logger.debug(f'SC send successfully! message: {message}, response: {response}')
+            logger.debug(
+                f'SC send successfully! message: {message}, response: {response}')
         else:
-            logger.warning(f'SC send failed! Unexpected response got. message: {message}, response: {response}')
+            logger.warning(
+                f'SC send failed! Unexpected response got. message: {message}, response: {response}')
     except Exception as e:
-        logger.warning(f'SC send failed! Exception caught. message: {message}, exception: {e}')
+        logger.warning(
+            f'SC send failed! Exception caught. message: {message}, exception: {e}')
     finally:
         return response
 
