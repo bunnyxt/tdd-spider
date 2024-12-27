@@ -2,7 +2,6 @@ from .AddMemberFollowerRecordJob import *
 from .AddSprintVideoRecordJob import *
 from .AddVideoRecordJob import *
 from .AddVideoFromArchiveJob import *
-from .GetPartionArchiveJob import *
 from .GetNewlistArchiveJob import *
 from .Job import *
 from .JobStat import *

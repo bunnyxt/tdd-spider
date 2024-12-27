@@ -4,10 +4,7 @@ __all__ = [
     'VideoViewOwner', 'VideoViewStat', 'VideoViewStaffItem', 'VideoView',
     'VideoTag', 'VideoTags',
     'MemberCard',
-    'MemberSpace',
     'MemberRelation',
-    'ArchiveRankByPartionPage', 'ArchiveRankByPartionArchiveStat', 'ArchiveRankByPartionArchive',
-    'ArchiveRankByPartion',
     'NewlistPage', 'NewlistArchiveStat', 'NewlistArchiveOwner', 'NewlistArchive', 'Newlist',
 ]
 
@@ -79,59 +76,10 @@ class MemberCard(NamedTuple):
     sign: str
 
 
-class MemberSpace(NamedTuple):
-    mid: int
-    name: str
-    sex: str
-    face: str
-    sign: str
-
-
 class MemberRelation(NamedTuple):
     mid: int
     following: int
     follower: int
-
-
-class ArchiveRankByPartionPage(NamedTuple):
-    count: int
-    num: int
-    size: int
-
-
-class ArchiveRankByPartionArchiveStat(NamedTuple):
-    aid: int
-    view: int
-    danmaku: int
-    reply: int
-    favorite: int
-    coin: int
-    share: int
-    now_rank: int
-    his_rank: int
-    like: int
-    dislike: int
-    vt: int
-    vv: int
-
-
-class ArchiveRankByPartionArchive(NamedTuple):
-    aid: int
-    videos: int
-    tid: int
-    tname: str
-    copyright: int
-    pic: str
-    title: str
-    stat: ArchiveRankByPartionArchiveStat
-    bvid: str
-    description: str
-    mid: int
-
-
-class ArchiveRankByPartion(NamedTuple):
-    archives: list[ArchiveRankByPartionArchive]
-    page: ArchiveRankByPartionPage
 
 
 class NewlistPage(NamedTuple):

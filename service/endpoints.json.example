@@ -19,11 +19,6 @@
     "workers": [
     ]
   },
-  "get_archive_rank_by_partion": {
-    "direct": "http://api.bilibili.com/archive_rank/getarchiverankbypartion",
-    "workers": [
-    ]
-  },
   "get_newlist": {
     "direct": "http://api.bilibili.com/x/web-interface/newlist",
     "workers": [

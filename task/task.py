@@ -1,4 +1,4 @@
-from service import Service, ServiceError, CodeError, ArchiveRankByPartionArchiveStat, NewlistArchiveStat
+from service import Service, ServiceError, CodeError, NewlistArchiveStat
 from sqlalchemy.orm.session import Session
 from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord, \
     TddMemberLog, TddSprintVideoRecord
@@ -11,7 +11,7 @@ import logging
 logger = logging.getLogger('task')
 
 __all__ = ['add_video_record_via_video_view',
-           'commit_video_record_via_archive_stat', 'commit_video_record_via_newlist_archive_stat',
+           'commit_video_record_via_newlist_archive_stat',
            'add_sprint_video_record_via_video_view',
            'add_video', 'update_video',
            'add_member', 'update_member', 'commit_staff', 'add_member_follower_record',
@@ -41,32 +41,6 @@ def add_video_record_via_video_view(aid: int, service: Service, session: Session
         his_rank=video_view.stat.his_rank,
         vt=video_view.stat.vt,
         vv=video_view.stat.vv,
-    )
-
-    # add to db
-    # TODO: use new db operation which can raise exception
-    DBOperation.add(new_video_record, session)
-
-    return new_video_record
-
-
-def commit_video_record_via_archive_stat(stat: ArchiveRankByPartionArchiveStat, session: Session) -> TddVideoRecord:
-    # assemble video record
-    new_video_record = TddVideoRecord(
-        aid=stat.aid,
-        added=get_ts_s(),
-        view=-1 if stat.view == '--' else stat.view,
-        danmaku=stat.danmaku,
-        reply=stat.reply,
-        favorite=stat.favorite,
-        coin=stat.coin,
-        share=stat.share,
-        like=stat.like,
-        dislike=stat.dislike,
-        now_rank=stat.now_rank,
-        his_rank=stat.his_rank,
-        vt=stat.vt,
-        vv=stat.vv,
     )
 
     # add to db

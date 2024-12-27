@@ -1,5 +1,5 @@
 from serverchan import sc_send
-from task import add_video, commit_video_record_via_archive_stat
+from task import add_video, commit_video_record_via_newlist_archive_stat
 import math
 from util import get_ts_s, ts_s_to_str, format_ts_s, logging_init, fullname
 from service import Service
@@ -15,7 +15,7 @@ logger = logging.getLogger(script_id)
 
 def add_all_video_with_tid_30():
     # NOTE: NOT TESTED
-    # due to the bug of get_archive_rank_by_partion api, will miss about 20% video
+    # due to the bug of newlist api, will miss about 20% video
     logger.info(f'Now start {script_fullname}...')
     start_ts = get_ts_s()  # get start ts
 
@@ -27,38 +27,45 @@ def add_all_video_with_tid_30():
 
     # get page total
     try:
-        archive_rank_by_partion = service.get_archive_rank_by_partion({'tid': 30, 'pn': 1, 'ps': 50})
+        newlist = service.get_newlist(
+            {'rid': 30, 'pn': 1, 'ps': 50})
     except Exception as e:
-        logger.critical(f'Fail to get archive rank by partion. tid: 30, pn: 1, ps: 50, error: {e}')
+        logger.critical(
+            f'Fail to get newlist. rid: 30, pn: 1, ps: 50, error: {e}')
         exit(1)
-    page_total = math.ceil(archive_rank_by_partion.page.count / 50)
+    page_total = math.ceil(newlist.page.count / 50)
     logging.info(f'Found {page_total} page(s) in total.')
 
     # add all video
     page_num = 1
     while page_num <= page_total:
-        # get archive rank by partion
+        # get newlist
         try:
-            archive_rank_by_partion = service.get_archive_rank_by_partion({'tid': 30, 'pn': page_num, 'ps': 50})
+            newlist = service.get_newlist(
+                {'rid': 30, 'pn': page_num, 'ps': 50})
         except Exception as e:
-            logger.error(f'Fail to get archive rank by partion. tid: 30, pn: {page_num}, ps: 50, error: {e}')
+            logger.error(
+                f'Fail to get newlist. rid: 30, pn: {page_num}, ps: 50, error: {e}')
             statistics['other_exception_count'] += 1
             page_num += 1
             continue
 
-        for archive in archive_rank_by_partion.archives:
+        for archive in newlist.archives:
             # add video
             try:
                 new_video = add_video(archive.aid, service, session)
             except Exception as e:
-                logger.error(f'Fail to add video parsed from archive! archive: {archive}, error: {e}')
+                logger.error(
+                    f'Fail to add video parsed from archive! archive: {archive}, error: {e}')
                 statistics['other_exception_count'] += 1
             else:
-                logger.info(f'New video parsed from archive added! video: {new_video}')
+                logger.info(
+                    f'New video parsed from archive added! video: {new_video}')
                 statistics['total_count'] += 1
                 # commit video record via archive stat
                 try:
-                    new_video_record = commit_video_record_via_archive_stat(archive.stat, session)
+                    new_video_record = commit_video_record_via_newlist_archive_stat(
+                        archive.stat, session)
                 except Exception as e:
                     logger.error(f'Fail to add video record parsed from archive stat! '
                                  f'archive: {archive}, error: {e}')
