@@ -763,7 +763,7 @@ class C30PipelineRunner(Thread):
 
         # create jobs
         check_c30_need_insert_but_not_found_aid_job_num = min(
-            200, max(len(need_insert_but_record_not_found_aid_list) // 10, 1))  # [1, 200]
+            100, max(len(need_insert_but_record_not_found_aid_list) // 10, 1))  # [1, 100]
         check_c30_need_insert_but_not_found_aid_job_list = []
         for i in range(check_c30_need_insert_but_not_found_aid_job_num):
             check_c30_need_insert_but_not_found_aid_job_list.append(
