@@ -23,7 +23,7 @@ __all__ = ['Service', 'RequestMode']
 class Service:
 
     def __init__(
-            self, headers: dict = None, retry: int = 3, timeout: float = 5.0, colddown_factor: float = 1.0,
+            self, headers: Optional[dict] = None, retry: int = 3, timeout: float = 5.0, colddown_factor: float = 1.0,
             mode: RequestMode = 'direct'
     ):
         # set default config
@@ -93,7 +93,7 @@ class Service:
 
     # since default configs are designed to be immutable, we should use following getters
 
-    def get_default_headers(self) -> Optional[dict]:
+    def get_default_headers(self) -> dict:
         return self._headers
 
     def get_default_retry(self) -> int:
@@ -111,9 +111,9 @@ class Service:
     # default config getters end
 
     def _get(
-            self, url: str, params: dict = None, headers: dict = None,
-            retry: int = None, timeout: float = None, colddown_factor: float = None,
-            parser: Callable[[str], Optional[dict]] = None
+            self, url: str, params: Optional[dict] = None, headers: Optional[dict] = None,
+            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
+            parser: Optional[Callable[[str], Optional[dict]]] = None
     ) -> Optional[dict]:
         # assemble headers
         if headers is None:
@@ -175,9 +175,9 @@ class Service:
         return response
 
     def get_video_view(
-            self, params: dict = None, headers: dict = None,
-            retry: int = None, timeout: float = None, colddown_factor: float = None,
-            mode: RequestMode = None
+            self, params: Optional[dict] = None, headers: Optional[dict] = None,
+            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
+            mode: Optional[RequestMode] = None
     ) -> VideoView:
         """
         params: { aid: int }
@@ -313,9 +313,9 @@ class Service:
         )
 
     def get_video_tags(
-            self, params: dict = None, headers: dict = None,
-            retry: int = None, timeout: float = None, colddown_factor: float = None,
-            mode: RequestMode = None
+            self, params: Optional[dict] = None, headers: Optional[dict] = None,
+            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
+            mode: Optional[RequestMode] = None
     ) -> VideoTags:
         """
         params: { aid: int }
@@ -399,10 +399,10 @@ class Service:
         return videoTags
 
     def get_member_card(
-            self, params: dict = None, headers: dict = None,
-            retry: int = None, timeout: float = None, colddown_factor: float = None,
-            mode: RequestMode = None
-    ) -> MemberRelation:
+            self, params: Optional[dict] = None, headers: Optional[dict] = None,
+            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
+            mode: Optional[RequestMode] = None
+    ) -> MemberCard:
         """
         params: { mid: int }
         mode: 'direct' | 'worker'
@@ -470,9 +470,9 @@ class Service:
         )
 
     def get_member_relation(
-            self, params: dict = None, headers: dict = None,
-            retry: int = None, timeout: float = None, colddown_factor: float = None,
-            mode: RequestMode = None
+            self, params: Optional[dict] = None, headers: Optional[dict] = None,
+            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
+            mode: Optional[RequestMode] = None
     ) -> MemberRelation:
         """
         params: { vmid: int }
@@ -531,9 +531,9 @@ class Service:
         )
 
     def get_newlist(
-            self, params: dict = None, headers: dict = None,
-            retry: int = None, timeout: float = None, colddown_factor: float = None,
-            mode: RequestMode = None
+            self, params: Optional[dict] = None, headers: Optional[dict] = None,
+            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
+            mode: Optional[RequestMode] = None
     ) -> Newlist:
         """
         params: { rid: int, pn: int, ps: int }
