@@ -7,6 +7,3 @@ dbname = tdd
 
 [serverchan]
 sckey = your sckey
-
-[proxy]
-proxy_pool_url = http://localhost:5555/random

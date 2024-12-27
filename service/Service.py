@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger('Service')
 
-RequestMode = Literal['direct', 'worker', 'proxy']
+RequestMode = Literal['direct', 'worker']
 
 __all__ = ['Service', 'RequestMode']
 
@@ -24,7 +24,7 @@ class Service:
 
     def __init__(
             self, headers: dict = None, retry: int = 3, timeout: float = 5.0, colddown_factor: float = 1.0,
-            mode: RequestMode = 'direct', get_proxy_url: Callable = None
+            mode: RequestMode = 'direct'
     ):
         # set default config
         self._headers = headers if headers is not None else {}
@@ -32,7 +32,6 @@ class Service:
         self._timeout = timeout
         self._colddown_factor = colddown_factor
         self._mode = mode
-        self._get_proxy_url = get_proxy_url
 
         # load endpoints
         try:
@@ -109,15 +108,12 @@ class Service:
     def get_default_mode(self) -> RequestMode:
         return self._mode
 
-    def get_default_get_proxy_url(self) -> Optional[Callable]:
-        return self._get_proxy_url
-
     # default config getters end
 
     def _get(
             self, url: str, params: dict = None, headers: dict = None,
             retry: int = None, timeout: float = None, colddown_factor: float = None,
-            get_proxy_url: Callable = None, parser: Callable[[str], Optional[dict]] = None
+            parser: Callable[[str], Optional[dict]] = None
     ) -> Optional[dict]:
         # assemble headers
         if headers is None:
@@ -142,18 +138,10 @@ class Service:
                 time.sleep((trial - 1) * (random.random()
                            * 0.5 + 0.75) * colddown_factor)
 
-            # get proxy
-            proxies = None
-            if get_proxy_url is not None:
-                proxy_url = get_proxy_url()
-                proxies = {
-                    'http': proxy_url,
-                }
-
             # try to get response
             try:
                 r = requests.get(url, params=params, headers=headers,
-                                 timeout=timeout, proxies=proxies)
+                                 timeout=timeout)
             except requests.exceptions.RequestException as e:
                 logger.debug(
                     f'Fail to get response. '
@@ -189,22 +177,18 @@ class Service:
     def get_video_view(
             self, params: dict = None, headers: dict = None,
             retry: int = None, timeout: float = None, colddown_factor: float = None,
-            mode: RequestMode = None, get_proxy_url: Callable = None
+            mode: RequestMode = None
     ) -> VideoView:
         """
         params: { aid: int }
-        mode: 'direct' | 'worker' | 'proxy'
+        mode: 'direct' | 'worker'
         """
-        # config mode and get_proxy_url
+        # config mode
         mode = mode if mode is not None else self._mode
-        get_proxy_url = get_proxy_url if get_proxy_url is not None else self._get_proxy_url
 
         # validate params
-        if mode not in ['direct', 'worker', 'proxy']:
+        if mode not in ['direct', 'worker']:
             logger.critical(f'Invalid request mode: {mode}.')
-            exit(1)
-        if mode == 'proxy' and get_proxy_url is None:
-            logger.critical('Proxy mode requires get_proxy_url function.')
             exit(1)
 
         # get endpoint url
@@ -219,8 +203,7 @@ class Service:
 
         # get response
         response = self._get(url, params=params, headers=headers,
-                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
-                             get_proxy_url=get_proxy_url if mode == 'proxy' else None)
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor)
         if response is None:
             raise ResponseError('video_view', params)
 
@@ -332,22 +315,18 @@ class Service:
     def get_video_tags(
             self, params: dict = None, headers: dict = None,
             retry: int = None, timeout: float = None, colddown_factor: float = None,
-            mode: RequestMode = None, get_proxy_url: Callable = None
+            mode: RequestMode = None
     ) -> VideoTags:
         """
         params: { aid: int }
-        mode: 'direct' | 'worker' | 'proxy'
+        mode: 'direct' | 'worker'
         """
-        # config mode and get_proxy_url
+        # config mode
         mode = mode if mode is not None else self._mode
-        get_proxy_url = get_proxy_url if get_proxy_url is not None else self._get_proxy_url
 
         # validate params
-        if mode not in ['direct', 'worker', 'proxy']:
+        if mode not in ['direct', 'worker']:
             logger.critical(f'Invalid request mode: {mode}.')
-            exit(1)
-        if mode == 'proxy' and get_proxy_url is None:
-            logger.critical('Proxy mode requires get_proxy_url function.')
             exit(1)
 
         # get endpoint url
@@ -380,7 +359,7 @@ class Service:
         # get response
         response = self._get(url, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor,
-                             get_proxy_url=get_proxy_url if mode == 'proxy' else None, parser=parser)
+                             parser=parser)
         if response is None:
             raise ResponseError('video_tags', params)
 
@@ -422,22 +401,18 @@ class Service:
     def get_member_card(
             self, params: dict = None, headers: dict = None,
             retry: int = None, timeout: float = None, colddown_factor: float = None,
-            mode: RequestMode = None, get_proxy_url: Callable = None
+            mode: RequestMode = None
     ) -> MemberRelation:
         """
         params: { mid: int }
-        mode: 'direct' | 'worker' | 'proxy'
+        mode: 'direct' | 'worker'
         """
-        # config mode and get_proxy_url
+        # config mode
         mode = mode if mode is not None else self._mode
-        get_proxy_url = get_proxy_url if get_proxy_url is not None else self._get_proxy_url
 
         # validate params
-        if mode not in ['direct', 'worker', 'proxy']:
+        if mode not in ['direct', 'worker']:
             logger.critical(f'Invalid request mode: {mode}.')
-            exit(1)
-        if mode == 'proxy' and get_proxy_url is None:
-            logger.critical('Proxy mode requires get_proxy_url function.')
             exit(1)
 
         # get endpoint url
@@ -452,8 +427,7 @@ class Service:
 
         # get response
         response = self._get(url, params=params, headers=headers,
-                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
-                             get_proxy_url=get_proxy_url if mode == 'proxy' else None)
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor)
         if response is None:
             raise ResponseError('member_card', params)
 
@@ -498,22 +472,18 @@ class Service:
     def get_member_relation(
             self, params: dict = None, headers: dict = None,
             retry: int = None, timeout: float = None, colddown_factor: float = None,
-            mode: RequestMode = None, get_proxy_url: Callable = None
+            mode: RequestMode = None
     ) -> MemberRelation:
         """
         params: { vmid: int }
-        mode: 'direct' | 'worker' | 'proxy'
+        mode: 'direct' | 'worker'
         """
-        # config mode and get_proxy_url
+        # config mode
         mode = mode if mode is not None else self._mode
-        get_proxy_url = get_proxy_url if get_proxy_url is not None else self._get_proxy_url
 
         # validate params
-        if mode not in ['direct', 'worker', 'proxy']:
+        if mode not in ['direct', 'worker']:
             logger.critical(f'Invalid request mode: {mode}.')
-            exit(1)
-        if mode == 'proxy' and get_proxy_url is None:
-            logger.critical('Proxy mode requires get_proxy_url function.')
             exit(1)
 
         # get endpoint url
@@ -528,8 +498,7 @@ class Service:
 
         # get response
         response = self._get(url, params=params, headers=headers,
-                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
-                             get_proxy_url=get_proxy_url if mode == 'proxy' else None)
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor)
         if response is None:
             raise ResponseError('member_relation', params)
 
@@ -564,22 +533,18 @@ class Service:
     def get_newlist(
             self, params: dict = None, headers: dict = None,
             retry: int = None, timeout: float = None, colddown_factor: float = None,
-            mode: RequestMode = None, get_proxy_url: Callable = None
+            mode: RequestMode = None
     ) -> Newlist:
         """
         params: { rid: int, pn: int, ps: int }
-        mode: 'direct' | 'worker' | 'proxy'
+        mode: 'direct' | 'worker'
         """
-        # config mode and get_proxy_url
+        # config mode
         mode = mode if mode is not None else self._mode
-        get_proxy_url = get_proxy_url if get_proxy_url is not None else self._get_proxy_url
 
         # validate params
-        if mode not in ['direct', 'worker', 'proxy']:
+        if mode not in ['direct', 'worker']:
             logger.critical(f'Invalid request mode: {mode}.')
-            exit(1)
-        if mode == 'proxy' and get_proxy_url is None:
-            logger.critical('Proxy mode requires get_proxy_url function.')
             exit(1)
 
         # get endpoint url
@@ -610,7 +575,7 @@ class Service:
         # get response
         response = self._get(url, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor,
-                             get_proxy_url=get_proxy_url if mode == 'proxy' else None, parser=parser)
+                             parser=parser)
         if response is None:
             raise ResponseError('newlist', params)
 

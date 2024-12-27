@@ -5,12 +5,12 @@
 </h1>
 
 <div align="center">
-天钿Daily（<a href="https://tdd.bunnyxt.com">https://tdd.bunnyxt.com</a>）的数据获取程序，基于Python，整合<a href="https://github.com/Python3WebSpider/ProxyPool">ProxyPool</a>代理池与<a href="http://sc.ftqq.com/3.version">Server酱</a>消息推送。QQ群：<a href="https://jq.qq.com/?_wv=1027&k=588s7nw">537793686</a>，欢迎加入！
+天钿Daily（<a href="https://tdd.bunnyxt.com">https://tdd.bunnyxt.com</a>）的数据获取程序，基于Python，整合<a href="http://sc.ftqq.com/3.version">Server酱</a>消息推送。QQ群：<a href="https://jq.qq.com/?_wv=1027&k=588s7nw">537793686</a>，欢迎加入！
 </div>
 
 ## 简介
 
-[天钿Daily](https://tdd.bunnyxt.com)为bunnyxt的个人项目，意在推进VC相关数据交流，为任何对VC数据感兴趣的用户提供尽可能完备且易得的数据及其可视化展示。
+[天钿 Daily](https://tdd.bunnyxt.com)为 bunnyxt 的个人项目，意在推进 VC 相关数据交流，为任何对 VC 数据感兴趣的用户提供尽可能完备且易得的数据及其可视化展示。
 
 整个项目天然解耦为三个部分，通过中心数据库相连，这三个部分分别是：
 
@@ -20,22 +20,22 @@
 
 整体结构如图所示
 
-![天钿Daily整体结构](./tdd-structure.png '天钿Daily整体结构')
+![天钿Daily整体结构](./tdd-structure.png "天钿Daily整体结构")
 
 ## 安装
 
 1. 下载代码，`git clone https://github.com/bunnyxt/tdd-spider.git && cd tdd-spider`。
 2. 配置`Python 3.5+`环境（强烈推荐使用`virtualenv`或`conda`新建虚拟环境以避免依赖冲突），运行`pip install -r requirements.txt`安装依赖。
-3. 安装[ProxyPool](https://github.com/Python3WebSpider/ProxyPool)，为了尽可能提高IP的可用性，配置以下环境变量
-    ```yaml
-    CYCLE_TESTER: 10
-    CYCLE_GETTER: 60
-    TEST_URL: http://api.bilibili.com/x/web-interface/view?aid=456930
-    TEST_TIMEOUT: 3
-    TEST_BATCH: 100
-    ```
-    PS：推荐使用`docker`方式使用，并在`docker-compose.yml`文件底部`environment`之后粘贴以上环境变量配置，配置完成后使用`nohup docker-compose up &`在后台启动ProxyPool服务。
-4. 打开`conf/conf.ini`文件，填写配置，包括数据库连接（`MySQL 5.7.30`）、Server酱SCKEY（获取方式见[Server酱首页](http://sc.ftqq.com/3.version)）、ProxyPool地址（默认[http://localhost:5555/random](http://localhost:5555/random)）等。
+3. 安装[ProxyPool](https://github.com/Python3WebSpider/ProxyPool)，为了尽可能提高 IP 的可用性，配置以下环境变量
+   ```yaml
+   CYCLE_TESTER: 10
+   CYCLE_GETTER: 60
+   TEST_URL: http://api.bilibili.com/x/web-interface/view?aid=456930
+   TEST_TIMEOUT: 3
+   TEST_BATCH: 100
+   ```
+   PS：推荐使用`docker`方式使用，并在`docker-compose.yml`文件底部`environment`之后粘贴以上环境变量配置，配置完成后使用`nohup docker-compose up &`在后台启动 ProxyPool 服务。
+4. 打开`conf/conf.ini`文件，填写配置，包括数据库连接（`MySQL 5.7.30`）、Server 酱 SCKEY（获取方式见[Server 酱首页](http://sc.ftqq.com/3.version)）、ProxyPool 地址（默认[http://localhost:5555/random](http://localhost:5555/random)）等。
 
 ## 运行
 
@@ -84,7 +84,7 @@ nohup python -u <script-name.py> >/dev/null 2>&1 &
 
 首先解释一下文件名的含义：
 
-- 下划线前的数字为`脚本编号`，通常功能相似的脚本由相同的编号前缀（如`0`开头的表示初始化脚本，`1`开头表示涉及到BiliBili API访问的定时脚本等等）。
+- 下划线前的数字为`脚本编号`，通常功能相似的脚本由相同的编号前缀（如`0`开头的表示初始化脚本，`1`开头表示涉及到 BiliBili API 访问的定时脚本等等）。
 - 下划线后的由`-`连接的一组英文单词为该脚本的功能介绍，供使用者快速了解脚本含义，节约文档查询时间。
 
 // TODO
@@ -95,7 +95,7 @@ nohup python -u <script-name.py> >/dev/null 2>&1 &
 
 注意：为了方便使用`run_xxx.sh`系列工具管理，建议仿照上文提到的内置脚本的命名规范，给自定义脚本命名。
 
-// TODO 实质就是调用模块，给一个直接调用的例子，一个定时任务的例子，一个jupyter notebook的例子
+// TODO 实质就是调用模块，给一个直接调用的例子，一个定时任务的例子，一个 jupyter notebook 的例子
 
 ## 模块文档
 
@@ -123,7 +123,7 @@ nohup python -u <script-name.py> >/dev/null 2>&1 &
 
 如果你对我或者我的项目感兴趣，欢迎通过以下方式联系我：
 
-- 新浪微博 [@牛奶源29](https://www.weibo.com/nny29)
+- 新浪微博 [@牛奶源 29](https://www.weibo.com/nny29)
 - Twitter [@bunnyxt29](https://twitter.com/bunnyxt29)
 - Email <a href="mailto:bunnyxt@outlook.com">bunnyxt@outlook.com</a>
 

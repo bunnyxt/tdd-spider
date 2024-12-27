@@ -9,7 +9,7 @@ CAUTION: This program is related to VOCALOID CHINA, so the most of the documenta
 </h1>
 
 <div align="center">
-Data acquisition program of TianDian Daily (<a href="https://tdd.bunnyxt.com">https://tdd.bunnyxt.com</a>) based on Python, integrated with <a href="https://github.com/Python3WebSpider/ProxyPool">ProxyPool</a> proxy pool and <a href="http://sc.ftqq.com/3.version"> ServerChan </a> message pushing. Feel free to contact us via QQ group: <a href="https://jq.qq.com/?_wv=1027&k=588s7nw">537793686</a>！
+Data acquisition program of TianDian Daily (<a href="https://tdd.bunnyxt.com">https://tdd.bunnyxt.com</a>) based on Python, integrated with <a href="http://sc.ftqq.com/3.version"> ServerChan </a> message pushing. Feel free to contact us via QQ group: <a href="https://jq.qq.com/?_wv=1027&k=588s7nw">537793686</a>！
 </div>
 
 ## Introduction
@@ -24,4 +24,4 @@ The project is composed of three distinct components, all interconnected with a 
 
 See the structure below.
 
-![TianDian Daily structure](./tdd-structure.png 'TianDian Daily structure')
+![TianDian Daily structure](./tdd-structure.png "TianDian Daily structure")
