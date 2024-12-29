@@ -1,4 +1,4 @@
-from service import Service, ServiceError, CodeError, NewlistArchiveStat
+from service import Service, ServiceError, CodeError, VideoView, NewlistArchiveStat
 from sqlalchemy.orm.session import Session
 from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord, \
     TddMemberLog, TddSprintVideoRecord
@@ -11,6 +11,7 @@ import logging
 logger = logging.getLogger('task')
 
 __all__ = ['add_video_record_via_video_view',
+           'commit_video_record_via_video_view',
            'commit_video_record_via_newlist_archive_stat',
            'add_sprint_video_record_via_video_view',
            'add_video', 'update_video',
@@ -29,6 +30,32 @@ def add_video_record_via_video_view(aid: int, service: Service, session: Session
     new_video_record = TddVideoRecord(
         aid=aid,
         added=get_ts_s(),
+        view=-1 if video_view.stat.view == '--' else video_view.stat.view,
+        danmaku=video_view.stat.danmaku,
+        reply=video_view.stat.reply,
+        favorite=video_view.stat.favorite,
+        coin=video_view.stat.coin,
+        share=video_view.stat.share,
+        like=video_view.stat.like,
+        dislike=video_view.stat.dislike,
+        now_rank=video_view.stat.now_rank,
+        his_rank=video_view.stat.his_rank,
+        vt=video_view.stat.vt,
+        vv=video_view.stat.vv,
+    )
+
+    # add to db
+    # TODO: use new db operation which can raise exception
+    DBOperation.add(new_video_record, session)
+
+    return new_video_record
+
+
+def commit_video_record_via_video_view(video_view: VideoView, added: int, session: Session) -> TddVideoRecord:
+    # assemble video record
+    new_video_record = TddVideoRecord(
+        aid=video_view.aid,
+        added=added,
         view=-1 if video_view.stat.view == '--' else video_view.stat.view,
         danmaku=video_view.stat.danmaku,
         reply=video_view.stat.reply,
@@ -103,7 +130,7 @@ def add_sprint_video_record_via_video_view(aid: int, service: Service, session: 
     return new_sprint_video_record
 
 
-def add_video(aid: int, service: Service, session: Session, test_exist=True) -> TddVideo:
+def add_video(aid: int, service: Service, session: Session, test_exist=True, commit_video_record=True) -> TddVideo:
     # test exist
     if test_exist:
         video = DBOperation.query_video_via_aid(aid, session)
@@ -207,6 +234,17 @@ def add_video(aid: int, service: Service, session: Session, test_exist=True) -> 
     # add to db
     # TODO: use new db operation which can raise exception
     DBOperation.add(new_video, session)
+
+    if commit_video_record:
+        # commit video record
+        try:
+            commit_video_record_via_video_view(
+                video_view, new_video.added, session)
+        except Exception as e:
+            logger.error(
+                f'Fail to commit video record! video: {new_video}, error: {e}')
+            session.rollback()
+            raise e
 
     # update member last_video and video_count
     try:
