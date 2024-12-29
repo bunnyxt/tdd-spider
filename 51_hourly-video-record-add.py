@@ -697,7 +697,9 @@ class C30PipelineRunner(Thread):
                      'values '
         sql = sql_prefix
         need_insert_but_record_not_found_aid_list = []
-        log_gap = 1000 * max(1, (len(need_insert_aid_list) // 1000 // 10))
+        batch_size = 2000
+        # only log 20 times
+        log_gap = batch_size * max(1, (len(need_insert_aid_list) // batch_size // 20))
         for idx, aid in enumerate(need_insert_aid_list, 1):
             record = aid_record_dict.get(aid, None)
             if not record:
@@ -710,7 +712,7 @@ class C30PipelineRunner(Thread):
                     record.now_rank), null_or_str(record.his_rank),
                 null_or_str(record.vt), null_or_str(record.vv)
             )
-            if idx % 1000 == 0:
+            if idx % batch_size == 0:
                 sql = sql[:-2]  # remove ending comma and space
                 try:
                     session.execute(sql)
