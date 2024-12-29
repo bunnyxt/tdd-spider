@@ -44,7 +44,7 @@ class AddVideoFromArchiveJob(Job):
                 # commit video record via archive stat
                 try:
                     new_video_record = commit_video_record_via_newlist_archive_stat(
-                        archive.stat, added, self.session)
+                        archive.stat, added, archive.aid, self.session)
                 except Exception as e:
                     self.logger.error(f'Fail to add video record parsed from archive stat! '
                                       f'archive: {archive}, error: {e}')

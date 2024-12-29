@@ -39,6 +39,8 @@ def add_all_video_with_tid_30():
     # add all video
     page_num = 1
     while page_num <= page_total:
+        added = get_ts_s()
+
         # get newlist
         try:
             newlist = service.get_newlist(
@@ -66,7 +68,7 @@ def add_all_video_with_tid_30():
                 # commit video record via archive stat
                 try:
                     new_video_record = commit_video_record_via_newlist_archive_stat(
-                        archive.stat, session)
+                        archive.stat, added, archive.aid, session)
                 except Exception as e:
                     logger.error(f'Fail to add video record parsed from archive stat! '
                                  f'archive: {archive}, error: {e}')

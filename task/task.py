@@ -77,10 +77,11 @@ def commit_video_record_via_video_view(video_view: VideoView, added: int, sessio
     return new_video_record
 
 
-def commit_video_record_via_newlist_archive_stat(stat: NewlistArchiveStat, added: int, session: Session) -> TddVideoRecord:
+def commit_video_record_via_newlist_archive_stat(stat: NewlistArchiveStat, added: int, aid: int, session: Session) -> TddVideoRecord:
     # assemble video record
     new_video_record = TddVideoRecord(
-        aid=stat.aid,
+        # sometimes stat.aid is 0, use aid provided by caller instead
+        aid=stat.aid if stat.aid != 0 else aid,
         added=added,
         view=-1 if stat.view == '--' else stat.view,
         danmaku=stat.danmaku,
