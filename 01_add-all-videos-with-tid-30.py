@@ -53,7 +53,8 @@ def add_all_video_with_tid_30():
         for archive in newlist.archives:
             # add video
             try:
-                new_video = add_video(archive.aid, service, session)
+                new_video = add_video(
+                    archive.aid, service, session, commit_video_record=False)
             except Exception as e:
                 logger.error(
                     f'Fail to add video parsed from archive! archive: {archive}, error: {e}')

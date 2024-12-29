@@ -20,25 +20,31 @@ class AddVideoFromArchiveJob(Job):
     def process(self):
         while not self.archive_video_queue.empty():
             added, archive = self.archive_video_queue.get()
-            self.logger.debug(f'Now start add video from archive. archive: {archive}')
+            self.logger.debug(
+                f'Now start add video from archive. archive: {archive}')
             timer = Timer()
             timer.start()
 
             try:
-                new_video = add_video(archive.aid, self.service, self.session)
+                new_video = add_video(
+                    archive.aid, self.service, self.session, commit_video_record=False)
             except AlreadyExistError:
-                self.logger.debug(f'Video presented in archives already exist! archive: {archive}')
+                self.logger.debug(
+                    f'Video presented in archives already exist! archive: {archive}')
                 self.stat.condition['already_exist_video'] += 1
             except Exception as e:
-                self.logger.error(f'Fail to add video parsed from archive! archive: {archive}, error: {e}')
+                self.logger.error(
+                    f'Fail to add video parsed from archive! archive: {archive}, error: {e}')
                 self.stat.condition['add_video_exception'] += 1
             else:
-                self.logger.info(f'New video detected in archives added! video: {new_video}')
+                self.logger.info(
+                    f'New video detected in archives added! video: {new_video}')
                 self.stat.condition['new_video'] += 1
 
                 # commit video record via archive stat
                 try:
-                    new_video_record = commit_video_record_via_newlist_archive_stat(archive.stat, added, self.session)
+                    new_video_record = commit_video_record_via_newlist_archive_stat(
+                        archive.stat, added, self.session)
                 except Exception as e:
                     self.logger.error(f'Fail to add video record parsed from archive stat! '
                                       f'archive: {archive}, error: {e}')
