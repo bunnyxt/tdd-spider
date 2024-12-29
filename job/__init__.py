@@ -1,5 +1,6 @@
 from .AddMemberFollowerRecordJob import *
 from .AddSprintVideoRecordJob import *
+from .AddVideoJob import *
 from .AddVideoRecordJob import *
 from .AddVideoFromArchiveJob import *
 from .GetNewlistArchiveJob import *

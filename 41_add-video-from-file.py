@@ -1,10 +1,9 @@
 import argparse
 from serverchan import sc_send_summary
-from job import AddVideoRecordJob
+from job import AddVideoJob
 from util import logging_init, fullname
 from timer import Timer
 from service import Service
-from db import TddVideoRecord
 from job import JobStat
 from queue import Queue
 import logging
@@ -44,15 +43,12 @@ def add_video_from_file(file_path: str):
     for aid in aid_list:
         aid_queue.put(aid)
 
-    # create video record queue
-    video_record_queue: Queue[TddVideoRecord] = Queue()
-
     # create jobs
-    job_num = 20
-    job_list = []
+    job_num = 50
+    job_list: list[AddVideoJob] = []
     for i in range(job_num):
-        job_list.append(AddVideoRecordJob(
-            f'job_{i}', aid_queue, video_record_queue, service, duration_limit_s=60*60*12))
+        job_list.append(AddVideoJob(
+            f'job_{i}', aid_queue, service))
 
     # start jobs
     for job in job_list:
