@@ -90,7 +90,7 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
         self.record_queue = record_queue
         self.service = service
         self.session = Session()
-        self._duration_limit_s = 60 * 40  # 40 minutes
+        self._duration_limit_s = 60 * 30  # 30 minutes
 
     def process(self):
         # TMP duration limit
@@ -690,7 +690,7 @@ class C30PipelineRunner(Thread):
         # insert records
         # TODO: extract to util funtion start
         self.logger.info('Now start inserting records...')
-        # use sql directly, combine 1000 records into one sql to execute and commit
+        # use sql directly, combine batch_size records into one sql to execute and commit
         sql_prefix = 'insert into ' \
                      'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`, ' \
                      'dislike, now_rank, his_rank, vt, vv) ' \
@@ -699,7 +699,8 @@ class C30PipelineRunner(Thread):
         need_insert_but_record_not_found_aid_list = []
         batch_size = 2000
         # only log 20 times
-        log_gap = batch_size * max(1, (len(need_insert_aid_list) // batch_size // 20))
+        log_gap = batch_size * \
+            max(1, (len(need_insert_aid_list) // batch_size // 20))
         for idx, aid in enumerate(need_insert_aid_list, 1):
             record = aid_record_dict.get(aid, None)
             if not record:
@@ -1629,5 +1630,6 @@ if __name__ == '__main__':
     # current time task, only number, ex: 201301311900
     time_task_simple = f'{get_ts_s_str()[:13]}:00'.replace(
         '-', '').replace(' ', '').replace(':', '')
-    logging_init(file_prefix=f'{script_id}_{time_task_simple}')
+    logging_init(file_prefix=f'{script_id}_{time_task_simple}', file_handler_levels=(
+        logging.DEBUG, logging.INFO, logging.WARNING))
     main()
