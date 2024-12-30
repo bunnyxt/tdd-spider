@@ -9,7 +9,7 @@ __all__ = ['engine', 'Base', 'Session',
 
 def get_engine():
     db_args = get_db_args()
-    conn_str = "mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8mb4".format(
+    conn_str = "mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8mb4&connect_timeout=10&read_timeout=30&write_timeout=60".format(
         db_args['user'], db_args['password'], db_args['host'], db_args['port'], db_args['dbname'])  # mysql
     eng = create_engine(conn_str, pool_recycle=3600, pool_size=50,
                         max_overflow=150, pool_timeout=60, pool_pre_ping=True)
