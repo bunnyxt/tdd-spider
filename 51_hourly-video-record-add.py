@@ -454,7 +454,7 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
         video_record_queue: Queue[TddVideoRecord] = Queue()
 
         # create jobs
-        job_num = 10
+        job_num = 50
         job_list = []
         for i in range(job_num):
             job_list.append(AddVideoRecordJob(
