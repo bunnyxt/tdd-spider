@@ -439,6 +439,9 @@ class Service:
                 if code in [-352]:
                     logger.debug(
                         f'Status code {code} found. Anti-crawler detected, return None for retry.')
+                    # TMP sleep 60 seconds
+                    time.sleep(60)
+                    # TMP end
                     parsed_response = None
             return parsed_response
 
