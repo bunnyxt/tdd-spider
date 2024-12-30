@@ -4,7 +4,7 @@ from timer import Timer
 from queue import Queue
 from db import Session
 from util import format_ts_ms
-from task import add_video
+from task import add_video, AlreadyExistError
 
 __all__ = ['AddVideoJob']
 
@@ -27,6 +27,10 @@ class AddVideoJob(Job):
             try:
                 new_video = add_video(
                     aid, self.service, self.session, self.test_exist)
+            except AlreadyExistError:
+                self.logger.info(
+                    f'Video already exist! aid: {aid}')
+                self.stat.condition['already_exist_video'] += 1
             except Exception as e:
                 self.logger.error(
                     f'Fail to add video! aid: {aid}, error: {e}')

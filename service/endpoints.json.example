@@ -10,7 +10,7 @@
     ]
   },
   "get_member_card": {
-    "direct": "https://api.bilibili.com/x/web-interface/card",
+    "direct": "http://api.bilibili.com/x/web-interface/card",
     "workers": [
     ]
   },
