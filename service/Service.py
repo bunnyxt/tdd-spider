@@ -440,7 +440,9 @@ class Service:
                     logger.debug(
                         f'Status code {code} found. Anti-crawler detected, return None for retry.')
                     # TMP sleep 60 seconds
+                    logger.info(f'TMP sleep 60 seconds.')
                     time.sleep(60)
+                    logger.info(f'TMP sleep 60 seconds end.')
                     # TMP end
                     parsed_response = None
             return parsed_response
