@@ -91,5 +91,6 @@ def main():
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix=script_id)
+    logging_init(file_prefix=script_id, file_handler_levels=(
+        logging.DEBUG, logging.INFO, logging.WARNING))
     main()
