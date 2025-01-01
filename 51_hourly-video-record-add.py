@@ -1630,6 +1630,5 @@ if __name__ == '__main__':
     # current time task, only number, ex: 201301311900
     time_task_simple = f'{get_ts_s_str()[:13]}:00'.replace(
         '-', '').replace(' ', '').replace(':', '')
-    logging_init(file_prefix=f'{script_id}_{time_task_simple}', file_handler_levels=(
-        logging.DEBUG, logging.INFO, logging.WARNING))
+    logging_init(file_prefix=f'{script_id}_{time_task_simple}')
     main()
