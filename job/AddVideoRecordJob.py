@@ -45,6 +45,13 @@ class AddVideoRecordJob(Job):
                     try:
                         tdd_video_logs = update_video(aid, self.service, self.session)
                     except Exception as e2:
+                        # Recover the session so a failed DB op does not leave
+                        # it in an invalid-transaction state that would cascade
+                        # to every subsequent aid in this worker.
+                        try:
+                            self.session.rollback()
+                        except Exception:
+                            pass
                         self.logger.error(f'Fail to update video info. aid: {aid}, error: {e2}')
                         self.stat.condition['update_exception'] += 1
                     else:
@@ -57,6 +64,12 @@ class AddVideoRecordJob(Job):
                     self.logger.error(f'Fail to add video record. aid: {aid}, error: {e}')
                 self.stat.condition['code_error'] += 1
             except Exception as e:
+                # Recover the session so a failed DB op does not leave it in an
+                # invalid-transaction state that would cascade to subsequent aids.
+                try:
+                    self.session.rollback()
+                except Exception:
+                    pass
                 self.logger.error(f'Fail to add video record. aid: {aid}, error: {e}')
                 self.stat.condition['other_exception'] += 1
             else:
