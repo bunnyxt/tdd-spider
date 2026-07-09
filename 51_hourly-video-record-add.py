@@ -745,8 +745,9 @@ class C30PipelineRunner(Thread):
                 self.logger.error('Exception: %s' % str(e))
         self.logger.info('%d / %d done' %
                          (len(need_insert_aid_list), len(need_insert_aid_list)))
-        self.logger.info('Finish inserting records! %d records added, %d aids left' % (
-            len(need_insert_aid_list), len(need_insert_but_record_not_found_aid_list)))
+        self.logger.info('Finish inserting records! %d records added, %d aids not found (record missing)' % (
+            len(need_insert_aid_list) - len(need_insert_but_record_not_found_aid_list),
+            len(need_insert_but_record_not_found_aid_list)))
         # TODO: extract to util funtion end
 
         # check need insert but not found aid list
@@ -879,8 +880,9 @@ class C30PipelineRunner(Thread):
                 self.logger.error('Exception: %s' % str(e))
         self.logger.info('%d / %d done' %
                          (len(missing_record_list), len(missing_record_list)))
-        self.logger.info('Finish inserting missing records! %d records added, %d aids left' % (
-            len(missing_record_list), len(need_insert_but_record_not_found_aid_list)))
+        self.logger.info('Finish inserting missing records! %d missing records added, %d aids still unresolved' % (
+            len(missing_record_list),
+            len(need_insert_but_record_not_found_aid_list) - len(missing_record_list)))
         # TODO: extract to util funtion end
 
         self.logger.info(
