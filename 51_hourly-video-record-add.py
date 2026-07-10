@@ -90,7 +90,7 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
         self.record_queue = record_queue
         self.service = service
         self.session = Session()
-        self._duration_limit_s = 60 * 30  # 30 minutes
+        self._duration_limit_s = 60 * 40  # 40 minutes, hard stop
 
     def process(self):
         # TMP duration limit
@@ -115,6 +115,14 @@ class CheckC30NeedInsertButNotFoundAidsJob(Job):
                     aid, self.service, self.session, out_context=update_video_context)
                 video_view: VideoView = update_video_context['video_view']
             except Exception as e:
+                # Roll back so a failed DB op (e.g. a transient 'too many
+                # connections') does not leave this worker's session in an
+                # invalid-transaction state, which would otherwise poison every
+                # subsequent aid and surface as bogus NotExistError cascades.
+                try:
+                    self.session.rollback()
+                except Exception:
+                    pass
                 self.logger.error(
                     f'Fail to update video info. aid: {aid}, error: {e}')
                 self.stat.condition['update_exception'] += 1
@@ -737,8 +745,9 @@ class C30PipelineRunner(Thread):
                 self.logger.error('Exception: %s' % str(e))
         self.logger.info('%d / %d done' %
                          (len(need_insert_aid_list), len(need_insert_aid_list)))
-        self.logger.info('Finish inserting records! %d records added, %d aids left' % (
-            len(need_insert_aid_list), len(need_insert_but_record_not_found_aid_list)))
+        self.logger.info('Finish inserting records! %d records added, %d aids not found (record missing)' % (
+            len(need_insert_aid_list) - len(need_insert_but_record_not_found_aid_list),
+            len(need_insert_but_record_not_found_aid_list)))
         # TODO: extract to util funtion end
 
         # check need insert but not found aid list
@@ -871,8 +880,9 @@ class C30PipelineRunner(Thread):
                 self.logger.error('Exception: %s' % str(e))
         self.logger.info('%d / %d done' %
                          (len(missing_record_list), len(missing_record_list)))
-        self.logger.info('Finish inserting missing records! %d records added, %d aids left' % (
-            len(missing_record_list), len(need_insert_but_record_not_found_aid_list)))
+        self.logger.info('Finish inserting missing records! %d missing records added, %d aids still unresolved' % (
+            len(missing_record_list),
+            len(need_insert_but_record_not_found_aid_list) - len(missing_record_list)))
         # TODO: extract to util funtion end
 
         self.logger.info(

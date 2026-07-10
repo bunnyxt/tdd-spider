@@ -26,6 +26,16 @@ class DBOperation:
         except Exception as e:
             logger_db.error('Exception: %s, params: %s' %
                             (e, {'aid': aid}), exc_info=True)
+            # Roll back so a transient failure (e.g. 'too many connections')
+            # does not leave the session stuck in an invalid transaction that
+            # breaks every following query on it. NOTE: on failure this still
+            # returns None, which callers like update_video treat as "not
+            # exist" -- an infra error can thus be mislabeled; revisit if that
+            # distinction matters.
+            try:
+                session.rollback()
+            except Exception:
+                pass
             return None
 
     @classmethod
