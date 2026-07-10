@@ -12,7 +12,7 @@ from serverchan import sc_send_summary, sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from core import TddError
 from service import Service, NewlistArchive, VideoView
-from job import GetNewlistArchiveJob, JobStat, AddVideoRecordJob, Job, JobPool
+from job import GetNewlistArchiveJob, AddVideoRecordJob, Job, JobPool
 from typing import NamedTuple, Optional
 from task import update_video, add_video, AlreadyExistError
 from timer import Timer
@@ -461,29 +461,19 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
         # create video record queue
         video_record_queue: Queue[TddVideoRecord] = Queue()
 
-        # create jobs
+        # create jobs and run them with a per-second progress heartbeat
         job_num = 50
-        job_list = []
-        for i in range(job_num):
-            job_list.append(AddVideoRecordJob(
-                f'job_{i}', aid_queue, video_record_queue, service))
-
-        # start jobs
-        for job in job_list:
-            job.start()
-        logger.info(f'{job_num} job(s) started.')
-
-        # wait for jobs
-        for job in job_list:
-            job.join()
-
-        # collect statistics
-        job_stat_list: list[JobStat] = []
-        for job in job_list:
-            job_stat_list.append(job.stat)
-
-        # merge statistics counters
-        job_stat_merged = sum(job_stat_list, JobStat())
+        job_list = [
+            AddVideoRecordJob(f'job_{i}', aid_queue, video_record_queue, service)
+            for i in range(job_num)
+        ]
+        pool = JobPool(
+            job_list,
+            progress_total=len(need_insert_aid_list),
+            progress_label='c0-acquisition',
+            logger_name='C0DataAcquisitionJob')
+        pool.start()
+        job_stat_merged = pool.join()
 
         self.logger.info('Finish add need insert aid list!')
         self.logger.info(job_stat_merged.get_summary())
@@ -544,28 +534,18 @@ class C30PipelineRunner(Thread):
         # create archive video queue
         archive_video_queue: Queue[tuple[int, NewlistArchive]] = Queue()
 
-        # create jobs
-        job_list = []
-        for i in range(job_num):
-            job_list.append(GetNewlistArchiveJob(
-                f'job_{i}', 30, page_num_queue, archive_video_queue, service))
-
-        # start jobs
-        for job in job_list:
-            job.start()
-        logger.info(f'{job_num} job(s) started.')
-
-        # wait for jobs
-        for job in job_list:
-            job.join()
-
-        # collect statistics
-        job_stat_list: list[JobStat] = []
-        for job in job_list:
-            job_stat_list.append(job.stat)
-
-        # merge statistics counters
-        job_stat_merged = sum(job_stat_list, JobStat())
+        # create jobs and run them with a per-second progress heartbeat
+        job_list = [
+            GetNewlistArchiveJob(f'job_{i}', 30, page_num_queue, archive_video_queue, service)
+            for i in range(job_num)
+        ]
+        pool = JobPool(
+            job_list,
+            progress_total=page_num_total,
+            progress_label='newlist-archive',
+            logger_name='C30PipelineRunner')
+        pool.start()
+        job_stat_merged = pool.join()
 
         self.logger.info('Finish get archive videos!')
         self.logger.info(job_stat_merged.get_summary())
@@ -621,33 +601,18 @@ class C30PipelineRunner(Thread):
         # prepare checked record queue
         checked_record_queue: Queue[RecordNew] = Queue()
 
-        # create jobs
-        job_list = []
-        for i in range(job_num):
-            job_list.append(CheckAllZeroRecordJob(
-                f'job_{i}', record_queue, checked_record_queue, service))
-
-        # start jobs
-        for job in job_list:
-            job.start()
-        logger.info(f'{job_num} job(s) started.')
-
-        # wait for jobs
-        for job in job_list:
-            job.join()
-
-        # collect statistics
-        job_stat_list: list[JobStat] = []
-        for job in job_list:
-            job_stat_list.append(job.stat)
-
-        # merge statistics counters with pre-initialized stat
-        stat = JobStat()
-        stat.condition['all_zero_record'] = 0
-        stat.condition['fail_fetch_again'] = 0
-        stat.condition['all_zero_record_again'] = 0
-        stat.condition['not_all_zero_record'] = 0
-        job_stat_merged = sum(job_stat_list, stat)
+        # create jobs and run them with a per-second progress heartbeat
+        job_list = [
+            CheckAllZeroRecordJob(f'job_{i}', record_queue, checked_record_queue, service)
+            for i in range(job_num)
+        ]
+        pool = JobPool(
+            job_list,
+            progress_total=record_queue_len,
+            progress_label='all-zero-check',
+            logger_name='C30PipelineRunner')
+        pool.start()
+        job_stat_merged = pool.join()
 
         # add remaining record to checked record queue
         while not record_queue.empty():
@@ -775,7 +740,7 @@ class C30PipelineRunner(Thread):
 
         # create jobs
         check_c30_need_insert_but_not_found_aid_job_num = min(
-            100, max(len(need_insert_but_record_not_found_aid_list) // 10, 1))  # [1, 100]
+            150, max(len(need_insert_but_record_not_found_aid_list) // 10, 1))  # [1, 150]
         check_c30_need_insert_but_not_found_aid_job_list = [
             CheckC30NeedInsertButNotFoundAidsJob(
                 f'job_{i}', need_insert_but_not_found_aid_queue, missing_record_queue, service)
@@ -904,31 +869,21 @@ class C30PipelineRunner(Thread):
         # create video record queue
         video_record_queue: Queue[TddVideoRecord] = Queue()
 
-        # create jobs
+        # create jobs and run them with a per-second progress heartbeat
         job_num = 50
-        job_list = []
-        for i in range(job_num):
-            job_list.append(AddVideoRecordJob(
+        job_list = [
+            AddVideoRecordJob(
                 f'job_{i}', aid_queue, video_record_queue, service,
-                duration_limit_s=60 * 40  # 40 minutes
-            ))
-
-        # start jobs
-        for job in job_list:
-            job.start()
-        logger.info(f'{job_num} job(s) started.')
-
-        # wait for jobs
-        for job in job_list:
-            job.join()
-
-        # collect statistics
-        job_stat_list: list[JobStat] = []
-        for job in job_list:
-            job_stat_list.append(job.stat)
-
-        # merge statistics counters
-        job_stat_merged = sum(job_stat_list, JobStat())
+                duration_limit_s=60 * 40)  # 40 minutes
+            for i in range(job_num)
+        ]
+        pool = JobPool(
+            job_list,
+            progress_total=len(need_insert_aid_list),
+            progress_label='simple-fetch',
+            logger_name='C30PipelineRunner')
+        pool.start()
+        job_stat_merged = pool.join()
 
         self.logger.info('Finish add need insert aid list!')
         self.logger.info(job_stat_merged.get_summary())
