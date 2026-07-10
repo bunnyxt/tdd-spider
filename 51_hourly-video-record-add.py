@@ -610,6 +610,8 @@ class C30PipelineRunner(Thread):
             job_list,
             progress_total=record_queue_len,
             progress_label='all-zero-check',
+            ensure_conditions=['all_zero_record', 'fail_fetch_again',
+                               'all_zero_record_again', 'not_all_zero_record'],
             logger_name='C30PipelineRunner')
         pool.start()
         job_stat_merged = pool.join()
