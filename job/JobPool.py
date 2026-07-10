@@ -29,6 +29,7 @@ class JobPool:
                  progress_total: Optional[int] = None,
                  progress_interval_s: float = 1.0,
                  progress_show_conditions: bool = True,
+                 ensure_conditions: Optional[list[str]] = None,
                  logger_name: str = 'JobPool'):
         # progress_label is required (keyword-only, no default) so every pool's
         # heartbeat is uniquely identifiable when several run concurrently.
@@ -37,6 +38,10 @@ class JobPool:
         self.progress_total = progress_total
         self.progress_interval_s = progress_interval_s
         self.progress_show_conditions = progress_show_conditions
+        # condition keys that should always appear in the merged summary (at 0
+        # if never hit). Needed because Counter '+' drops zero counts, so a key
+        # that no job incremented would otherwise vanish from get_summary().
+        self.ensure_conditions = ensure_conditions or []
         self.logger = logging.getLogger(logger_name)
         self._stop_event = Event()
         self._progress_thread: Optional[Thread] = None
@@ -57,7 +62,13 @@ class JobPool:
         self._stop_event.set()
         if self._progress_thread is not None:
             self._progress_thread.join()
-        return sum((job.stat for job in self.jobs), JobStat())
+        merged = sum((job.stat for job in self.jobs), JobStat())
+        # seed declared keys so they always show (direct assignment keeps a 0,
+        # which Counter '+' would have dropped); never overwrites a real count.
+        for key in self.ensure_conditions:
+            if key not in merged.condition:
+                merged.condition[key] = 0
+        return merged
 
     def _report_progress(self):
         last_done = 0
