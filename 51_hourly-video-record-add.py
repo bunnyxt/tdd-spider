@@ -12,7 +12,7 @@ from serverchan import sc_send_summary, sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from core import TddError
 from service import Service, NewlistArchive, VideoView
-from job import GetNewlistArchiveJob, JobStat, AddVideoRecordJob, Job
+from job import GetNewlistArchiveJob, JobStat, AddVideoRecordJob, Job, JobPool
 from typing import NamedTuple, Optional
 from task import update_video, add_video, AlreadyExistError
 from timer import Timer
@@ -776,17 +776,19 @@ class C30PipelineRunner(Thread):
         # create jobs
         check_c30_need_insert_but_not_found_aid_job_num = min(
             100, max(len(need_insert_but_record_not_found_aid_list) // 10, 1))  # [1, 100]
-        check_c30_need_insert_but_not_found_aid_job_list = []
-        for i in range(check_c30_need_insert_but_not_found_aid_job_num):
-            check_c30_need_insert_but_not_found_aid_job_list.append(
-                CheckC30NeedInsertButNotFoundAidsJob(
-                    f'job_{i}', need_insert_but_not_found_aid_queue, missing_record_queue, service))
+        check_c30_need_insert_but_not_found_aid_job_list = [
+            CheckC30NeedInsertButNotFoundAidsJob(
+                f'job_{i}', need_insert_but_not_found_aid_queue, missing_record_queue, service)
+            for i in range(check_c30_need_insert_but_not_found_aid_job_num)
+        ]
 
-        # start jobs
-        for job in check_c30_need_insert_but_not_found_aid_job_list:
-            job.start()
-        logger.info(
-            f'{check_c30_need_insert_but_not_found_aid_job_num} job(s) started.')
+        # start jobs, with a per-second progress heartbeat (greppable: PROGRESS)
+        check_c30_pool = JobPool(
+            check_c30_need_insert_but_not_found_aid_job_list,
+            progress_total=len(need_insert_but_record_not_found_aid_list),
+            progress_label='check-c30-missing',
+            logger_name='C30PipelineRunner')
+        check_c30_pool.start()
 
         # check no need insert records
         # if time label is 04:00, we need to add all video records into tdd_video_record table,
@@ -807,20 +809,8 @@ class C30PipelineRunner(Thread):
                 no_need_insert_aid_list)
             c30_no_need_insert_aids_checker.start()
 
-        # wait for jobs
-        for job in check_c30_need_insert_but_not_found_aid_job_list:
-            job.join()
-
-        # collect statistics
-        check_c30_need_insert_but_not_found_aid_job_stat_list: list[JobStat] = [
-        ]
-        for job in check_c30_need_insert_but_not_found_aid_job_list:
-            check_c30_need_insert_but_not_found_aid_job_stat_list.append(
-                job.stat)
-
-        # merge statistics counters
-        check_c30_need_insert_but_not_found_aid_job_stat_merged = sum(
-            check_c30_need_insert_but_not_found_aid_job_stat_list, JobStat())
+        # wait for jobs (also stops the progress heartbeat) and merge their stats
+        check_c30_need_insert_but_not_found_aid_job_stat_merged = check_c30_pool.join()
 
         self.logger.info(f'Finish check c30 need insert but not found aid!')
         self.logger.info(

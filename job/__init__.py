@@ -6,5 +6,6 @@ from .AddVideoFromArchiveJob import *
 from .GetNewlistArchiveJob import *
 from .Job import *
 from .JobStat import *
+from .JobPool import *
 from .UpdateMemberJob import *
 from .UpdateVideoJob import *
