@@ -923,11 +923,13 @@ class C30PipelineRunner(Thread):
 
         service = Service(mode='worker')
 
-        # Probe the bulk newlist api. It can be "broken" two ways: raise, or (as
-        # seen since 2026-07) return successfully with count 0. Only go
-        # comprehensive (bulk-fetch all c30 records) when it reports a real
-        # count; otherwise fetch records per-aid via the view-only simple path,
-        # which avoids the heavy update_video + flaky video_tags call.
+        # Probe the bulk newlist api. It can be "broken" several ways: raise,
+        # return count 0, or (degraded) return an implausibly small count. A
+        # healthy c30 newlist reports hundreds of thousands of archives (~1M,
+        # thousands of pages), so treat anything below this floor as broken and
+        # fall back to the view-only per-aid path -- which also avoids the heavy
+        # update_video + flaky video_tags call.
+        bulk_min_count = 1000
         try:
             new_list = service.get_newlist({'rid': 30, 'pn': 1, 'ps': 50})
             bulk_count = new_list.page.count
@@ -936,13 +938,14 @@ class C30PipelineRunner(Thread):
                               f'rid: 30, pn: 1, ps: 50, error: {e}')
             bulk_count = 0
 
-        if bulk_count > 0:
+        if bulk_count >= bulk_min_count:
             self.logger.info(
                 f'Newlist bulk api healthy (count: {bulk_count}). Go comprehensive process.')
             self.process_comprehensive()
         else:
             self.logger.warning(
-                'Newlist bulk api empty/broken (count: 0). Go simple (view-only per-aid) process.')
+                f'Newlist bulk api empty/broken/degraded (count: {bulk_count}, < {bulk_min_count}). '
+                f'Go simple (view-only per-aid) process.')
             self.process_simple()
 
 
