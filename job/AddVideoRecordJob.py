@@ -2,7 +2,8 @@ from .Job import Job
 from service import Service, CodeError
 from timer import Timer
 from queue import Queue
-from db import Session, TddVideoRecord
+from db import Session
+from core import RecordNew
 from util import format_ts_ms, get_ts_s, ts_s_to_str
 from task import add_video_record_via_video_view, update_video
 from typing import Optional
@@ -11,7 +12,7 @@ __all__ = ['AddVideoRecordJob']
 
 
 class AddVideoRecordJob(Job):
-    def __init__(self, name: str, aid_queue: Queue[int], video_record_queue: Queue[TddVideoRecord], service: Service,
+    def __init__(self, name: str, aid_queue: Queue[int], video_record_queue: Queue[RecordNew], service: Service,
                  update_if_code_error: bool = True, duration_limit_s: Optional[int] = None):
         super().__init__(name)
         self.aid_queue = aid_queue

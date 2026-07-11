@@ -3,7 +3,7 @@ from sqlalchemy.orm.session import Session
 from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord, \
     TddMemberLog, TddSprintVideoRecord
 from util import get_ts_s, a2b, same_pic_url
-from core import TddError
+from core import TddError, RecordNew
 from .error import AlreadyExistError, NotExistError
 
 import logging
@@ -19,18 +19,22 @@ __all__ = ['add_video_record_via_video_view',
            'get_video_tags_str']
 
 
-def add_video_record_via_video_view(aid: int, service: Service, session: Session) -> TddVideoRecord:
+def add_video_record_via_video_view(aid: int, service: Service, session: Session) -> RecordNew:
     # get video view
     try:
         video_view = service.get_video_view({'aid': aid})
     except ServiceError as e:
         raise e
 
-    # assemble video record
+    added = get_ts_s()
+    view = -1 if video_view.stat.view == '--' else video_view.stat.view
+
+    # assemble and persist the record. The ORM object is confined to this
+    # function -- it exists only to run the INSERT and never leaves.
     new_video_record = TddVideoRecord(
         aid=aid,
-        added=get_ts_s(),
-        view=-1 if video_view.stat.view == '--' else video_view.stat.view,
+        added=added,
+        view=view,
         danmaku=video_view.stat.danmaku,
         reply=video_view.stat.reply,
         favorite=video_view.stat.favorite,
@@ -43,12 +47,28 @@ def add_video_record_via_video_view(aid: int, service: Service, session: Session
         vt=video_view.stat.vt,
         vv=video_view.stat.vv,
     )
-
-    # add to db
     # TODO: use new db operation which can raise exception
     DBOperation.add(new_video_record, session)
 
-    return new_video_record
+    # return the lightweight, session-independent record built from video_view
+    # (never read back the committed ORM row, which expires on commit / detaches)
+    return RecordNew(
+        added=added,
+        aid=aid,
+        bvid=video_view.bvid.lstrip('BV'),
+        view=view,
+        danmaku=video_view.stat.danmaku,
+        reply=video_view.stat.reply,
+        favorite=video_view.stat.favorite,
+        coin=video_view.stat.coin,
+        share=video_view.stat.share,
+        like=video_view.stat.like,
+        dislike=video_view.stat.dislike,
+        now_rank=video_view.stat.now_rank,
+        his_rank=video_view.stat.his_rank,
+        vt=video_view.stat.vt,
+        vv=video_view.stat.vv,
+    )
 
 
 def commit_video_record_via_video_view(video_view: VideoView, added: int, session: Session) -> TddVideoRecord:
