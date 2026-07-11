@@ -871,8 +871,12 @@ class C30PipelineRunner(Thread):
         # create video record queue
         video_record_queue: Queue[TddVideoRecord] = Queue()
 
-        # create jobs and run them with a per-second progress heartbeat
-        job_num = 50
+        # create jobs and run them with a per-second progress heartbeat.
+        # 150 workers (vs C0's 50): this is now C30's primary fetch path over a
+        # much larger aid set (~65k+), and at ~0.25 aids/s/worker that covers a
+        # plain hour within the 40-min cap. Note get_video_view is a single
+        # endpoint, so scaling is sub-linear -- watch the PROGRESS rate.
+        job_num = 150
         job_list = [
             AddVideoRecordJob(
                 f'job_{i}', aid_queue, video_record_queue, service,
