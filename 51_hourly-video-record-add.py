@@ -1,4 +1,4 @@
-from db import Session, DBOperation, TddVideoRecordAbnormalChange, TddVideoRecord
+from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from threading import Thread
 from queue import Queue
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
@@ -11,7 +11,7 @@ import re
 from serverchan import sc_send_summary, sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from core import TddError
-from service import Service, NewlistArchive, VideoView
+from service import Service, NewlistArchive, VideoView, VideoViewStat
 from job import GetNewlistArchiveJob, AddVideoRecordJob, Job, JobPool
 from typing import NamedTuple, Optional
 from task import update_video, add_video, AlreadyExistError
@@ -459,7 +459,7 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
             aid_queue.put(aid)
 
         # create video record queue
-        video_record_queue: Queue[TddVideoRecord] = Queue()
+        video_record_queue: Queue[tuple[int, int, str, VideoViewStat]] = Queue()
 
         # create jobs and run them with a per-second progress heartbeat
         job_num = 50
@@ -480,23 +480,23 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
 
         # parse tdd video record to record
         while not video_record_queue.empty():
-            video_record = video_record_queue.get()
+            added, aid, bvid, stat = video_record_queue.get()
             self.record_queue.put(RecordNew(
-                added=video_record.added,
-                aid=video_record.aid,
-                bvid=a2b(video_record.aid),
-                view=video_record.view,
-                danmaku=video_record.danmaku,
-                reply=video_record.reply,
-                favorite=video_record.favorite,
-                coin=video_record.coin,
-                share=video_record.share,
-                like=video_record.like,
-                dislike=video_record.dislike,
-                now_rank=video_record.now_rank,
-                his_rank=video_record.his_rank,
-                vt=video_record.vt,
-                vv=video_record.vv,
+                added=added,
+                aid=aid,
+                bvid=bvid,
+                view=-1 if stat.view == '--' else stat.view,
+                danmaku=stat.danmaku,
+                reply=stat.reply,
+                favorite=stat.favorite,
+                coin=stat.coin,
+                share=stat.share,
+                like=stat.like,
+                dislike=stat.dislike,
+                now_rank=stat.now_rank,
+                his_rank=stat.his_rank,
+                vt=stat.vt,
+                vv=stat.vv,
             ))
         self.logger.info(
             f'{self.record_queue.qsize()} record(s) parsed and returned.')
@@ -869,7 +869,7 @@ class C30PipelineRunner(Thread):
             aid_queue.put(aid)
 
         # create video record queue
-        video_record_queue: Queue[TddVideoRecord] = Queue()
+        video_record_queue: Queue[tuple[int, int, str, VideoViewStat]] = Queue()
 
         # create jobs and run them with a per-second progress heartbeat.
         # 150 workers (vs C0's 50): this is now C30's primary fetch path over a
@@ -897,23 +897,23 @@ class C30PipelineRunner(Thread):
         # parse tdd video record to record
         record_cnt = 0
         while not video_record_queue.empty():
-            video_record = video_record_queue.get()
+            added, aid, bvid, stat = video_record_queue.get()
             self.record_queue.put(RecordNew(
-                added=video_record.added,
-                aid=video_record.aid,
-                bvid=a2b(video_record.aid),
-                view=video_record.view,
-                danmaku=video_record.danmaku,
-                reply=video_record.reply,
-                favorite=video_record.favorite,
-                coin=video_record.coin,
-                share=video_record.share,
-                like=video_record.like,
-                dislike=video_record.dislike,
-                now_rank=video_record.now_rank,
-                his_rank=video_record.his_rank,
-                vt=video_record.vt,
-                vv=video_record.vv,
+                added=added,
+                aid=aid,
+                bvid=bvid,
+                view=-1 if stat.view == '--' else stat.view,
+                danmaku=stat.danmaku,
+                reply=stat.reply,
+                favorite=stat.favorite,
+                coin=stat.coin,
+                share=stat.share,
+                like=stat.like,
+                dislike=stat.dislike,
+                now_rank=stat.now_rank,
+                his_rank=stat.his_rank,
+                vt=stat.vt,
+                vv=stat.vv,
             ))
             record_cnt += 1
         self.logger.info(f'{record_cnt} record(s) parsed and returned.')

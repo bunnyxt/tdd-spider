@@ -1,17 +1,18 @@
 from .Job import Job
-from service import Service, CodeError
+from service import Service, CodeError, VideoViewStat
 from timer import Timer
 from queue import Queue
-from db import Session, TddVideoRecord
+from db import Session
 from util import format_ts_ms, get_ts_s, ts_s_to_str
-from task import add_video_record_via_video_view, update_video
+from task import commit_video_record_via_video_view, update_video
 from typing import Optional
 
 __all__ = ['AddVideoRecordJob']
 
 
 class AddVideoRecordJob(Job):
-    def __init__(self, name: str, aid_queue: Queue[int], video_record_queue: Queue[TddVideoRecord], service: Service,
+    def __init__(self, name: str, aid_queue: Queue[int],
+                 video_record_queue: 'Queue[tuple[int, int, str, VideoViewStat]]', service: Service,
                  update_if_code_error: bool = True, duration_limit_s: Optional[int] = None):
         super().__init__(name)
         self.aid_queue = aid_queue
@@ -38,7 +39,9 @@ class AddVideoRecordJob(Job):
             timer.start()
 
             try:
-                new_video_record = add_video_record_via_video_view(aid, self.service, self.session)
+                video_view = self.service.get_video_view({'aid': aid})
+                added = get_ts_s()
+                commit_video_record_via_video_view(video_view, added, self.session)
             except CodeError as e:
                 if self.update_if_code_error:
                     self.logger.info(f'Code error occurred. Now start update video. aid: {aid}')
@@ -73,8 +76,11 @@ class AddVideoRecordJob(Job):
                 self.logger.error(f'Fail to add video record. aid: {aid}, error: {e}')
                 self.stat.condition['other_exception'] += 1
             else:
-                self.video_record_queue.put(new_video_record)
-                self.logger.debug(f'New video record {new_video_record} added. aid: {aid}')
+                # queue a session-independent snapshot built from the in-memory
+                # video_view -- NOT the committed ORM row, whose attributes expire
+                # on commit and detach once the worker session closes.
+                self.video_record_queue.put(
+                    (added, aid, video_view.bvid.lstrip('BV'), video_view.stat))
                 self.stat.condition['success'] += 1
 
             timer.stop()
