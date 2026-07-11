@@ -871,8 +871,12 @@ class C30PipelineRunner(Thread):
         # create video record queue
         video_record_queue: Queue[TddVideoRecord] = Queue()
 
-        # create jobs and run them with a per-second progress heartbeat
-        job_num = 50
+        # create jobs and run them with a per-second progress heartbeat.
+        # 150 workers (vs C0's 50): this is now C30's primary fetch path over a
+        # much larger aid set (~65k+), and at ~0.25 aids/s/worker that covers a
+        # plain hour within the 40-min cap. Note get_video_view is a single
+        # endpoint, so scaling is sub-linear -- watch the PROGRESS rate.
+        job_num = 150
         job_list = [
             AddVideoRecordJob(
                 f'job_{i}', aid_queue, video_record_queue, service,
@@ -919,17 +923,29 @@ class C30PipelineRunner(Thread):
 
         service = Service(mode='worker')
 
-        # get newlist
+        # Probe the bulk newlist api. It can be "broken" several ways: raise,
+        # return count 0, or (degraded) return an implausibly small count. A
+        # healthy c30 newlist reports hundreds of thousands of archives (~1M,
+        # thousands of pages), so treat anything below this floor as broken and
+        # fall back to the view-only per-aid path -- which also avoids the heavy
+        # update_video + flaky video_tags call.
+        bulk_min_count = 1000
         try:
-            service.get_newlist({'rid': 30, 'pn': 1, 'ps': 50})
-
-            # no error raised, api works fine, go comprehensive process
-            self.process_comprehensive()
+            new_list = service.get_newlist({'rid': 30, 'pn': 1, 'ps': 50})
+            bulk_count = new_list.page.count
         except Exception as e:
             self.logger.error(f'Fail to get newlist, very likely api broken. '
                               f'rid: 30, pn: 1, ps: 50, error: {e}')
+            bulk_count = 0
 
-            # api broken, go simple process
+        if bulk_count >= bulk_min_count:
+            self.logger.info(
+                f'Newlist bulk api healthy (count: {bulk_count}). Go comprehensive process.')
+            self.process_comprehensive()
+        else:
+            self.logger.warning(
+                f'Newlist bulk api empty/broken/degraded (count: {bulk_count}, < {bulk_min_count}). '
+                f'Go simple (view-only per-aid) process.')
             self.process_simple()
 
 
