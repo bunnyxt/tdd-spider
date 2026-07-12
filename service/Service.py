@@ -1,4 +1,5 @@
 import requests
+from requests.adapters import HTTPAdapter
 import json
 import time
 import random
@@ -24,7 +25,7 @@ class Service:
 
     def __init__(
             self, headers: Optional[dict] = None, retry: int = 3, timeout: float = 5.0, colddown_factor: float = 1.0,
-            mode: RequestMode = 'direct'
+            mode: RequestMode = 'direct', pool_maxsize: int = 256
     ):
         # set default config
         self._headers = headers if headers is not None else {}
@@ -32,6 +33,17 @@ class Service:
         self._timeout = timeout
         self._colddown_factor = colddown_factor
         self._mode = mode
+
+        # pooled session for HTTP keep-alive: reuse TCP+TLS connections across
+        # requests instead of a fresh handshake per call (big win when many
+        # workers hammer a single endpoint). One Service is shared by all worker
+        # threads; urllib3's connection pool is thread-safe. pool_maxsize must
+        # cover the concurrent worker count hitting one host, or overflow
+        # connections get opened-then-discarded (no keep-alive benefit).
+        self._session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=32, pool_maxsize=pool_maxsize)
+        self._session.mount('http://', adapter)
+        self._session.mount('https://', adapter)
 
         # load endpoints
         try:
@@ -140,8 +152,8 @@ class Service:
 
             # try to get response
             try:
-                r = requests.get(url, params=params, headers=headers,
-                                 timeout=timeout)
+                r = self._session.get(url, params=params, headers=headers,
+                                      timeout=timeout)
             except requests.exceptions.RequestException as e:
                 logger.debug(
                     f'Fail to get response. '
