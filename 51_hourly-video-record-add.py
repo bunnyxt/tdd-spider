@@ -962,77 +962,6 @@ class RecordsSaveToFileRunner(Thread):
 
 
 # TODO: change to record new
-class RecordsSaveToDbRunner(Thread):
-    def __init__(self, records, time_label):
-        super().__init__()
-        self.records = records
-        self.time_label = time_label
-        self.logger = logging.getLogger('RecordsSaveToDbRunner')
-
-    def run(self):
-        self.logger.info('Now start saving records to db...')
-        session = Session()
-        sql_prefix = 'insert into ' \
-                     'tdd_video_record_hourly(added, bvid, `view`, danmaku, reply, favorite, coin, share, `like`) ' \
-                     'values '
-        sql = sql_prefix
-        for idx, record in enumerate(self.records, 1):
-            sql += '(%d, "%s", %d, %d, %d, %d, %d, %d, %d), ' % (
-                record.added, record.bvid,
-                record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like
-            )
-            if idx % 1000 == 0:
-                sql = sql[:-2]  # remove ending comma and space
-                session.execute(sql)
-                session.commit()
-                sql = sql_prefix
-                if idx % 10000 == 0:
-                    self.logger.info('%d / %d done' % (idx, len(self.records)))
-        if sql != sql_prefix:
-            sql = sql[:-2]  # remove ending comma and space
-            session.execute(sql)
-            session.commit()
-        self.logger.info('%d / %d done' %
-                         (len(self.records), len(self.records)))
-        session.close()
-        self.logger.info('Finish save %d records into db!' % len(self.records))
-
-        # TODO ugly design, should be separated into another class
-        if self.time_label == '23:00':
-            try:
-                session.execute(
-                    'drop table if exists tdd_video_record_hourly_4')
-                self.logger.info('drop table tdd_video_record_hourly_4')
-
-                session.execute(
-                    'rename table tdd_video_record_hourly_3 to tdd_video_record_hourly_4')
-                self.logger.info(
-                    'rename table tdd_video_record_hourly_3 to tdd_video_record_hourly_4')
-
-                session.execute(
-                    'rename table tdd_video_record_hourly_2 to tdd_video_record_hourly_3')
-                self.logger.info(
-                    'rename table tdd_video_record_hourly_2 to tdd_video_record_hourly_3')
-
-                session.execute(
-                    'rename table tdd_video_record_hourly to tdd_video_record_hourly_2')
-                self.logger.info(
-                    'rename table tdd_video_record_hourly to tdd_video_record_hourly_2')
-
-                session.execute(
-                    'create table tdd_video_record_hourly like tdd_video_record_hourly_2')
-                self.logger.info(
-                    'create table tdd_video_record_hourly like tdd_video_record_hourly_2')
-            except Exception as e:
-                session.rollback()
-                self.logger.error(
-                    'Error occur when executing change tdd_video_record_hourly table. Detail: %s' % e)
-            else:
-                self.logger.info(
-                    'Finish change tdd_video_record_hourly table!')
-
-
-# TODO: change to record new
 class RecentRecordsAnalystRunner(Thread):
     def __init__(self, records, time_task, data_folder='data/', recent_file_num=2):
         super().__init__()
@@ -1503,7 +1432,6 @@ def run_hourly_video_record_add(time_task):
     logger.info('Now start downstream data analysis pipelines...')
     data_analysis_pipeline_runner_list = [
         RecordsSaveToFileRunner(records, time_task),
-        RecordsSaveToDbRunner(records, time_label),
         RecentRecordsAnalystRunner(records, time_task),
         RecentActivityFreqUpdateRunner(time_label),
     ]
