@@ -444,7 +444,8 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
         # create jobs and run them with a per-second progress heartbeat
         job_num = 50
         job_list = [
-            AddVideoRecordJob(f'job_{i}', aid_queue, video_record_queue, service)
+            AddVideoRecordJob(f'job_{i}', aid_queue, video_record_queue, service,
+                              duration_limit_s=60 * 40)  # 40 minutes, cap the 04:00 full scan
             for i in range(job_num)
         ]
         pool = JobPool(
