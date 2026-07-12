@@ -68,11 +68,25 @@ class JobPool:
         for key in self.ensure_conditions:
             if key not in merged.condition:
                 merged.condition[key] = 0
+        # overall per-aid stage averages for the whole pool run
+        stage_ms = {k: v for k, v in merged.condition.items() if k.endswith('_ms')}
+        if stage_ms and merged.total_count > 0:
+            stage_str = ', '.join(
+                f'{k[:-3]} {self._fmt_ms(v / merged.total_count)}/aid'
+                for k, v in sorted(stage_ms.items()))
+            self.logger.info(
+                f'STAGE AVG {self.progress_label}: {stage_str} '
+                f'(over {merged.total_count} aids)')
         return merged
+
+    @staticmethod
+    def _fmt_ms(ms: float) -> str:
+        return f'{ms / 1000:.2f}s' if ms >= 1000 else f'{ms:.0f}ms'
 
     def _report_progress(self):
         last_done = 0
         last_ts = time.time()
+        last_stage_ms = {}
         while True:
             # wait() returns True if stopped, False on interval timeout; this
             # keeps a steady cadence and still emits one final line on stop.
@@ -88,12 +102,25 @@ class JobPool:
             else:
                 msg = f'PROGRESS {self.progress_label}: {done} done, {rate:.0f}/s'
             if self.progress_show_conditions:
+                conditions = sum((job.stat.condition for job in self.jobs), Counter())
+                # keys ending in _ms are per-stage duration totals (see
+                # AddVideoRecordJob): show them as per-aid averages over THIS
+                # interval, so a stage getting slower is visible live.
+                stage_ms = {k: v for k, v in conditions.items() if k.endswith('_ms')}
+                delta_done = done - last_done
+                if stage_ms and delta_done > 0:
+                    stage_str = ', '.join(
+                        f'{k[:-3]} {self._fmt_ms((v - last_stage_ms.get(k, 0)) / delta_done)}/aid'
+                        for k, v in sorted(stage_ms.items()))
+                    msg = f'{msg} | {stage_str}'
+                last_stage_ms = stage_ms
                 # live breakdown of the jobs' own condition counters, e.g.
                 # "missing_video_record_get: 11000, update_exception: 1300"
-                conditions = sum((job.stat.condition for job in self.jobs), Counter())
-                if conditions:
+                counts = Counter({k: v for k, v in conditions.items()
+                                  if not k.endswith('_ms')})
+                if counts:
                     cond_str = ', '.join(
-                        f'{k}: {v}' for k, v in conditions.most_common())
+                        f'{k}: {v}' for k, v in counts.most_common())
                     msg = f'{msg} | {cond_str}'
             self.logger.info(msg)
             last_done, last_ts = done, now

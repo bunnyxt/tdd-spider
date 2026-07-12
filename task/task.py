@@ -7,6 +7,7 @@ from core import TddError, RecordNew
 from .error import AlreadyExistError, NotExistError
 
 import logging
+import time
 
 logger = logging.getLogger('task')
 
@@ -19,12 +20,20 @@ __all__ = ['add_video_record_via_video_view',
            'get_video_tags_str']
 
 
-def add_video_record_via_video_view(aid: int, service: Service, session: Session) -> RecordNew:
+def add_video_record_via_video_view(aid: int, service: Service, session: Session,
+                                    out_stat: dict = None) -> RecordNew:
+    # out_stat (optional): filled with per-stage durations for instrumentation,
+    # keys 'http_ms' (view fetch incl retries) and 'db_ms' (insert + commit).
+    # Same pattern as update_video's out_context.
+
     # get video view
+    stage_start = time.perf_counter()
     try:
         video_view = service.get_video_view({'aid': aid})
     except ServiceError as e:
         raise e
+    if out_stat is not None:
+        out_stat['http_ms'] = int((time.perf_counter() - stage_start) * 1000)
 
     added = get_ts_s()
     view = -1 if video_view.stat.view == '--' else video_view.stat.view
@@ -48,7 +57,10 @@ def add_video_record_via_video_view(aid: int, service: Service, session: Session
         vv=video_view.stat.vv,
     )
     # TODO: use new db operation which can raise exception
+    stage_start = time.perf_counter()
     DBOperation.add(new_video_record, session)
+    if out_stat is not None:
+        out_stat['db_ms'] = int((time.perf_counter() - stage_start) * 1000)
 
     # return the lightweight, session-independent record built from video_view
     # (never read back the committed ORM row, which expires on commit / detaches)
