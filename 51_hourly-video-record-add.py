@@ -1,4 +1,4 @@
-from db import Session, DBOperation, TddVideoRecordAbnormalChange, TddVideoRecord
+from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from threading import Thread
 from queue import Queue
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
@@ -10,10 +10,9 @@ import os
 import re
 from serverchan import sc_send_summary, sc_send_critical
 from collections import namedtuple, defaultdict, Counter
-from core import TddError
+from core import TddError, RecordNew
 from service import Service, NewlistArchive, VideoView
 from job import GetNewlistArchiveJob, AddVideoRecordJob, Job, JobPool
-from typing import NamedTuple, Optional
 from task import update_video, add_video, AlreadyExistError
 from timer import Timer
 import logging
@@ -33,25 +32,6 @@ RecordSpeed = namedtuple('RecordSpeed', [
     'start_ts', 'end_ts', 'timespan', 'per_seconds', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
 RecordSpeedRatio = namedtuple('RecordSpeedRatio', [
     'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like', 'inf_magic_num'])
-
-
-# TODO: rename back to Record after all old Record is removed
-class RecordNew(NamedTuple):
-    added: int
-    aid: int
-    bvid: str
-    view: int
-    danmaku: int
-    reply: int
-    favorite: int
-    coin: int
-    share: int
-    like: int
-    dislike: int
-    now_rank: int
-    his_rank: int
-    vt: Optional[int]
-    vv: Optional[int]
 
 
 def get_need_insert_aid_list(time_label, is_tid_30, session):
@@ -459,7 +439,7 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
             aid_queue.put(aid)
 
         # create video record queue
-        video_record_queue: Queue[TddVideoRecord] = Queue()
+        video_record_queue: Queue[RecordNew] = Queue()
 
         # create jobs and run them with a per-second progress heartbeat
         job_num = 50
@@ -478,26 +458,9 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
         self.logger.info('Finish add need insert aid list!')
         self.logger.info(job_stat_merged.get_summary())
 
-        # parse tdd video record to record
+        # forward the fetched records (already lightweight RecordNew)
         while not video_record_queue.empty():
-            video_record = video_record_queue.get()
-            self.record_queue.put(RecordNew(
-                added=video_record.added,
-                aid=video_record.aid,
-                bvid=a2b(video_record.aid),
-                view=video_record.view,
-                danmaku=video_record.danmaku,
-                reply=video_record.reply,
-                favorite=video_record.favorite,
-                coin=video_record.coin,
-                share=video_record.share,
-                like=video_record.like,
-                dislike=video_record.dislike,
-                now_rank=video_record.now_rank,
-                his_rank=video_record.his_rank,
-                vt=video_record.vt,
-                vv=video_record.vv,
-            ))
+            self.record_queue.put(video_record_queue.get())
         self.logger.info(
             f'{self.record_queue.qsize()} record(s) parsed and returned.')
 
@@ -869,7 +832,7 @@ class C30PipelineRunner(Thread):
             aid_queue.put(aid)
 
         # create video record queue
-        video_record_queue: Queue[TddVideoRecord] = Queue()
+        video_record_queue: Queue[RecordNew] = Queue()
 
         # create jobs and run them with a per-second progress heartbeat.
         # 150 workers (vs C0's 50): this is now C30's primary fetch path over a
@@ -894,27 +857,10 @@ class C30PipelineRunner(Thread):
         self.logger.info('Finish add need insert aid list!')
         self.logger.info(job_stat_merged.get_summary())
 
-        # parse tdd video record to record
+        # forward the fetched records (already lightweight RecordNew)
         record_cnt = 0
         while not video_record_queue.empty():
-            video_record = video_record_queue.get()
-            self.record_queue.put(RecordNew(
-                added=video_record.added,
-                aid=video_record.aid,
-                bvid=a2b(video_record.aid),
-                view=video_record.view,
-                danmaku=video_record.danmaku,
-                reply=video_record.reply,
-                favorite=video_record.favorite,
-                coin=video_record.coin,
-                share=video_record.share,
-                like=video_record.like,
-                dislike=video_record.dislike,
-                now_rank=video_record.now_rank,
-                his_rank=video_record.his_rank,
-                vt=video_record.vt,
-                vv=video_record.vv,
-            ))
+            self.record_queue.put(video_record_queue.get())
             record_cnt += 1
         self.logger.info(f'{record_cnt} record(s) parsed and returned.')
 
