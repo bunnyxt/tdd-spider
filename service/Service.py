@@ -1,5 +1,6 @@
 import requests
 from requests.adapters import HTTPAdapter
+from http.cookiejar import DefaultCookiePolicy
 import json
 import time
 import random
@@ -41,6 +42,11 @@ class Service:
         # cover the concurrent worker count hitting one host, or overflow
         # connections get opened-then-discarded (no keep-alive benefit).
         self._session = requests.Session()
+        # these API calls are stateless (no cookies needed). Reject all cookies
+        # so responses never write the shared cookie jar -- that concurrent
+        # write is the one real thread-safety hazard of sharing a Session across
+        # worker threads; without it, the connection pool is thread-safe.
+        self._session.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
         adapter = HTTPAdapter(pool_connections=32, pool_maxsize=pool_maxsize)
         self._session.mount('http://', adapter)
         self._session.mount('https://', adapter)
