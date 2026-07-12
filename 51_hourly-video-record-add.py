@@ -2,12 +2,14 @@ from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from threading import Thread
 from queue import Queue
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
-    str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day, logging_init, fullname, get_current_line_no, format_ts_ms
+    str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day, logging_init, fullname, get_current_line_no, \
+    format_ts_ms, SysStatLogger
 import math
 import time
 import datetime
 import os
 import re
+import sys
 from serverchan import sc_send_summary, sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from core import TddError, RecordNew
@@ -1478,5 +1480,14 @@ if __name__ == '__main__':
     # current time task, only number, ex: 201301311900
     time_task_simple = f'{get_ts_s_str()[:13]}:00'.replace(
         '-', '').replace(' ', '').replace(':', '')
-    logging_init(file_prefix=f'{script_id}_{time_task_simple}')
+
+    # --debug: also write a {prefix}_DEBUG.log with everything (per-aid TIMING,
+    # per-request REQUEST, SYSSTAT samples) for offline bottleneck analysis
+    debug = '--debug' in sys.argv
+    logging_init(file_prefix=f'{script_id}_{time_task_simple}', debug=debug)
+    if debug:
+        logger.info('Debug logging enabled, writing to '
+                    f'{script_id}_{time_task_simple}_DEBUG.log')
+        SysStatLogger().start()  # daemon, samples net/load/mem every 10s
+
     main()

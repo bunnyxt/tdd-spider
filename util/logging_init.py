@@ -24,7 +24,15 @@ class UnescapeFormatter(logging.Formatter):
 def logging_init(format=DEFAULT_LOG_FORMAT,
                  unescape=True,
                  console_handler_enable=True, console_handler_level=logging.INFO,
-                 file_prefix='default', file_handler_levels=(logging.INFO, logging.WARNING)):
+                 file_prefix='default', file_handler_levels=(logging.INFO, logging.WARNING),
+                 debug=False):
+    # debug=True adds a {file_prefix}_DEBUG.log file handler capturing ALL log
+    # records (DEBUG and above, every logger). Opt-in only: the file is large
+    # (per-aid TIMING lines, per-request Service lines, SYSSTAT samples), meant
+    # for offline analysis of a specific run.
+    if debug:
+        file_handler_levels = (logging.DEBUG,) + tuple(file_handler_levels)
+
     handlers = []
 
     if console_handler_enable:

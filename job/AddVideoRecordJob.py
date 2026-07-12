@@ -38,8 +38,10 @@ class AddVideoRecordJob(Job):
             timer = Timer()
             timer.start()
 
+            stage_stat = {}  # per-stage durations, filled by the task (http_ms, db_ms)
             try:
-                new_video_record = add_video_record_via_video_view(aid, self.service, self.session)
+                new_video_record = add_video_record_via_video_view(
+                    aid, self.service, self.session, out_stat=stage_stat)
             except CodeError as e:
                 if self.update_if_code_error:
                     self.logger.info(f'Code error occurred. Now start update video. aid: {aid}')
@@ -79,8 +81,15 @@ class AddVideoRecordJob(Job):
                 self.stat.condition['success'] += 1
 
             timer.stop()
-            self.logger.debug(f'Finish add video record. '
-                              f'aid: {aid}, duration: {format_ts_ms(timer.get_duration_ms())}')
+            # accumulate per-stage durations into the pool stats (JobPool's
+            # heartbeat turns *_ms keys into live per-aid stage averages) and
+            # emit a greppable per-aid line for offline analysis (--debug file)
+            for stage_key, stage_ms in stage_stat.items():
+                self.stat.condition[stage_key] += stage_ms
+            self.logger.debug(
+                f'TIMING aid={aid} '
+                + ' '.join(f'{k[:-3]}={v}ms' for k, v in stage_stat.items())
+                + f' total={timer.get_duration_ms()}ms')
             self.stat.total_count += 1
             self.stat.total_duration_ms += timer.get_duration_ms()
 

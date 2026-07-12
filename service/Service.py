@@ -157,6 +157,7 @@ class Service:
                            * 0.5 + 0.75) * colddown_factor)
 
             # try to get response
+            trial_start = time.perf_counter()
             try:
                 r = self._session.get(url, params=params, headers=headers,
                                       timeout=timeout)
@@ -166,14 +167,20 @@ class Service:
                     f'url: {url}, params: {params}, trial: {trial}, error: {e}'
                 )
                 continue
+            trial_ms = int((time.perf_counter() - trial_start) * 1000)
 
             # check status code
             if r.status_code != 200:
                 logger.debug(
                     f'Fail to get response with status code {r.status_code}. '
-                    f'url: {url}, params: {params}, trial: {trial}'
+                    f'url: {url}, params: {params}, trial: {trial}, duration: {trial_ms}ms'
                 )
                 continue
+
+            # greppable per-request line (REQUEST): trial > 1 means retries
+            # happened; duration is the pure network round-trip of this trial
+            logger.debug(
+                f'REQUEST url: {url}, params: {params}, trial: {trial}, duration: {trial_ms}ms')
 
             # parse response
             if parser is None:
