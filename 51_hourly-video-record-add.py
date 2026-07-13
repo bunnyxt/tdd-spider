@@ -14,7 +14,7 @@ from serverchan import sc_send_summary, sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from core import TddError, RecordNew
 from service import Service, NewlistArchive, VideoView
-from job import GetNewlistArchiveJob, AddVideoRecordJob, Job, JobPool
+from job import GetNewlistArchiveJob, FetchVideoRecordJob, BatchInsertVideoRecordJob, Job, JobPool
 from task import update_video, add_video, AlreadyExistError
 from timer import Timer
 import logging
@@ -52,6 +52,63 @@ def get_need_insert_aid_list(time_label, is_tid_30, session):
             1, is_tid_30, session)
 
     return aid_list
+
+
+def fetch_and_batch_insert_records(
+        need_insert_aid_list: list, record_queue: Queue, *,
+        job_num: int, fetch_label: str, writer_label: str, logger_name: str,
+        duration_limit_s=60 * 40):
+    """
+    Bulk fetch-then-batch-insert pipeline shared by the C0 and C30 (simple)
+    acquisition paths:
+
+        aid_queue -> FetchVideoRecordJob x job_num (HTTP only)
+                  -> fetched_record_queue
+                  -> BatchInsertVideoRecordJob x 1 (multi-row INSERT, one
+                     commit per batch) -> record_queue (downstream)
+
+    A single writer removes the per-record commit/fsync contention that made
+    db cost ~157ms/record when 150+ workers each committed individually.
+    Returns (fetch_stat, writer_stat) merged JobStats.
+    """
+    log = logging.getLogger(logger_name)
+    service = Service(mode='worker')
+
+    # put aid into queue
+    aid_queue: Queue[int] = Queue()
+    for aid in need_insert_aid_list:
+        aid_queue.put(aid)
+
+    # fetched records flow through here to the single batch writer
+    fetched_record_queue: Queue = Queue()
+
+    fetch_pool = JobPool(
+        [FetchVideoRecordJob(f'job_{i}', aid_queue, fetched_record_queue, service,
+                             duration_limit_s=duration_limit_s)
+         for i in range(job_num)],
+        progress_total=len(need_insert_aid_list),
+        progress_label=fetch_label,
+        logger_name=logger_name)
+    writer_pool = JobPool(
+        [BatchInsertVideoRecordJob('writer_0', fetched_record_queue, record_queue)],
+        progress_total=len(need_insert_aid_list),
+        progress_label=writer_label,
+        progress_interval_s=5.0,  # writer progress is less chatty
+        logger_name=logger_name)
+
+    fetch_pool.start()
+    writer_pool.start()
+
+    fetch_stat = fetch_pool.join()
+    # one sentinel per writer, AFTER all fetch workers finished (FIFO
+    # guarantees it arrives behind every record)
+    fetched_record_queue.put(None)
+    writer_stat = writer_pool.join()
+
+    log.info(fetch_stat.get_summary())
+    log.info(writer_stat.get_summary())
+    log.info(f'{writer_stat.total_count} record(s) fetched, batch inserted and returned.')
+    return fetch_stat, writer_stat
 
 
 class CheckC30NeedInsertButNotFoundAidsJob(Job):
@@ -433,39 +490,16 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
         self.logger.info(
             f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
-        service = Service(mode='worker')
-
-        # put aid into queue
-        aid_queue: Queue[int] = Queue()
-        for aid in need_insert_aid_list:
-            aid_queue.put(aid)
-
-        # create video record queue
-        video_record_queue: Queue[RecordNew] = Queue()
-
-        # create jobs and run them with a per-second progress heartbeat
-        job_num = 50
-        job_list = [
-            AddVideoRecordJob(f'job_{i}', aid_queue, video_record_queue, service,
-                              duration_limit_s=60 * 40)  # 40 minutes, cap the 04:00 full scan
-            for i in range(job_num)
-        ]
-        pool = JobPool(
-            job_list,
-            progress_total=len(need_insert_aid_list),
-            progress_label='c0-acquisition',
-            logger_name='C0DataAcquisitionJob')
-        pool.start()
-        job_stat_merged = pool.join()
+        # bulk fetch -> single batch writer -> self.record_queue
+        fetch_and_batch_insert_records(
+            need_insert_aid_list, self.record_queue,
+            job_num=50,
+            fetch_label='c0-acquisition',
+            writer_label='c0-db-writer',
+            logger_name='C0DataAcquisitionJob',
+            duration_limit_s=60 * 40)  # 40 minutes, cap the 04:00 full scan
 
         self.logger.info('Finish add need insert aid list!')
-        self.logger.info(job_stat_merged.get_summary())
-
-        # forward the fetched records (already lightweight RecordNew)
-        while not video_record_queue.empty():
-            self.record_queue.put(video_record_queue.get())
-        self.logger.info(
-            f'{self.record_queue.qsize()} record(s) parsed and returned.')
 
 
 # TODO: refactor using Job, create a class DataAcquisitionJob,
@@ -827,45 +861,19 @@ class C30PipelineRunner(Thread):
         self.logger.info(
             f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
-        service = Service(mode='worker')
-
-        # put aid into queue
-        aid_queue: Queue[int] = Queue()
-        for aid in need_insert_aid_list:
-            aid_queue.put(aid)
-
-        # create video record queue
-        video_record_queue: Queue[RecordNew] = Queue()
-
-        # create jobs and run them with a per-second progress heartbeat.
-        # 150 workers (vs C0's 50): this is now C30's primary fetch path over a
-        # much larger aid set (~65k+), and at ~0.25 aids/s/worker that covers a
-        # plain hour within the 40-min cap. Note get_video_view is a single
+        # bulk fetch -> single batch writer -> self.record_queue.
+        # 150 fetch workers (vs C0's 50): this is C30's primary path over a
+        # much larger aid set (~65k+/163k+). Note get_video_view is a single
         # endpoint, so scaling is sub-linear -- watch the PROGRESS rate.
-        job_num = 150
-        job_list = [
-            AddVideoRecordJob(
-                f'job_{i}', aid_queue, video_record_queue, service,
-                duration_limit_s=60 * 40)  # 40 minutes
-            for i in range(job_num)
-        ]
-        pool = JobPool(
-            job_list,
-            progress_total=len(need_insert_aid_list),
-            progress_label='simple-fetch',
-            logger_name='C30PipelineRunner')
-        pool.start()
-        job_stat_merged = pool.join()
+        fetch_and_batch_insert_records(
+            need_insert_aid_list, self.record_queue,
+            job_num=150,
+            fetch_label='simple-fetch',
+            writer_label='simple-db-writer',
+            logger_name='C30PipelineRunner',
+            duration_limit_s=60 * 40)  # 40 minutes
 
         self.logger.info('Finish add need insert aid list!')
-        self.logger.info(job_stat_merged.get_summary())
-
-        # forward the fetched records (already lightweight RecordNew)
-        record_cnt = 0
-        while not video_record_queue.empty():
-            self.record_queue.put(video_record_queue.get())
-            record_cnt += 1
-        self.logger.info(f'{record_cnt} record(s) parsed and returned.')
 
     def run(self):
         self.logger.info('c30 video pipeline start')

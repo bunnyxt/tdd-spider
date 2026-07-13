@@ -2,7 +2,7 @@ from service import Service, ServiceError, CodeError, VideoView, NewlistArchiveS
 from sqlalchemy.orm.session import Session
 from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord, \
     TddMemberLog, TddSprintVideoRecord
-from util import get_ts_s, a2b, same_pic_url
+from util import get_ts_s, a2b, same_pic_url, null_or_str
 from core import TddError, RecordNew
 from .error import AlreadyExistError, NotExistError
 
@@ -12,6 +12,8 @@ import time
 logger = logging.getLogger('task')
 
 __all__ = ['add_video_record_via_video_view',
+           'fetch_video_record_via_video_view',
+           'commit_video_records_batch',
            'commit_video_record_via_video_view',
            'commit_video_record_via_newlist_archive_stat',
            'add_sprint_video_record_via_video_view',
@@ -20,11 +22,13 @@ __all__ = ['add_video_record_via_video_view',
            'get_video_tags_str']
 
 
-def add_video_record_via_video_view(aid: int, service: Service, session: Session,
-                                    out_stat: dict = None) -> RecordNew:
-    # out_stat (optional): filled with per-stage durations for instrumentation,
-    # keys 'http_ms' (view fetch incl retries) and 'db_ms' (insert + commit).
-    # Same pattern as update_video's out_context.
+def fetch_video_record_via_video_view(aid: int, service: Service,
+                                      out_stat: dict = None) -> RecordNew:
+    # Fetch-only: build a lightweight, session-independent record from the
+    # video view WITHOUT touching the DB. Pair with a writer that persists
+    # records (single-record add_video_record_via_video_view, or the batched
+    # commit_video_records_batch for bulk pipelines).
+    # out_stat (optional): filled with 'http_ms' (view fetch incl retries).
 
     # get video view
     stage_start = time.perf_counter()
@@ -38,32 +42,6 @@ def add_video_record_via_video_view(aid: int, service: Service, session: Session
     added = get_ts_s()
     view = -1 if video_view.stat.view == '--' else video_view.stat.view
 
-    # assemble and persist the record. The ORM object is confined to this
-    # function -- it exists only to run the INSERT and never leaves.
-    new_video_record = TddVideoRecord(
-        aid=aid,
-        added=added,
-        view=view,
-        danmaku=video_view.stat.danmaku,
-        reply=video_view.stat.reply,
-        favorite=video_view.stat.favorite,
-        coin=video_view.stat.coin,
-        share=video_view.stat.share,
-        like=video_view.stat.like,
-        dislike=video_view.stat.dislike,
-        now_rank=video_view.stat.now_rank,
-        his_rank=video_view.stat.his_rank,
-        vt=video_view.stat.vt,
-        vv=video_view.stat.vv,
-    )
-    # TODO: use new db operation which can raise exception
-    stage_start = time.perf_counter()
-    DBOperation.add(new_video_record, session)
-    if out_stat is not None:
-        out_stat['db_ms'] = int((time.perf_counter() - stage_start) * 1000)
-
-    # return the lightweight, session-independent record built from video_view
-    # (never read back the committed ORM row, which expires on commit / detaches)
     return RecordNew(
         added=added,
         aid=aid,
@@ -81,6 +59,71 @@ def add_video_record_via_video_view(aid: int, service: Service, session: Session
         vt=video_view.stat.vt,
         vv=video_view.stat.vv,
     )
+
+
+def add_video_record_via_video_view(aid: int, service: Service, session: Session,
+                                    out_stat: dict = None) -> RecordNew:
+    # Fetch + persist one record. Good for small aid batches; bulk pipelines
+    # should use fetch_video_record_via_video_view + commit_video_records_batch
+    # to avoid per-record commit contention.
+    # out_stat (optional): filled with per-stage durations for instrumentation,
+    # keys 'http_ms' (view fetch incl retries) and 'db_ms' (insert + commit).
+    # Same pattern as update_video's out_context.
+    record = fetch_video_record_via_video_view(aid, service, out_stat=out_stat)
+
+    # persist. The ORM object is confined to this function -- it exists only
+    # to run the INSERT and never leaves.
+    new_video_record = TddVideoRecord(
+        aid=record.aid,
+        added=record.added,
+        view=record.view,
+        danmaku=record.danmaku,
+        reply=record.reply,
+        favorite=record.favorite,
+        coin=record.coin,
+        share=record.share,
+        like=record.like,
+        dislike=record.dislike,
+        now_rank=record.now_rank,
+        his_rank=record.his_rank,
+        vt=record.vt,
+        vv=record.vv,
+    )
+    # TODO: use new db operation which can raise exception
+    stage_start = time.perf_counter()
+    DBOperation.add(new_video_record, session)
+    if out_stat is not None:
+        out_stat['db_ms'] = int((time.perf_counter() - stage_start) * 1000)
+
+    return record
+
+
+def commit_video_records_batch(records: list, session: Session, out_stat: dict = None) -> None:
+    # Persist many RecordNew with ONE multi-row INSERT and ONE commit. This is
+    # the bulk counterpart of add_video_record_via_video_view: profiling showed
+    # per-record commits under high concurrency cost ~157ms/record (p50 17ms,
+    # p90 458ms -- commit/fsync contention), which a single writer with batches
+    # avoids. Raises on failure; the caller owns rollback/retry policy.
+    # out_stat (optional): filled with 'db_ms' (insert + commit).
+    if not records:
+        return
+
+    stage_start = time.perf_counter()
+    sql = 'insert into ' \
+          'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`, ' \
+          'dislike, now_rank, his_rank, vt, vv) ' \
+          'values '
+    sql += ', '.join(
+        '(%d, %d, %d, %d, %d, %d, %d, %d, %d, %s, %s, %s, %s, %s)' % (
+            r.added, r.aid,
+            r.view, r.danmaku, r.reply, r.favorite, r.coin, r.share, r.like,
+            null_or_str(r.dislike), null_or_str(r.now_rank), null_or_str(r.his_rank),
+            null_or_str(r.vt), null_or_str(r.vv))
+        for r in records)
+    session.execute(sql)
+    session.commit()
+    if out_stat is not None:
+        out_stat['db_ms'] = int((time.perf_counter() - stage_start) * 1000)
 
 
 def commit_video_record_via_video_view(video_view: VideoView, added: int, session: Session) -> TddVideoRecord:
