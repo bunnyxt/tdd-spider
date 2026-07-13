@@ -72,7 +72,13 @@ def fetch_and_batch_insert_records(
     Returns (fetch_stat, writer_stat) merged JobStats.
     """
     log = logging.getLogger(logger_name)
-    service = Service(mode='worker')
+    # pool_maxsize MUST cover job_num: every worker hits the same worker host,
+    # and urllib3 caps connections per host at pool_maxsize. Exceed it and the
+    # surplus connections are opened-then-discarded -- a TLS handshake per
+    # request (~5KB out vs ~500B), which would multiply outbound ~10x on a box
+    # whose ~3Mbps upload is already the throughput ceiling. Derive it from
+    # job_num so bumping workers can't silently break keep-alive.
+    service = Service(mode='worker', pool_maxsize=job_num + 32)
 
     # put aid into queue
     aid_queue: Queue[int] = Queue()
@@ -862,12 +868,15 @@ class C30PipelineRunner(Thread):
             f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
         # bulk fetch -> single batch writer -> self.record_queue.
-        # 150 fetch workers (vs C0's 50): this is C30's primary path over a
-        # much larger aid set (~65k+/163k+). Note get_video_view is a single
-        # endpoint, so scaling is sub-linear -- watch the PROGRESS rate.
+        # 250 fetch workers (vs C0's 50): this is C30's primary path over a
+        # much larger aid set (~65k+/163k+). Scaling is sub-linear -- the
+        # trimmed worker is a single endpoint, and the box's ~3Mbps OUTBOUND
+        # (request headers + ACKs, ~500B/fetch) caps throughput somewhere
+        # around 400-600/s regardless of worker count. Watch the PROGRESS rate
+        # and SYSSTAT tx: if tx pins at ~3Mbps, more workers won't help.
         fetch_and_batch_insert_records(
             need_insert_aid_list, self.record_queue,
-            job_num=150,
+            job_num=250,
             fetch_label='simple-fetch',
             writer_label='simple-db-writer',
             logger_name='C30PipelineRunner',
