@@ -30,10 +30,12 @@ def fetch_video_record_via_video_view(aid: int, service: Service,
     # commit_video_records_batch for bulk pipelines).
     # out_stat (optional): filled with 'http_ms' (view fetch incl retries).
 
-    # get video view
+    # get video view (trimmed: the record only needs bvid + stat, and the
+    # trimmed worker response skips the 200KB-2.8MB season/UGC bloat that the
+    # full view payload carries for season/multi-part videos)
     stage_start = time.perf_counter()
     try:
-        video_view = service.get_video_view({'aid': aid})
+        video_view = service.get_video_view_trimmed({'aid': aid})
     except ServiceError as e:
         raise e
     if out_stat is not None:
@@ -180,9 +182,9 @@ def commit_video_record_via_newlist_archive_stat(stat: NewlistArchiveStat, added
 
 
 def add_sprint_video_record_via_video_view(aid: int, service: Service, session: Session) -> TddSprintVideoRecord:
-    # get video view
+    # get video view (trimmed: sprint record is stat-only too)
     try:
-        video_view = service.get_video_view({'aid': aid})
+        video_view = service.get_video_view_trimmed({'aid': aid})
     except ServiceError as e:
         raise e
 

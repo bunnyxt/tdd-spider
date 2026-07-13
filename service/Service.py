@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional, Callable, Literal
 from .error import ResponseError, FormatError, CodeError
 from .response import \
-    VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, \
+    VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, VideoViewTrimmed, \
     VideoTag, VideoTags, \
     MemberCard, \
     MemberRelation, \
@@ -403,6 +403,104 @@ class Service:
             attribute=response['data'].get('attribute', None),
             forward=response['data'].get('forward', None),
             staff=staff
+        )
+
+    def get_video_view_trimmed(
+            self, params: Optional[dict] = None, headers: Optional[dict] = None,
+            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
+            mode: Optional[RequestMode] = None
+    ) -> VideoViewTrimmed:
+        """
+        params: { aid: int }
+        mode: 'worker' only
+
+        Stat-only variant of get_video_view for record jobs: hits the trimmed
+        video_view worker (service/workers/video_view/), whose ~250B response
+        avoids shipping the 200KB-2.8MB season/UGC bloat of the full view
+        payload. Worker-only: no bilibili API serves the trimmed contract
+        (endpoints.json marks direct as invalid://...); callers needing direct
+        mode should use get_video_view, whose response is a superset. The full
+        view response would parse here too, which is what makes the full-view
+        worker URL a valid drop-in workers entry before the trimmed Lambda is
+        deployed.
+        """
+        # config mode
+        mode = mode if mode is not None else self._mode
+
+        # validate params
+        if mode != 'worker':
+            logger.critical(f'Endpoint "get_video_view_trimmed" is worker-only '
+                            f'(no direct API serves the trimmed contract), got mode: {mode}. '
+                            f'Use get_video_view for direct mode.')
+            exit(1)
+
+        # get endpoint url (worker-only, no direct fallback)
+        try:
+            url = random.choice(
+                self.endpoints['get_video_view_trimmed']['workers'])
+        except KeyError:
+            logger.critical('Endpoint "get_video_view_trimmed" not found.')
+            exit(1)
+        except IndexError:
+            logger.critical('Endpoint "get_video_view_trimmed" has no worker configured.')
+            exit(1)
+
+        # get response
+        response = self._get(url, params=params, headers=headers,
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor)
+        if response is None:
+            raise ResponseError('video_view_trimmed', params)
+
+        # validate format
+
+        # response should contain keys
+        for key in ['code', 'message', 'ttl']:
+            if key not in response.keys():
+                raise FormatError('video_view_trimmed', params, response,
+                                  f'Response should contain key {key}.')
+        # response code should be 0
+        if response['code'] != 0:
+            raise CodeError('video_view_trimmed', params,
+                            response, response['code'])
+        # response data should be a dict
+        if type(response['data']) != dict:
+            raise FormatError('video_view_trimmed', params, response,
+                              'Response data should be a dict.')
+        # data should contain keys
+        for key in ['bvid', 'aid', 'stat']:
+            if key not in response['data'].keys():
+                raise FormatError('video_view_trimmed', params, response,
+                                  f'Response data should contain key {key}.')
+        # response data stat should be a dict
+        if type(response['data']['stat']) != dict:
+            raise FormatError('video_view_trimmed', params, response,
+                              'Response data stat should be a dict.')
+        # data stat should contain keys
+        for key in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
+                    'dislike']:
+            if key not in response['data']['stat'].keys():
+                raise FormatError('video_view_trimmed', params, response,
+                                  f'Response data stat should contain key {key}.')
+
+        # assemble data
+        return VideoViewTrimmed(
+            bvid=response['data']['bvid'],
+            aid=response['data']['aid'],
+            stat=VideoViewStat(
+                aid=response['data']['stat']['aid'],
+                view=response['data']['stat']['view'],
+                danmaku=response['data']['stat']['danmaku'],
+                reply=response['data']['stat']['reply'],
+                favorite=response['data']['stat']['favorite'],
+                coin=response['data']['stat']['coin'],
+                share=response['data']['stat']['share'],
+                now_rank=response['data']['stat']['now_rank'],
+                his_rank=response['data']['stat']['his_rank'],
+                like=response['data']['stat']['like'],
+                dislike=response['data']['stat']['dislike'],
+                vt=response['data']['stat'].get('vt', None),
+                vv=response['data']['stat'].get('vv', None),
+            ),
         )
 
     def get_video_tags(
