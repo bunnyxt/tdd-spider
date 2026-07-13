@@ -412,31 +412,37 @@ class Service:
     ) -> VideoViewTrimmed:
         """
         params: { aid: int }
-        mode: 'direct' | 'worker'
+        mode: 'worker' only
 
-        Stat-only variant of get_video_view for record jobs. In worker mode it
-        hits the trimmed video_view worker (service/workers/video_view/), whose
-        ~250B response avoids shipping the 200KB-2.8MB season/UGC bloat of the
-        full view payload. The trimmed response is a strict subset of the full
-        one, so this parser also accepts the full API response (direct mode
-        falls back to the regular view endpoint).
+        Stat-only variant of get_video_view for record jobs: hits the trimmed
+        video_view worker (service/workers/video_view/), whose ~250B response
+        avoids shipping the 200KB-2.8MB season/UGC bloat of the full view
+        payload. Worker-only: no bilibili API serves the trimmed contract
+        (endpoints.json marks direct as invalid://...); callers needing direct
+        mode should use get_video_view, whose response is a superset. The full
+        view response would parse here too, which is what makes the full-view
+        worker URL a valid drop-in workers entry before the trimmed Lambda is
+        deployed.
         """
         # config mode
         mode = mode if mode is not None else self._mode
 
         # validate params
-        if mode not in ['direct', 'worker']:
-            logger.critical(f'Invalid request mode: {mode}.')
+        if mode != 'worker':
+            logger.critical(f'Endpoint "get_video_view_trimmed" is worker-only '
+                            f'(no direct API serves the trimmed contract), got mode: {mode}. '
+                            f'Use get_video_view for direct mode.')
             exit(1)
 
-        # get endpoint url
+        # get endpoint url (worker-only, no direct fallback)
         try:
-            url = self.endpoints['get_video_view_trimmed']['direct']
-            if mode == 'worker':
-                url = random.choice(
-                    self.endpoints['get_video_view_trimmed']['workers'])
+            url = random.choice(
+                self.endpoints['get_video_view_trimmed']['workers'])
         except KeyError:
             logger.critical('Endpoint "get_video_view_trimmed" not found.')
+            exit(1)
+        except IndexError:
+            logger.critical('Endpoint "get_video_view_trimmed" has no worker configured.')
             exit(1)
 
         # get response

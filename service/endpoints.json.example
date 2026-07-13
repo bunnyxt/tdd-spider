@@ -5,7 +5,7 @@
     ]
   },
   "get_video_view_trimmed": {
-    "direct": "http://api.bilibili.com/x/web-interface/view",
+    "direct": "invalid://api.bilibili.com/x/web-interface/view",
     "workers": [
     ]
   },
