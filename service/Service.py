@@ -26,7 +26,8 @@ class Service:
 
     def __init__(
             self, headers: Optional[dict] = None, retry: int = 3, timeout: float = 5.0, colddown_factor: float = 1.0,
-            mode: RequestMode = 'direct', pool_maxsize: int = 256, deadline: float = 10.0
+            mode: RequestMode = 'direct', pool_maxsize: int = 256, deadline: float = 10.0,
+            min_throughput_bps: float = 80_000.0
     ):
         # set default config
         self._headers = headers if headers is not None else {}
@@ -37,6 +38,12 @@ class Service:
         # total wall-clock budget per trial, see _get() for why this differs
         # from timeout
         self._deadline = deadline
+        # some responses (season/multi-part videos) run 200KB-2.8MB against a
+        # typical few-KB payload; production measured p10 throughput of 94.5
+        # KB/s on those, so a flat deadline kills healthy large transfers
+        # (measured: 1974/1975 deadline hits were >200KB, not stalls). Deadline
+        # scales with Content-Length at this floor, see _get()
+        self._min_throughput_bps = min_throughput_bps
 
         # pooled session for HTTP keep-alive: reuse TCP+TLS connections across
         # requests instead of a fresh handshake per call (big win when many
@@ -184,12 +191,26 @@ class Service:
             # Enforce a real wall-clock budget across the whole download and
             # abandon (close) the connection the moment it's blown, so the
             # thread is freed instead of stuck waiting on a slow socket.
+            #
+            # A flat budget isn't enough though: some responses (season /
+            # multi-part videos) run 200KB-2.8MB against a typical few-KB
+            # payload, and legitimately need more wall-clock time under
+            # concurrent load. Scale the budget by the declared response size
+            # so those aren't killed mid-transfer.
+            trial_deadline = deadline
+            content_length = r.headers.get('Content-Length')
+            if content_length is not None:
+                try:
+                    trial_deadline = max(deadline, int(content_length) / self._min_throughput_bps)
+                except ValueError:
+                    pass
+
             body = bytearray()
             deadline_exceeded = False
             try:
                 for chunk in r.iter_content(chunk_size=65536):
                     body += chunk
-                    if time.perf_counter() - trial_start > deadline:
+                    if time.perf_counter() - trial_start > trial_deadline:
                         deadline_exceeded = True
                         break
             except requests.exceptions.RequestException as e:
@@ -204,7 +225,8 @@ class Service:
                 trial_ms = int((time.perf_counter() - trial_start) * 1000)
                 logger.debug(
                     f'Deadline exceeded while downloading response body. '
-                    f'url: {url}, params: {params}, trial: {trial}, deadline: {deadline}s, duration: {trial_ms}ms'
+                    f'url: {url}, params: {params}, trial: {trial}, deadline: {trial_deadline:.1f}s, '
+                    f'content_length: {content_length}, duration: {trial_ms}ms'
                 )
                 continue
             # populate requests' internal cache with what we already
