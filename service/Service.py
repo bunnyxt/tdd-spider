@@ -26,7 +26,7 @@ class Service:
 
     def __init__(
             self, headers: Optional[dict] = None, retry: int = 3, timeout: float = 5.0, colddown_factor: float = 1.0,
-            mode: RequestMode = 'direct', pool_maxsize: int = 256
+            mode: RequestMode = 'direct', pool_maxsize: int = 256, deadline: float = 10.0
     ):
         # set default config
         self._headers = headers if headers is not None else {}
@@ -34,6 +34,9 @@ class Service:
         self._timeout = timeout
         self._colddown_factor = colddown_factor
         self._mode = mode
+        # total wall-clock budget per trial, see _get() for why this differs
+        # from timeout
+        self._deadline = deadline
 
         # pooled session for HTTP keep-alive: reuse TCP+TLS connections across
         # requests instead of a fresh handshake per call (big win when many
@@ -126,11 +129,15 @@ class Service:
     def get_default_mode(self) -> RequestMode:
         return self._mode
 
+    def get_default_deadline(self) -> float:
+        return self._deadline
+
     # default config getters end
 
     def _get(
             self, url: str, params: Optional[dict] = None, headers: Optional[dict] = None,
             retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
+            deadline: Optional[float] = None,
             parser: Optional[Callable[[str], Optional[dict]]] = None
     ) -> Optional[dict]:
         # assemble headers
@@ -146,6 +153,7 @@ class Service:
         retry = retry if retry is not None else self._retry
         timeout = timeout if timeout is not None else self._timeout
         colddown_factor = colddown_factor if colddown_factor is not None else self._colddown_factor
+        deadline = deadline if deadline is not None else self._deadline
 
         # go request
         response = None
@@ -160,13 +168,51 @@ class Service:
             trial_start = time.perf_counter()
             try:
                 r = self._session.get(url, params=params, headers=headers,
-                                      timeout=timeout)
+                                      timeout=timeout, stream=True)
             except requests.exceptions.RequestException as e:
                 logger.debug(
                     f'Fail to get response. '
                     f'url: {url}, params: {params}, trial: {trial}, error: {e}'
                 )
                 continue
+
+            # `timeout` above only bounds the gap between individual socket
+            # reads. A response that trickles bytes slower than that gap but
+            # never actually stalls sails right through it -- observed in
+            # production as 100+ second single-trial requests against the
+            # worker Lambda, each one parking a fetch thread the whole time.
+            # Enforce a real wall-clock budget across the whole download and
+            # abandon (close) the connection the moment it's blown, so the
+            # thread is freed instead of stuck waiting on a slow socket.
+            body = bytearray()
+            deadline_exceeded = False
+            try:
+                for chunk in r.iter_content(chunk_size=65536):
+                    body += chunk
+                    if time.perf_counter() - trial_start > deadline:
+                        deadline_exceeded = True
+                        break
+            except requests.exceptions.RequestException as e:
+                r.close()
+                logger.debug(
+                    f'Fail to read response body. '
+                    f'url: {url}, params: {params}, trial: {trial}, error: {e}'
+                )
+                continue
+            if deadline_exceeded:
+                r.close()
+                trial_ms = int((time.perf_counter() - trial_start) * 1000)
+                logger.debug(
+                    f'Deadline exceeded while downloading response body. '
+                    f'url: {url}, params: {params}, trial: {trial}, deadline: {deadline}s, duration: {trial_ms}ms'
+                )
+                continue
+            # populate requests' internal cache with what we already
+            # downloaded, so r.json()/r.text below read it directly instead
+            # of trying to re-read the now-exhausted stream
+            r._content = bytes(body)
+            r._content_consumed = True
+
             trial_ms = int((time.perf_counter() - trial_start) * 1000)
 
             # check status code
