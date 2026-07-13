@@ -36,6 +36,12 @@ class BatchInsertVideoRecordJob(Job):
         self.poll_timeout_s = poll_timeout_s
         self.session = Session()
 
+    def _rollback_quietly(self):
+        try:
+            self.session.rollback()
+        except Exception:
+            pass
+
     def _flush(self, batch: list):
         if not batch:
             return
@@ -43,14 +49,23 @@ class BatchInsertVideoRecordJob(Job):
         try:
             commit_video_records_batch(batch, self.session)
         except Exception as e:
-            # Recover the session so a failed batch does not leave it in an
-            # invalid-transaction state; records are still forwarded downstream.
+            # Recover the session, then retry ONCE: a transient DB blip would
+            # otherwise lose the whole batch from tdd_video_record (the batch
+            # is one statement in one transaction, so the failed attempt is
+            # rolled back atomically -- no partial insert, no duplication).
+            self._rollback_quietly()
+            self.logger.warning(
+                f'Batch insert failed, retrying once. size: {len(batch)}, error: {e}')
             try:
-                self.session.rollback()
-            except Exception:
-                pass
-            self.logger.error(f'Fail to batch insert {len(batch)} video record(s). error: {e}')
-            self.stat.condition['batch_insert_fail'] += 1
+                commit_video_records_batch(batch, self.session)
+            except Exception as e2:
+                self._rollback_quietly()
+                self.logger.error(
+                    f'Fail to batch insert {len(batch)} video record(s) after retry. '
+                    f'aids: {batch[0].aid}..{batch[-1].aid}, error: {e2}')
+                self.stat.condition['batch_insert_fail'] += 1
+            else:
+                self.stat.condition['batch_insert_retry_ok'] += 1
         else:
             self.stat.condition['batch_insert'] += 1
         flush_ms = int((time.perf_counter() - flush_start) * 1000)
