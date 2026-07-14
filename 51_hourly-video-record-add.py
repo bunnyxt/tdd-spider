@@ -55,6 +55,13 @@ def get_need_insert_aid_list(time_label, is_tid_30, session):
     return aid_list
 
 
+def _stamp(time_task: str) -> str:
+    # '2026-07-14 08:00' -> '2026-07-14_0800', for filenames: keeps the date so
+    # runs on different days never append into the same recovery file, and
+    # avoids the space/colon of the time_task-named csv.
+    return time_task.replace(' ', '_').replace(':', '')
+
+
 def fetch_and_batch_insert_records(
         need_insert_aid_list: list, record_queue: Queue, *,
         job_num: int, fetch_label: str, writer_label: str, logger_name: str,
@@ -485,15 +492,19 @@ class C30NoNeedInsertAidsChecker(Thread):
 
 
 class DataAcquisitionJob(Job):
-    def __init__(self, name: str, time_label: str, record_queue: Queue[RecordNew]):
+    def __init__(self, name: str, time_task: str, record_queue: Queue[RecordNew]):
         super().__init__(name)
-        self.time_label = time_label
+        # time_task is the full stamp ('2026-07-14 08:00'); time_label is just
+        # the hour ('08:00'). Recovery files need the full stamp so runs on
+        # different days don't append into the same file.
+        self.time_task = time_task
+        self.time_label = time_task[-5:]
         self.record_queue = record_queue
 
 
 class C0DataAcquisitionJob(DataAcquisitionJob):
-    def __init__(self, time_label: str, record_queue: Queue[RecordNew]):
-        super().__init__('c0', time_label, record_queue)
+    def __init__(self, time_task: str, record_queue: Queue[RecordNew]):
+        super().__init__('c0', time_task, record_queue)
 
     def process(self):
         # get need insert aid list
@@ -512,7 +523,7 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
             writer_label='c0-db-writer',
             logger_name='C0DataAcquisitionJob',
             duration_limit_s=60 * 40,  # 40 minutes, cap the 04:00 full scan
-            recovery_path=f'data/record_recovery_c0_{self.time_label.replace(":", "")}.csv')
+            recovery_path=f'data/record_recovery_c0_{_stamp(self.time_task)}.csv')
 
         self.logger.info('Finish add need insert aid list!')
 
@@ -520,9 +531,10 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
 # TODO: refactor using Job, create a class DataAcquisitionJob,
 #  then derive from it to create C30DataAcquisitionJob and C0DataAcquisitionJob
 class C30PipelineRunner(Thread):
-    def __init__(self, time_label, record_queue):
+    def __init__(self, time_task, record_queue):
         super().__init__()
-        self.time_label = time_label
+        self.time_task = time_task  # full stamp, ex: '2026-07-14 08:00'
+        self.time_label = time_task[-5:]  # hour only, ex: '08:00'
         self.record_queue = record_queue
         self.logger = logging.getLogger('C30PipelineRunner')
 
@@ -890,7 +902,7 @@ class C30PipelineRunner(Thread):
             writer_label='simple-db-writer',
             logger_name='C30PipelineRunner',
             duration_limit_s=60 * 40,  # 40 minutes
-            recovery_path=f'data/record_recovery_c30_{self.time_label.replace(":", "")}.csv')
+            recovery_path=f'data/record_recovery_c30_{_stamp(self.time_task)}.csv')
 
         self.logger.info('Finish add need insert aid list!')
 
@@ -1416,8 +1428,8 @@ def run_hourly_video_record_add(time_task):
 
     records_queue: Queue[RecordNew] = Queue()
 
-    c30_runner = C30PipelineRunner(time_label, records_queue)
-    c0_runner = C0DataAcquisitionJob(time_label, records_queue)
+    c30_runner = C30PipelineRunner(time_task, records_queue)
+    c0_runner = C0DataAcquisitionJob(time_task, records_queue)
 
     c30_runner.start()
     c0_runner.start()
