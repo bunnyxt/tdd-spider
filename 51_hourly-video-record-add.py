@@ -121,6 +121,10 @@ def fetch_and_batch_insert_records(
     # it stays tiny (~465 aids across a 1M-aid full scan).
     code_error_aid_queue: Queue = Queue()
 
+    # ensure_conditions: seed the keys that matter with 0 so they ALWAYS show in
+    # the summary. A Counter omits a key it never saw, so without this you cannot
+    # tell "nothing failed" from "the counter does not exist" -- exactly the
+    # distinction you need when scanning a log for data loss.
     fetch_pool = JobPool(
         [FetchVideoRecordJob(f'job_{i}', aid_queue, fetched_record_queue, service,
                              code_error_aid_queue=code_error_aid_queue,
@@ -128,6 +132,8 @@ def fetch_and_batch_insert_records(
          for i in range(job_num)],
         progress_total=len(need_insert_aid_list),
         progress_label=fetch_label,
+        ensure_conditions=['success', 'code_error', 'other_exception',
+                           'record_dropped_queue_full', 'duration_limit_reached'],
         logger_name=logger_name)
     writer_pool = JobPool(
         [BatchInsertVideoRecordJob('writer_0', fetched_record_queue, record_queue,
@@ -135,6 +141,8 @@ def fetch_and_batch_insert_records(
         progress_total=len(need_insert_aid_list),
         progress_label=writer_label,
         progress_interval_s=5.0,  # writer progress is less chatty
+        ensure_conditions=['batch_insert', 'batch_insert_split', 'batch_insert_split_ok',
+                           'single_insert_retry_ok', 'batch_insert_fail'],
         logger_name=logger_name)
     # bounded DB concurrency: update_job_num connections, not job_num
     update_pool = JobPool(
@@ -144,6 +152,7 @@ def fetch_and_batch_insert_records(
         progress_total=None,  # total is unknown until fetching is done
         progress_label=update_label,
         progress_interval_s=5.0,
+        ensure_conditions=['update_exception', 'duration_limit_reached'],
         logger_name=logger_name)
 
     fetch_pool.start()
@@ -159,9 +168,11 @@ def fetch_and_batch_insert_records(
     writer_stat = writer_pool.join()
     update_stat = update_pool.join()
 
-    log.info(fetch_stat.get_summary())
-    log.info(writer_stat.get_summary())
-    log.info(update_stat.get_summary())
+    # label each summary: a run emits three of these and they are otherwise
+    # indistinguishable in the log
+    log.info(fetch_stat.get_summary(fetch_label))
+    log.info(writer_stat.get_summary(writer_label))
+    log.info(update_stat.get_summary(update_label))
     log.info(f'{writer_stat.total_count} record(s) fetched, batch inserted and returned.')
     log.info(f'{update_stat.total_count} code-error video(s) updated.')
     return fetch_stat, writer_stat, update_stat

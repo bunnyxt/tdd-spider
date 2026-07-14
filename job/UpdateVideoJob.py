@@ -82,7 +82,7 @@ class UpdateVideoJob(Job):
                 except Exception:
                     pass
                 self.logger.error(f'Fail to update video info. aid: {aid}, error: {e}')
-                self.stat.condition['exception'] += 1
+                self.stat.condition['update_exception'] += 1
             else:
                 for log in tdd_video_logs:
                     self.logger.info(f'Update video info. aid: {aid}, '

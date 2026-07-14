@@ -21,10 +21,14 @@ class JobStat:
             return 0
         return self.total_duration_ms // self.total_count
 
-    def get_summary(self, separator=', ') -> str:
+    def get_summary(self, label: Optional[str] = None, separator=', ') -> str:
+        # label identifies WHICH pool this is (matching its PROGRESS / STAGE AVG
+        # lines). A run emits several of these -- fetch, db-writer, video-update
+        # -- and without it they are indistinguishable in the log.
+        header = '## job stat summary' if label is None else f'## job stat summary [{label}]'
         time_str = f'total count: {self.total_count}, average duration: {format_ts_ms(self.get_avg_duration_ms())}'
         condition_str = separator.join([f'- {key}: {value}' for key, value in self.condition.items()])
-        return separator.join(['## job stat summary', time_str, '### conditions', condition_str])
+        return separator.join([header, time_str, '### conditions', condition_str])
 
     def __add__(self, other):
         new_job_stat = JobStat()

@@ -64,7 +64,12 @@ class FetchVideoRecordJob(Job):
 
         while True:
             if self.duration_limit_due_ts_s is not None and get_ts_s() >= self.duration_limit_due_ts_s:
-                self.logger.info(f'Duration limit reached. Now exit.')
+                self.logger.info(f'Duration limit reached. Now exit. '
+                                 f'{self.aid_queue.qsize()} aid(s) left unfetched.')
+                # surface the cut in the pool summary, not just in a log line:
+                # on the 04:00 full scan this is THE number that says whether we
+                # finished inside the 40-minute window
+                self.stat.condition['duration_limit_reached'] += 1
                 break
 
             # get_nowait instead of empty()+get(): the latter races when several
