@@ -88,7 +88,7 @@ class FetchVideoRecordJob(Job):
                 # is DB work and must not happen on a fetch worker
                 if self.code_error_aid_queue is not None:
                     self.code_error_aid_queue.put(aid)
-                    self.logger.debug(
+                    self.logger.info(
                         f'Code error, queued for video update. aid: {aid}, error: {e}')
                 else:
                     self.logger.error(f'Fail to fetch video record. aid: {aid}, error: {e}')
