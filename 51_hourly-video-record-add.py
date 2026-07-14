@@ -56,10 +56,10 @@ def get_need_insert_aid_list(time_label, is_tid_30, session):
 
 
 def _stamp(time_task: str) -> str:
-    # '2026-07-14 08:00' -> '2026-07-14_0800', for filenames: keeps the date so
-    # runs on different days never append into the same recovery file, and
-    # avoids the space/colon of the time_task-named csv.
-    return time_task.replace(' ', '_').replace(':', '')
+    # '2026-07-14 08:00' -> '202607140800'. Same convention as the log files
+    # (51_202607140800_INFO.log): digits only, no '-', ' ' or ':'. Keeps the
+    # date so runs on different days never append into the same file.
+    return time_task.replace('-', '').replace(' ', '').replace(':', '')
 
 
 def fetch_and_batch_insert_records(

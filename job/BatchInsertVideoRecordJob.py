@@ -46,14 +46,18 @@ class BatchInsertVideoRecordJob(Job):
 
     def __init__(self, name: str, record_queue: 'Queue[Optional[RecordNew]]',
                  downstream_queue: Queue, batch_size: int = 1000, poll_timeout_s: float = 1.0,
-                 recovery_path: Optional[str] = None):
+                 recovery_path: Optional[str] = None, single_retry: int = 3,
+                 retry_backoff_s: float = 1.0):
         super().__init__(name)
         self.record_queue = record_queue
         self.downstream_queue = downstream_queue
         self.batch_size = batch_size
         self.poll_timeout_s = poll_timeout_s
         self.recovery_path = recovery_path
+        self.single_retry = single_retry
+        self.retry_backoff_s = retry_backoff_s
         self.session = Session()
+        self._last_error = ''
 
     def _rollback_quietly(self):
         try:
@@ -105,12 +109,27 @@ class BatchInsertVideoRecordJob(Job):
                 self.stat.condition['batch_insert_split_ok'] += 1
             return len(batch)
 
-        # a single record that still fails is genuinely unpersistable (bad row,
-        # or the DB is down) -- park it rather than spin
+        # Down to a single row. Splitting can't isolate anything further, so
+        # this is where we retry in time rather than in size: back off and try
+        # again, in case the failure was transient (a DB blip, a lock, a
+        # timeout under load) rather than a genuinely bad row. Only after these
+        # all fail is the record parked in the recovery file.
         if len(batch) == 1:
+            for attempt in range(1, self.single_retry + 1):
+                time.sleep(self.retry_backoff_s * attempt)  # 1s, 2s, 3s
+                if self._insert(batch):
+                    self.logger.info(
+                        f'Insert succeeded on retry {attempt}/{self.single_retry}. '
+                        f'aid: {batch[0].aid}')
+                    self.stat.condition['single_insert_retry_ok'] += 1
+                    return 1
+                self.logger.warning(
+                    f'Insert retry {attempt}/{self.single_retry} failed. '
+                    f'aid: {batch[0].aid}, error: {self._last_error}')
+
             self.logger.error(
-                f'Fail to insert video record after splitting to a single row. '
-                f'aid: {batch[0].aid}, error: {self._last_error}')
+                f'Fail to insert video record after {self.single_retry} retries. '
+                f'Now save to recovery file. aid: {batch[0].aid}, error: {self._last_error}')
             self.stat.condition['batch_insert_fail'] += 1
             self._to_recovery_file(batch, self._last_error)
             return 0
