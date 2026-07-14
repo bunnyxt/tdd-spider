@@ -15,7 +15,7 @@ from collections import namedtuple, defaultdict, Counter
 from typing import Optional
 from core import TddError, RecordNew
 from service import Service, NewlistArchive, VideoView
-from job import GetNewlistArchiveJob, FetchVideoRecordJob, BatchInsertVideoRecordJob, Job, JobPool
+from job import GetNewlistArchiveJob, FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool
 from task import update_video, add_video, AlreadyExistError
 from timer import Timer
 import logging
@@ -67,19 +67,33 @@ def fetch_and_batch_insert_records(
         job_num: int, fetch_label: str, writer_label: str, logger_name: str,
         duration_limit_s=60 * 40,
         fetched_queue_maxsize: int = 20000,
-        recovery_path: Optional[str] = None):
+        recovery_path: Optional[str] = None,
+        update_job_num: int = 10, update_label: str = 'video-update'):
     """
     Bulk fetch-then-batch-insert pipeline shared by the C0 and C30 (simple)
     acquisition paths:
 
-        aid_queue -> FetchVideoRecordJob x job_num (HTTP only)
-                  -> fetched_record_queue
-                  -> BatchInsertVideoRecordJob x 1 (multi-row INSERT, one
-                     commit per batch) -> record_queue (downstream)
+        aid_queue -> FetchVideoRecordJob x job_num (HTTP only, ZERO DB)
+                  |
+                  +-- ok        -> fetched_record_queue
+                  |                 -> BatchInsertVideoRecordJob x 1
+                  |                    (multi-row INSERT, one commit per batch)
+                  |                    -> record_queue (downstream)
+                  |
+                  +-- CodeError -> code_error_aid_queue
+                                    -> UpdateVideoJob x update_job_num (DB)
 
     A single writer removes the per-record commit/fsync contention that made
     db cost ~157ms/record when 150+ workers each committed individually.
-    Returns (fetch_stat, writer_stat) merged JobStats.
+
+    The update pool runs CONCURRENTLY with the fetch pool (so it does not extend
+    the run) and carries the SAME duration_limit_s, so the whole upstream stage
+    is hard-capped. Refreshing tdd_video.code for a dead aid is what drops it out
+    of future need_insert lists, so it is load-bearing -- but it is DB work, and
+    doing it inline on a fetch worker let all 250 fetchers hit the DB at once,
+    which deadlocked the 2026-07-15 04:00 full scan.
+
+    Returns (fetch_stat, writer_stat, update_stat) merged JobStats.
     """
     log = logging.getLogger(logger_name)
     # pool_maxsize MUST cover job_num: every worker hits the same worker host,
@@ -102,8 +116,14 @@ def fetch_and_batch_insert_records(
     # in the PROGRESS rate instead of a silent memory climb.
     fetched_record_queue: Queue = Queue(maxsize=fetched_queue_maxsize)
 
+    # CodeError aids (deleted / hidden / -403) go here for the update pool.
+    # Unbounded on purpose: it must never exert backpressure on a fetcher, and
+    # it stays tiny (~465 aids across a 1M-aid full scan).
+    code_error_aid_queue: Queue = Queue()
+
     fetch_pool = JobPool(
         [FetchVideoRecordJob(f'job_{i}', aid_queue, fetched_record_queue, service,
+                             code_error_aid_queue=code_error_aid_queue,
                              duration_limit_s=duration_limit_s)
          for i in range(job_num)],
         progress_total=len(need_insert_aid_list),
@@ -116,20 +136,35 @@ def fetch_and_batch_insert_records(
         progress_label=writer_label,
         progress_interval_s=5.0,  # writer progress is less chatty
         logger_name=logger_name)
+    # bounded DB concurrency: update_job_num connections, not job_num
+    update_pool = JobPool(
+        [UpdateVideoJob(f'updater_{i}', code_error_aid_queue, service,
+                        duration_limit_s=duration_limit_s)
+         for i in range(update_job_num)],
+        progress_total=None,  # total is unknown until fetching is done
+        progress_label=update_label,
+        progress_interval_s=5.0,
+        logger_name=logger_name)
 
     fetch_pool.start()
     writer_pool.start()
+    update_pool.start()
 
     fetch_stat = fetch_pool.join()
-    # one sentinel per writer, AFTER all fetch workers finished (FIFO
-    # guarantees it arrives behind every record)
+    # one sentinel per consumer, AFTER all fetch workers finished (FIFO
+    # guarantees each sentinel arrives behind every item that worker could take)
     fetched_record_queue.put(None)
+    for _ in range(update_job_num):
+        code_error_aid_queue.put(None)
     writer_stat = writer_pool.join()
+    update_stat = update_pool.join()
 
     log.info(fetch_stat.get_summary())
     log.info(writer_stat.get_summary())
+    log.info(update_stat.get_summary())
     log.info(f'{writer_stat.total_count} record(s) fetched, batch inserted and returned.')
-    return fetch_stat, writer_stat
+    log.info(f'{update_stat.total_count} code-error video(s) updated.')
+    return fetch_stat, writer_stat, update_stat
 
 
 class CheckC30NeedInsertButNotFoundAidsJob(Job):
@@ -523,7 +558,8 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
             writer_label='c0-db-writer',
             logger_name='C0DataAcquisitionJob',
             duration_limit_s=60 * 40,  # 40 minutes, cap the 04:00 full scan
-            recovery_path=f'data/record_recovery_c0_{_stamp(self.time_task)}.csv')
+            recovery_path=f'data/record_recovery_c0_{_stamp(self.time_task)}.csv',
+            update_job_num=5, update_label='c0-video-update')
 
         self.logger.info('Finish add need insert aid list!')
 
@@ -902,7 +938,8 @@ class C30PipelineRunner(Thread):
             writer_label='simple-db-writer',
             logger_name='C30PipelineRunner',
             duration_limit_s=60 * 40,  # 40 minutes
-            recovery_path=f'data/record_recovery_c30_{_stamp(self.time_task)}.csv')
+            recovery_path=f'data/record_recovery_c30_{_stamp(self.time_task)}.csv',
+            update_job_num=10, update_label='c30-video-update')
 
         self.logger.info('Finish add need insert aid list!')
 

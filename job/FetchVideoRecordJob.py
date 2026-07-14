@@ -2,10 +2,9 @@ from .Job import Job
 from service import Service, CodeError
 from timer import Timer
 from queue import Queue, Empty, Full
-from db import Session
 from core import RecordNew
 from util import format_ts_ms, get_ts_s, ts_s_to_str
-from task import fetch_video_record_via_video_view, update_video
+from task import fetch_video_record_via_video_view
 from typing import Optional
 
 __all__ = ['FetchVideoRecordJob']
@@ -19,10 +18,14 @@ class FetchVideoRecordJob(Job):
     the bulk counterpart of AddVideoRecordJob (which stays the right choice for
     small aid batches).
 
-    Fetchers hold NO pooled DB connection: the rare CodeError -> update_video
-    fallback takes a short-lived session and returns it immediately. Holding one
-    per worker deadlocked the 2026-07-15 04:00 full scan -- see
-    _update_video_with_own_session.
+    Fetchers touch NO DB, at all -- they do not even import Session. An aid whose
+    view call returns a CodeError (deleted / hidden / -403) is pushed to
+    code_error_aid_queue for a bounded UpdateVideoJob pool to refresh, instead of
+    the fetcher running update_video itself. Doing it inline meant any of the 250
+    fetchers could grab a pooled connection (and, before that, pin one for its
+    whole life) -- unbounded DB concurrency from the fetch tier, which is what
+    deadlocked the 2026-07-15 04:00 full scan. It also cost a fetch slot and
+    pulled a FULL (untrimmed, up to 2.8MB) view payload per code error.
     """
 
     # give up on a record after this long stuck on a full queue, so a dead
@@ -32,45 +35,19 @@ class FetchVideoRecordJob(Job):
 
     def __init__(self, name: str, aid_queue: Queue[int], record_queue: 'Queue[Optional[RecordNew]]',
                  service: Service,
-                 update_if_code_error: bool = True, duration_limit_s: Optional[int] = None,
+                 code_error_aid_queue: 'Optional[Queue[Optional[int]]]' = None,
+                 duration_limit_s: Optional[int] = None,
                  put_timeout_s: float = 30.0):
         super().__init__(name)
         self.aid_queue = aid_queue
         self.record_queue = record_queue
         self.service = service
-        self.update_if_code_error = update_if_code_error
+        # where CodeError aids go for a bounded UpdateVideoJob pool to refresh.
+        # None -> code errors are only counted (no metadata refresh).
+        self.code_error_aid_queue = code_error_aid_queue
         self.duration_limit_s = duration_limit_s
         self.duration_limit_due_ts_s = None
         self.put_timeout_s = put_timeout_s
-
-    def _update_video_with_own_session(self, aid: int):
-        """
-        Run the CodeError -> update_video fallback on a SHORT-LIVED session.
-
-        This must NOT hold a pooled connection for the worker's lifetime. It
-        used to: a lazy self.session was opened on the first CodeError and kept
-        until cleanup(). With 250 workers against a 200-connection pool
-        (pool_size=50 + max_overflow=150), a full scan spreads enough CodeErrors
-        across workers that every worker eventually pins a connection -- the
-        pool is then exhausted, the batch writer cannot get a connection to
-        drain record_queue, record_queue fills to its cap, and every fetcher
-        blocks forever in put() while still holding the connections the writer
-        needs. That is a deadlock, and it hung the 2026-07-15 04:00 full scan.
-
-        A fetcher needs the DB for well under 1% of aids, so it takes a
-        connection only for that call and gives it straight back.
-        """
-        session = Session()
-        try:
-            return update_video(aid, self.service, session)
-        except Exception:
-            try:
-                session.rollback()
-            except Exception:
-                pass
-            raise
-        finally:
-            session.close()  # back to the pool immediately
 
     def _put_record(self, record) -> bool:
         """Bounded put with a timeout. False -> queue still full, caller decides."""
@@ -106,21 +83,13 @@ class FetchVideoRecordJob(Job):
                 record = fetch_video_record_via_video_view(
                     aid, self.service, out_stat=stage_stat)
             except CodeError as e:
-                if self.update_if_code_error:
-                    self.logger.info(f'Code error occurred. Now start update video. aid: {aid}')
-                    try:
-                        # short-lived session: rollback + close are handled
-                        # inside, so no pooled connection outlives this call
-                        tdd_video_logs = self._update_video_with_own_session(aid)
-                    except Exception as e2:
-                        self.logger.error(f'Fail to update video info. aid: {aid}, error: {e2}')
-                        self.stat.condition['update_exception'] += 1
-                    else:
-                        for log in tdd_video_logs:
-                            self.logger.info(
-                                f'Update video info. aid: {aid}, attr: {log.attr}, {log.oldval} -> {log.newval}')
-                        self.logger.debug(f'{len(tdd_video_logs)} log(s) found. aid: {aid}')
-                        self.stat.condition[f'{len(tdd_video_logs)}_update'] += 1
+                # hand off to the UpdateVideoJob pool: refreshing tdd_video.code
+                # is what drops this aid out of future need_insert lists, but it
+                # is DB work and must not happen on a fetch worker
+                if self.code_error_aid_queue is not None:
+                    self.code_error_aid_queue.put(aid)
+                    self.logger.debug(
+                        f'Code error, queued for video update. aid: {aid}, error: {e}')
                 else:
                     self.logger.error(f'Fail to fetch video record. aid: {aid}, error: {e}')
                 self.stat.condition['code_error'] += 1
