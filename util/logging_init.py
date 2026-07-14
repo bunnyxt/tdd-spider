@@ -12,13 +12,25 @@ if not os.path.exists(LOG_DIR):
 
 class UnescapeFormatter(logging.Formatter):
     """
-    Unescape escaped character for logging. For example, print '\n' as '\\n'.
+    Collapse a log record onto a single line by escaping line-breaking control
+    characters (newline, carriage return, tab) -- video descriptions contain
+    newlines, and an un-collapsed record would break across many lines and
+    wreck line-based grep.
+
+    Only those control chars are escaped. The previous implementation used
+    str.encode('unicode_escape'), which ALSO escaped every non-ASCII character
+    to \\uXXXX -- turning CJK text (titles, descriptions) into unreadable escape
+    sequences in the log. Printable Unicode is now left intact (the file
+    handlers are opened as utf-8).
     """
 
     def format(self, record):
         original = logging.Formatter.format(self, record)
-        escaped = original.encode('unicode_escape').decode()
-        return escaped
+        return (original
+                .replace('\\', '\\\\')
+                .replace('\r', '\\r')
+                .replace('\n', '\\n')
+                .replace('\t', '\\t'))
 
 
 def logging_init(format=DEFAULT_LOG_FORMAT,
@@ -42,7 +54,9 @@ def logging_init(format=DEFAULT_LOG_FORMAT,
 
     for level in file_handler_levels:
         level_name = logging.getLevelName(level)
-        file_handler = logging.FileHandler(filename=os.path.join(LOG_DIR, f'{file_prefix}_{level_name}.log'))
+        file_handler = logging.FileHandler(
+            filename=os.path.join(LOG_DIR, f'{file_prefix}_{level_name}.log'),
+            encoding='utf-8')  # CJK titles/descs are no longer escaped, write them as utf-8
         file_handler.setLevel(level)
         handlers.append(file_handler)
 
