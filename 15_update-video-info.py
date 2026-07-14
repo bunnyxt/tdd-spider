@@ -1,7 +1,7 @@
 from db import DBOperation, Session
 from service import Service
 from serverchan import sc_send_summary
-from util import logging_init, get_week_day, fullname
+from util import logging_init, get_week_day, fullname, b2a
 from timer import Timer
 from queue import Queue
 from job import UpdateVideoJob, JobStat
@@ -38,17 +38,26 @@ def update_video_info():
 
     logger.info(f'Will update {len(bvids)} videos info.')
 
-    # put bvid into queue
-    bvid_queue: Queue[str] = Queue()
+    # put aid into queue. UpdateVideoJob takes aids (it used to take bvids and
+    # b2a them itself); converting here keeps the job free of that concern and
+    # lets 51_ feed it aids straight from the fetch pipeline.
+    aid_queue: Queue[int] = Queue()
     for bvid in bvids:
-        bvid_queue.put(bvid)
-    logger.info(f'{bvid_queue.qsize()} bvids put into queue.')
+        aid_queue.put(b2a(bvid))
+    # one sentinel per worker: UpdateVideoJob is now sentinel-terminated (an
+    # empty queue means "wait", so it can also run alongside a live producer in
+    # 51_). This also retires the old `while not queue.empty(): queue.get()`
+    # loop, which races -- two workers both see a non-empty queue, both call
+    # get(), and the loser blocks forever on the last item.
+    job_num = 20
+    for _ in range(job_num):
+        aid_queue.put(None)
+    logger.info(f'{len(bvids)} aids put into queue.')
 
     # create jobs
-    job_num = 20
     job_list = []
     for i in range(job_num):
-        job_list.append(UpdateVideoJob(f'job_{i}', bvid_queue, service))
+        job_list.append(UpdateVideoJob(f'job_{i}', aid_queue, service))
 
     # start jobs
     for job in job_list:
