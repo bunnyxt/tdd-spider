@@ -12,6 +12,7 @@ import re
 import sys
 from serverchan import sc_send_summary, sc_send_critical
 from collections import namedtuple, defaultdict, Counter
+from typing import Optional
 from core import TddError, RecordNew
 from service import Service, NewlistArchive, VideoView
 from job import GetNewlistArchiveJob, FetchVideoRecordJob, BatchInsertVideoRecordJob, Job, JobPool
@@ -57,7 +58,9 @@ def get_need_insert_aid_list(time_label, is_tid_30, session):
 def fetch_and_batch_insert_records(
         need_insert_aid_list: list, record_queue: Queue, *,
         job_num: int, fetch_label: str, writer_label: str, logger_name: str,
-        duration_limit_s=60 * 40):
+        duration_limit_s=60 * 40,
+        fetched_queue_maxsize: int = 20000,
+        recovery_path: Optional[str] = None):
     """
     Bulk fetch-then-batch-insert pipeline shared by the C0 and C30 (simple)
     acquisition paths:
@@ -85,8 +88,12 @@ def fetch_and_batch_insert_records(
     for aid in need_insert_aid_list:
         aid_queue.put(aid)
 
-    # fetched records flow through here to the single batch writer
-    fetched_record_queue: Queue = Queue()
+    # Fetched records flow through here to the single batch writer. BOUNDED:
+    # fetchers now outrun the writer (~537/s vs ~365/s), so an unbounded queue
+    # just absorbs the backlog into RSS and hides it. A cap turns that into
+    # backpressure -- fetchers block on put() at writer speed, which is visible
+    # in the PROGRESS rate instead of a silent memory climb.
+    fetched_record_queue: Queue = Queue(maxsize=fetched_queue_maxsize)
 
     fetch_pool = JobPool(
         [FetchVideoRecordJob(f'job_{i}', aid_queue, fetched_record_queue, service,
@@ -96,7 +103,8 @@ def fetch_and_batch_insert_records(
         progress_label=fetch_label,
         logger_name=logger_name)
     writer_pool = JobPool(
-        [BatchInsertVideoRecordJob('writer_0', fetched_record_queue, record_queue)],
+        [BatchInsertVideoRecordJob('writer_0', fetched_record_queue, record_queue,
+                                   recovery_path=recovery_path)],
         progress_total=len(need_insert_aid_list),
         progress_label=writer_label,
         progress_interval_s=5.0,  # writer progress is less chatty
@@ -503,7 +511,8 @@ class C0DataAcquisitionJob(DataAcquisitionJob):
             fetch_label='c0-acquisition',
             writer_label='c0-db-writer',
             logger_name='C0DataAcquisitionJob',
-            duration_limit_s=60 * 40)  # 40 minutes, cap the 04:00 full scan
+            duration_limit_s=60 * 40,  # 40 minutes, cap the 04:00 full scan
+            recovery_path=f'data/record_recovery_c0_{self.time_label.replace(":", "")}.csv')
 
         self.logger.info('Finish add need insert aid list!')
 
@@ -880,7 +889,8 @@ class C30PipelineRunner(Thread):
             fetch_label='simple-fetch',
             writer_label='simple-db-writer',
             logger_name='C30PipelineRunner',
-            duration_limit_s=60 * 40)  # 40 minutes
+            duration_limit_s=60 * 40,  # 40 minutes
+            recovery_path=f'data/record_recovery_c30_{self.time_label.replace(":", "")}.csv')
 
         self.logger.info('Finish add need insert aid list!')
 
