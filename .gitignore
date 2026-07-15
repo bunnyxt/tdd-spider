@@ -3,6 +3,10 @@
 
 # IDE
 .idea/
+.vscode/
+
+# agent tooling (local worktrees, session state, per-user memory)
+.claude/
 
 # python
 venv/
