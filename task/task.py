@@ -503,15 +503,27 @@ def update_video(aid: int, service: Service, session: Session, out_context: dict
                 video_update_logs.append(
                     TddVideoLog(added, aid, bvid,
                                 'staff', f'mid: {curr_staff_item.mid}; title: {curr_staff_item.title}', None))
-        # update tags string
-        new_tags = get_video_tags_str(aid, service)
-        new_tags_sorted = ';'.join(sorted(new_tags.split(';')))
-        curr_tags_sorted = ';'.join(sorted(curr_video.tags.split(';')))
-        if new_tags_sorted != curr_tags_sorted:
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'tags', curr_video.tags, new_tags))
-            curr_video.tags = new_tags
+        # update tags string. The video_tags endpoint is separate from the
+        # view and unstable (frequent ResponseError). It must NOT be fatal: the
+        # view fetch already succeeded and its changes (title, tname, code,
+        # state, ...) are staged on curr_video, so letting a tags failure
+        # propagate here would roll ALL of them back at the commit below --
+        # dropping real metadata/reactivation updates over a flaky tags call.
+        # On failure, skip tags this pass (it gets another chance next cycle)
+        # and keep the view-based changes.
+        try:
+            new_tags = get_video_tags_str(aid, service)
+        except ServiceError as e:
+            logger.warning(
+                f'Skip tags update (view changes kept). aid: {aid}, error: {e}')
+        else:
+            new_tags_sorted = ';'.join(sorted(new_tags.split(';')))
+            curr_tags_sorted = ';'.join(sorted(curr_video.tags.split(';')))
+            if new_tags_sorted != curr_tags_sorted:
+                video_update_logs.append(
+                    TddVideoLog(added, aid, bvid,
+                                'tags', curr_video.tags, new_tags))
+                curr_video.tags = new_tags
 
     # commit changes
     try:
