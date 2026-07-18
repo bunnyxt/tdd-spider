@@ -1,22 +1,20 @@
 from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from threading import Thread
 from queue import Queue
-from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, null_or_str, \
-    str_to_ts_s, ts_s_to_str, b2a, zk_calc, get_week_day, logging_init, fullname, get_current_line_no, \
-    format_ts_ms, SysStatLogger
-import math
+from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, \
+    str_to_ts_s, ts_s_to_str, logging_init, fullname, get_current_line_no, \
+    SysStatLogger
 import time
 import datetime
 import os
 import re
 import sys
-from serverchan import sc_send_summary, sc_send_critical
+from serverchan import sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from typing import Optional
-from core import TddError, RecordNew
-from service import Service, NewlistArchive, VideoView
-from job import GetNewlistArchiveJob, FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool
-from task import update_video, add_video, AlreadyExistError
+from core import RecordNew
+from service import Service
+from job import FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool
 from timer import Timer
 import logging
 
@@ -37,20 +35,20 @@ RecordSpeedRatio = namedtuple('RecordSpeedRatio', [
     'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like', 'inf_magic_num'])
 
 
-def get_need_insert_aid_list(time_label, is_tid_30, session):
+def get_need_insert_aid_list(time_label, session):
+    # all in-scope videos (tdd_video, code == 0, state == 0); no tid filter --
+    # c0/c30 were merged, the tid == 30 partition no longer means anything.
     if time_label == '04:00':
-        # return total
-        return DBOperation.query_all_update_video_aids(is_tid_30, session)
+        # return total (daily full scan)
+        return DBOperation.query_all_update_video_aids(session)
 
     # add 1 hour aids
-    aid_list = DBOperation.query_freq_update_video_aids(
-        2, is_tid_30, session)  # freq = 2
+    aid_list = DBOperation.query_freq_update_video_aids(2, session)  # freq = 2
 
     if time_label in ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00']:
         # add 4 hour aids
         # freq = 1
-        aid_list += DBOperation.query_freq_update_video_aids(
-            1, is_tid_30, session)
+        aid_list += DBOperation.query_freq_update_video_aids(1, session)
 
     return aid_list
 
@@ -178,812 +176,49 @@ def fetch_and_batch_insert_records(
     return fetch_stat, writer_stat, update_stat
 
 
-class CheckC30NeedInsertButNotFoundAidsJob(Job):
+class VideoRecordAcquisitionJob(Job):
     """
-    Check c30 need insert but not found aids.
-    It is expected that record of those aids already fetched, however not found at present.
-    Possible reasons:
-    - now video tid != 30
-    - now video code != 0
-    - now video state = -4, forward = another video aid
-    - missing video from api (e.g. partion archive api)
-    - ...
-    """
+    Single acquisition pipeline over ALL in-scope videos (tdd_video, code == 0,
+    state == 0). Formerly split into a c0 (tid != 30) and a c30 (tid == 30)
+    runner, back when tid == 30 was Bilibili's VOCALOID-UTAU category and the
+    c30 half could be bulk-read from the newlist api. Bilibili has retired tid
+    as a user-selectable publish category (it is now AI-assigned), so the
+    partition tracks nothing meaningful -- videos drift between the two buckets
+    on every update_video -- and the newlist bulk path had been dead for weeks
+    (see git history for process_comprehensive et al., removed here). One aid
+    set, one worker pool.
 
-    def __init__(self, name: str, aid_queue: Queue[int], record_queue: Queue[RecordNew], service: Service):
-        super().__init__(name)
-        self.aid_queue = aid_queue
-        self.record_queue = record_queue
-        self.service = service
-        self.session = Session()
-        self._duration_limit_s = 60 * 40  # 40 minutes, hard stop
-
-    def process(self):
-        # TMP duration limit
-        duration_limit_due_ts = get_ts_s() + self._duration_limit_s
-        self.logger.info(
-            f'Duration limit due at {ts_s_to_str(duration_limit_due_ts)}.')
-
-        while not self.aid_queue.empty():
-            if get_ts_s() > duration_limit_due_ts:
-                self.logger.warning('Duration limit reached. Exit.')
-                break
-
-            aid = self.aid_queue.get()
-            self.logger.debug(
-                f'Now check c30 need insert but not found aid. aid: {aid}')
-            timer = Timer()
-            timer.start()
-
-            try:
-                update_video_context = {}
-                tdd_video_logs = update_video(
-                    aid, self.service, self.session, out_context=update_video_context)
-                video_view: VideoView = update_video_context['video_view']
-            except Exception as e:
-                # Roll back so a failed DB op (e.g. a transient 'too many
-                # connections') does not leave this worker's session in an
-                # invalid-transaction state, which would otherwise poison every
-                # subsequent aid and surface as bogus NotExistError cascades.
-                try:
-                    self.session.rollback()
-                except Exception:
-                    pass
-                self.logger.error(
-                    f'Fail to update video info. aid: {aid}, error: {e}')
-                self.stat.condition['update_exception'] += 1
-            else:
-                for log in tdd_video_logs:
-                    self.logger.info(
-                        f'Update video info. aid: {aid}, attr: {log.attr}, {log.oldval} -> {log.newval}')
-                self.logger.debug(
-                    f'{len(tdd_video_logs)} log(s) found. aid: {aid}')
-                self.stat.condition[f'{len(tdd_video_logs)}_update'] += 1
-
-                log_attr_log_dict = {log.attr: log for log in tdd_video_logs}
-                expected_change_found = False
-                if 'tid' in log_attr_log_dict:
-                    if log_attr_log_dict['tid'].oldval == '30' and log_attr_log_dict['tid'].newval != '30':
-                        expected_change_found = True
-                        self.stat.condition['tid_not_30'] += 1
-                if 'code' in log_attr_log_dict:
-                    if log_attr_log_dict['code'].oldval == '0' and log_attr_log_dict['code'].newval != '0':
-                        expected_change_found = True
-                        self.stat.condition['code_not_0'] += 1
-                if 'state' in log_attr_log_dict and 'forward' in log_attr_log_dict:
-                    if log_attr_log_dict['state'].oldval == '0' and log_attr_log_dict['state'].newval == '-4' and \
-                            log_attr_log_dict['forward'].newval != str(aid):
-                        expected_change_found = True
-                        self.stat.condition['state_-4'] += 1
-
-                if expected_change_found:
-                    self.stat.condition['expected_change_found'] += 1
-                else:
-                    # Due to the bug of awesome api, some video may not be fetched from the batch api.
-                    # In this case, we need to retrieve video record from video view.
-                    # So much such missing video existed, therefore, to simplify the log,
-                    # we downgrade the log level from warning to debug.
-                    self.logger.debug(
-                        f'Expected change not found, maybe missing video from api. aid: {aid}')
-                    self.stat.condition['expected_change_not_found'] += 1
-
-                    # Parse record from video view which already fetched before when update video.
-                    new_record = RecordNew(
-                        added=get_ts_s(),
-                        aid=aid,
-                        bvid=video_view.bvid.lstrip('BV'),
-                        view=video_view.stat.view,
-                        danmaku=video_view.stat.danmaku,
-                        reply=video_view.stat.reply,
-                        favorite=video_view.stat.favorite,
-                        coin=video_view.stat.coin,
-                        share=video_view.stat.share,
-                        like=video_view.stat.like,
-                        dislike=video_view.stat.dislike,
-                        now_rank=video_view.stat.now_rank,
-                        his_rank=video_view.stat.his_rank,
-                        vt=video_view.stat.vt,
-                        vv=video_view.stat.vv,
-                    )
-                    self.record_queue.put(new_record)
-                    self.logger.info(
-                        f'Missing video record get. aid: {aid}, record: {new_record}')
-                    self.stat.condition['missing_video_record_get'] += 1
-
-            timer.stop()
-            self.logger.debug(f'Finish check c30 need insert but not found aid. '
-                              f'aid: {aid}, duration: {format_ts_ms(timer.get_duration_ms())}')
-            self.stat.total_count += 1
-            self.stat.total_duration_ms += timer.get_duration_ms()
-
-    def cleanup(self):
-        self.session.close()
-
-
-class CheckAllZeroRecordJob(Job):
-    """
-    Check records, avoid all zero record got due to API error.
-    Once all zero record detected, try to re-fetch video record.
+    job_num=250: throughput is capped by the box's ~3Mbps OUTBOUND (request
+    headers + ACKs, ~500B/fetch), which saturates around 500-600/s regardless
+    of worker count -- more workers do not help. A single batch writer keeps up
+    comfortably (measured ~1000+ rec/s capacity vs the ~560/s network-capped
+    arrival), so no writer parallelism is needed.
     """
 
-    def __init__(self, name: str,
-                 record_queue: Queue[RecordNew], checked_record_queue: Queue[RecordNew], service: Service):
-        super().__init__(name)
-        self.record_queue = record_queue
-        self.checked_record_queue = checked_record_queue
-        self.service = service
-        self._duration_limit_s = 60 * 3  # 3 minutes
-
-    def process(self):
-        # TMP duration limit
-        duration_limit_due_ts = get_ts_s() + self._duration_limit_s
-        self.logger.info(
-            f'Duration limit due at {ts_s_to_str(duration_limit_due_ts)}.')
-
-        while not self.record_queue.empty():
-            if get_ts_s() > duration_limit_due_ts:
-                self.logger.warning('Duration limit reached. Exit.')
-                break
-
-            record = self.record_queue.get()
-            timer = Timer()
-            timer.start()
-
-            if is_all_zero_record(record):
-                self.logger.debug(
-                    f'All zero record of video aid {record.aid} detected. Try get video record again.')
-                self.stat.condition['all_zero_record'] += 1
-
-                # get video view
-                try:
-                    video_view = self.service.get_video_view(
-                        {'aid': record.aid})
-                except Exception as e:
-                    self.logger.warning(
-                        f'Fail to get valid video view. aid: {record.aid}, error: {e}')
-                    self.stat.condition['fail_fetch_again'] += 1
-                else:
-                    # assemble new record
-                    new_record = RecordNew(
-                        added=get_ts_s(),
-                        aid=video_view.aid,
-                        bvid=video_view.bvid.lstrip('BV'),
-                        view=video_view.stat.view,
-                        danmaku=video_view.stat.danmaku,
-                        reply=video_view.stat.reply,
-                        favorite=video_view.stat.favorite,
-                        coin=video_view.stat.coin,
-                        share=video_view.stat.share,
-                        like=video_view.stat.like,
-                        dislike=video_view.stat.dislike,
-                        now_rank=video_view.stat.now_rank,
-                        his_rank=video_view.stat.his_rank,
-                        vt=video_view.stat.vt,
-                        vv=video_view.stat.vv
-                    )
-
-                    if is_all_zero_record(new_record):
-                        self.logger.debug(
-                            f'All zero record of video aid {record.aid} detected again.')
-                        self.stat.condition['all_zero_record_again'] += 1
-                    else:
-                        # not all zero record got, use new record
-                        record = new_record
-                        self.logger.info(
-                            f'Not all zero record {new_record} detected. Use new record instead.')
-                        self.stat.condition['not_all_zero_record'] += 1
-
-            self.checked_record_queue.put(record)
-
-            timer.stop()
-            self.stat.total_count += 1
-            self.stat.total_duration_ms += timer.get_duration_ms()
-
-
-# class C30NeedAddButNotFoundAidsChecker(Thread):
-#     def __init__(self, need_insert_but_record_not_found_aid_list):
-#         super().__init__()
-#         self.need_insert_but_record_not_found_aid_list = need_insert_but_record_not_found_aid_list
-#         self.logger = logging.getLogger('C30NeedAddButNotFoundAidsChecker')
-#
-#     def run(self):
-#         # check need insert but not found aid list
-#         # these aids should have record in aid_record_dict, but not found at present
-#         # possible reasons:
-#         # - now video tid != 30
-#         # - now video code != 0
-#         # - now video state = -4, forward = another video aid
-#         # - ...
-#         self.logger.info('Now start checking need add but not found aids...')
-#         session = Session()
-#         result_status_dict = defaultdict(list)
-#         # self.logger.error('%s' % self.need_insert_but_record_not_found_aid_list)  # TMP
-#         self.logger.error('TMP stop add affected video record, count: %d' % len(
-#             self.need_insert_but_record_not_found_aid_list))  # TMP
-#         sc_send('affected video found', 'send time: %s, count: %d' % (
-#             get_ts_s_str(), len(self.need_insert_but_record_not_found_aid_list)))  # TMP
-#         # for idx, aid in enumerate(self.need_insert_but_record_not_found_aid_list, 1):
-#         #     # try update video
-#         #     try:
-#         #         TODO: use new update_video
-#         #         tdd_video_logs = update_video(aid, bapi_with_proxy, session)
-#         #     except TddCommonError as e2:
-#         #         self.logger.warning('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-#         #         result_status_dict['fail_aids'].append(aid)
-#         #     except Exception as e2:
-#         #         self.logger.error('Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-#         #         result_status_dict['fail_aids'].append(aid)
-#         #     else:
-#         #         # check update logs
-#         #         for log in tdd_video_logs:
-#         #             self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
-#         #                              % (log.aid, log.attr, log.oldval, log.newval))
-#         #         # set result status
-#         #         # NOTE: here maybe code_change_aids and tid_change_aids both +1 aid
-#         #         tdd_video_logs_attr_list = [ log.attr for log in tdd_video_logs]
-#         #         expected_change_found = False
-#         #         if 'code' in tdd_video_logs_attr_list:
-#         #             result_status_dict['code_change_aids'].append(aid)
-#         #             expected_change_found = True
-#         #         if 'tid' in tdd_video_logs_attr_list:
-#         #             result_status_dict['tid_change_aids'].append(aid)
-#         #             expected_change_found = True
-#         #         if 'state' in tdd_video_logs_attr_list and 'forward' in tdd_video_logs_attr_list:
-#         #             result_status_dict['state_and_forward_change_aids'].append(aid)
-#         #             expected_change_found = True
-#         #         if not expected_change_found:
-#         #             self.logger.warning('No expected change (code / tid / state & forward) found for video aid %d, need further check' % aid)
-#         #             # TMP START
-#         #             try:
-#         #                 new_video_record = add_video_record_via_stat_api(aid, bapi_with_proxy, session)
-#         #                 self.logger.warning('TMP add affected video record %s' % new_video_record)
-#         #             except Exception as e3:
-#         #                 self.logger.warning('TMP Fail to add video record aid %d. Exception caught. Detail: %s' % (aid, e3))
-#         #             # TMP END
-#         #             result_status_dict['no_expected_change_found_aids'].append(aid)
-#         #     finally:
-#         #         if idx % 10 == 0:
-#         #             self.logger.info('%d / %d done' % (idx, len(self.need_insert_but_record_not_found_aid_list)))
-#         # self.logger.info('%d / %d done' % (len(self.need_insert_but_record_not_found_aid_list),
-#         #                                    len(self.need_insert_but_record_not_found_aid_list)))
-#         session.close()
-#         self.logger.info('Finish checking need add but not found aids! %s' %
-#                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
-#         self.logger.warning('fail_aids: %r' % result_status_dict['fail_aids'])
-#         self.logger.warning('no_change_found_aids: %r' % result_status_dict['no_change_found_aids'])
-
-
-class C30NoNeedInsertAidsChecker(Thread):
-    def __init__(self, no_need_insert_aid_list):
-        super().__init__()
-        self.no_need_insert_aid_list = no_need_insert_aid_list
-        self.logger = logging.getLogger('C30NoNeedInsertAidsChecker')
-
-    def run(self):
-        # check no need insert records
-        # if time label is 04:00, we need to add all video records into tdd_video_record table,
-        # therefore need_insert_aid_list contains all c30 aids in db, however, still not cover all records
-        # possible reasons:
-        # - some video moved into c30
-        # - some video code changed to 0
-        # - some video has -403 code, awesome api will also get these video, login session not required
-        # - ...
-        self.logger.info('Now start checking no need insert records...')
-        session = Session()
-        service = Service(mode='worker')
-        _403_aids = DBOperation.query_403_video_aids(session)
-        result_status_dict = defaultdict(list)
-        for idx, aid in enumerate(self.no_need_insert_aid_list, 1):
-            # check whether -403 video
-            if aid in _403_aids:
-                self.logger.info('-403 video aid %d detected, skip' % aid)
-                result_status_dict['-403_aids'].append(aid)
-                continue
-
-            # try add new video first
-            video_already_exist_flag = False
-            try:
-                new_video = add_video(aid, service, session)
-            except AlreadyExistError:
-                # video already exist, which is absolutely common
-                self.logger.debug('Video aid %d already exists' % aid)
-                video_already_exist_flag = True
-            except TddError as e:
-                self.logger.warning(
-                    'Fail to add video aid %d. Exception caught. Detail: %s' % (aid, e))
-            else:
-                self.logger.info('Add new video %s' % new_video)
-                result_status_dict['add_new_video_aids'].append(aid)
-
-            if video_already_exist_flag:
-                # try update video
-                try:
-                    tdd_video_logs = update_video(aid, service, session)
-                except TddError as e2:
-                    self.logger.warning(
-                        'Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-                    result_status_dict['fail_aids'].append(aid)
-                except Exception as e2:
-                    self.logger.error(
-                        'Fail to update video aid %d. Exception caught. Detail: %s' % (aid, e2))
-                    result_status_dict['fail_aids'].append(aid)
-                else:
-                    # init change flags
-                    code_change_flag = False
-                    # check update logs
-                    for log in tdd_video_logs:
-                        if log.attr == 'code':
-                            code_change_flag = True
-                        self.logger.info('Update video aid %d, attr: %s, oldval: %s, newval: %s'
-                                         % (log.aid, log.attr, log.oldval, log.newval))
-                    # set result status
-                    # NOTE: here maybe code_change_aids and tid_change_aids both +1 aid
-                    if code_change_flag:
-                        result_status_dict['code_change_aids'].append(aid)
-                    else:
-                        self.logger.warning(
-                            'No code change found for video aid %d, need further check' % aid)
-                        result_status_dict['no_change_found_aids'].append(aid)
-
-            if idx % 10 == 0:
-                self.logger.info('%d / %d done' %
-                                 (idx, len(self.no_need_insert_aid_list)))
-        self.logger.info(
-            '%d / %d done' % (len(self.no_need_insert_aid_list), len(self.no_need_insert_aid_list)))
-        self.logger.info('Finish checking no need insert records! %s' %
-                         ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
-        self.logger.warning('fail_aids: %r' % result_status_dict['fail_aids'])
-        self.logger.warning('no_change_found_aids: %r' %
-                            result_status_dict['no_change_found_aids'])
-
-
-class DataAcquisitionJob(Job):
-    def __init__(self, name: str, time_task: str, record_queue: Queue[RecordNew]):
-        super().__init__(name)
-        # time_task is the full stamp ('2026-07-14 08:00'); time_label is just
-        # the hour ('08:00'). Recovery files need the full stamp so runs on
-        # different days don't append into the same file.
-        self.time_task = time_task
-        self.time_label = time_task[-5:]
-        self.record_queue = record_queue
-
-
-class C0DataAcquisitionJob(DataAcquisitionJob):
     def __init__(self, time_task: str, record_queue: Queue[RecordNew]):
-        super().__init__('c0', time_task, record_queue)
-
-    def process(self):
-        # get need insert aid list
-        session = Session()
-        need_insert_aid_list = get_need_insert_aid_list(
-            self.time_label, False, session)
-        session.close()
-        self.logger.info(
-            f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
-
-        # bulk fetch -> single batch writer -> self.record_queue
-        fetch_and_batch_insert_records(
-            need_insert_aid_list, self.record_queue,
-            job_num=50,
-            fetch_label='c0-acquisition',
-            writer_label='c0-db-writer',
-            logger_name='C0DataAcquisitionJob',
-            duration_limit_s=60 * 40,  # 40 minutes, cap the 04:00 full scan
-            recovery_path=f'data/record_recovery_c0_{_stamp(self.time_task)}.csv',
-            update_job_num=5, update_label='c0-video-update')
-
-        self.logger.info('Finish add need insert aid list!')
-
-
-# TODO: refactor using Job, create a class DataAcquisitionJob,
-#  then derive from it to create C30DataAcquisitionJob and C0DataAcquisitionJob
-class C30PipelineRunner(Thread):
-    def __init__(self, time_task, record_queue):
-        super().__init__()
-        self.time_task = time_task  # full stamp, ex: '2026-07-14 08:00'
+        super().__init__('acquisition')
+        self.time_task = time_task      # full stamp, ex: '2026-07-14 08:00'
         self.time_label = time_task[-5:]  # hour only, ex: '08:00'
         self.record_queue = record_queue
-        self.logger = logging.getLogger('C30PipelineRunner')
 
-    def get_all_c30_video_record_from_newlist_api(self, service: Service, job_num: int = 80) -> Queue[RecordNew]:
-        # get newlist
-        try:
-            new_list = service.get_newlist({'rid': 30, 'pn': 1, 'ps': 50})
-        except Exception as e:
-            self.logger.error(f'Fail to get archive rank by partion for calculating page num total. '
-                              f'tid: 30, pn: 1, ps: 50, error: {e}')
-            raise e
-
-        # calculate page num total
-        page_num_total = math.ceil(new_list.page.count / 50)
-        self.logger.info(
-            f'Archive page num total calculated. page_num_total: {page_num_total}')
-
-        # put page num into queue
-        page_num_queue: Queue[int] = Queue()
-        for page_num in range(1, page_num_total + 1):
-            page_num_queue.put(page_num)
-        self.logger.info(f'{page_num_queue.qsize()} page nums put into queue.')
-
-        # create archive video queue
-        archive_video_queue: Queue[tuple[int, NewlistArchive]] = Queue()
-
-        # create jobs and run them with a per-second progress heartbeat
-        job_list = [
-            GetNewlistArchiveJob(f'job_{i}', 30, page_num_queue, archive_video_queue, service)
-            for i in range(job_num)
-        ]
-        pool = JobPool(
-            job_list,
-            progress_total=page_num_total,
-            progress_label='newlist-archive',
-            logger_name='C30PipelineRunner')
-        pool.start()
-        job_stat_merged = pool.join()
-
-        self.logger.info('Finish get archive videos!')
-        self.logger.info(job_stat_merged.get_summary())
-
-        # parse archive video to record
-        record_list: list[RecordNew] = []
-        while not archive_video_queue.empty():
-            added, archive_video = archive_video_queue.get()
-            record_list.append(RecordNew(
-                added=added,
-                aid=archive_video.aid,
-                bvid=archive_video.bvid.lstrip('BV'),
-                view=archive_video.stat.view,
-                danmaku=archive_video.stat.danmaku,
-                reply=archive_video.stat.reply,
-                favorite=archive_video.stat.favorite,
-                coin=archive_video.stat.coin,
-                share=archive_video.stat.share,
-                like=archive_video.stat.like,
-                dislike=archive_video.stat.dislike,
-                now_rank=archive_video.stat.now_rank,
-                his_rank=archive_video.stat.his_rank,
-                vt=archive_video.stat.vt,
-                vv=archive_video.stat.vv
-            ))
-        self.logger.info(f'{len(record_list)} record(s) parsed.')
-
-        # remove duplication, then record list -> aid record dict
-        aid_record_dict = {}
-        for record in record_list:
-            aid_record_dict[record.aid] = record
-        record_list_after_remove_duplication = list(aid_record_dict.values())
-        self.logger.info(
-            f'{len(record_list_after_remove_duplication)} record(s) left after remove duplication.')
-
-        # build record queue and return
-        record_queue: Queue[RecordNew] = Queue()
-        for record in record_list_after_remove_duplication:
-            record_queue.put(record)
-        return record_queue
-
-    def check_all_zero_record(
-            self, record_queue: Queue[RecordNew], service: Service, job_num: int = 50
-    ) -> Queue[RecordNew]:
-        self.logger.info('Now start checking all zero record...')
-        timer = Timer()
-        timer.start()
-
-        # write down record_queue length
-        record_queue_len = record_queue.qsize()
-        self.logger.info(f'Will check {record_queue_len} record(s).')
-
-        # prepare checked record queue
-        checked_record_queue: Queue[RecordNew] = Queue()
-
-        # create jobs and run them with a per-second progress heartbeat
-        job_list = [
-            CheckAllZeroRecordJob(f'job_{i}', record_queue, checked_record_queue, service)
-            for i in range(job_num)
-        ]
-        pool = JobPool(
-            job_list,
-            progress_total=record_queue_len,
-            progress_label='all-zero-check',
-            ensure_conditions=['all_zero_record', 'fail_fetch_again',
-                               'all_zero_record_again', 'not_all_zero_record'],
-            logger_name='C30PipelineRunner')
-        pool.start()
-        job_stat_merged = pool.join()
-
-        # add remaining record to checked record queue
-        while not record_queue.empty():
-            checked_record_queue.put(record_queue.get())
-
-        # write down checked_record_queue length
-        checked_record_queue_len = checked_record_queue.qsize()
-        self.logger.info(
-            f'Got {checked_record_queue_len} record(s) after check.')
-        if record_queue_len != checked_record_queue_len:
-            self.logger.error(f'Records number not match after check! '
-                              f'before: {record_queue_len}, after: {checked_record_queue_len}')
-
-        # write down records number into stat condition
-        job_stat_merged.condition['record_queue_len'] = record_queue_len
-        job_stat_merged.condition['checked_record_queue_len'] = checked_record_queue_len
-
-        timer.stop()
-
-        # summary
-        self.logger.info('Finish checking all zero record!')
-        self.logger.info(timer.get_summary())
-        self.logger.info(job_stat_merged.get_summary())
-        if job_stat_merged.condition['record_queue_len'] != job_stat_merged.condition['checked_record_queue_len'] \
-                or job_stat_merged.condition['not_all_zero_record'] > 0:
-            sc_send_summary(
-                f'{script_fullname}.check_all_zero_record', timer, job_stat_merged)
-        return checked_record_queue
-
-    def process_comprehensive(self):
-        service = Service(mode='worker')
-
-        record_queue = self.get_all_c30_video_record_from_newlist_api(service)
-
-        # build aid record dict
-        aid_record_dict: dict[int, RecordNew] = {}
-        while not record_queue.empty():
-            record = record_queue.get()
-            aid_record_dict[record.aid] = record
-
-        # get need insert aid list
+    def process(self):
         session = Session()
-        need_insert_aid_list = get_need_insert_aid_list(
-            self.time_label, True, session)
-        self.logger.info(
-            f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
-
-        # insert records
-        # TODO: extract to util funtion start
-        self.logger.info('Now start inserting records...')
-        # use sql directly, combine batch_size records into one sql to execute and commit
-        sql_prefix = 'insert into ' \
-                     'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`, ' \
-                     'dislike, now_rank, his_rank, vt, vv) ' \
-                     'values '
-        sql = sql_prefix
-        need_insert_but_record_not_found_aid_list = []
-        batch_size = 2000
-        # only log 20 times
-        log_gap = batch_size * \
-            max(1, (len(need_insert_aid_list) // batch_size // 20))
-        for idx, aid in enumerate(need_insert_aid_list, 1):
-            record = aid_record_dict.get(aid, None)
-            if not record:
-                need_insert_but_record_not_found_aid_list.append(aid)
-                continue
-            sql += '(%d, %d, %d, %d, %d, %d, %d, %d, %d, %s, %s, %s, %s, %s), ' % (
-                record.added, record.aid,
-                record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like,
-                null_or_str(record.dislike), null_or_str(
-                    record.now_rank), null_or_str(record.his_rank),
-                null_or_str(record.vt), null_or_str(record.vv)
-            )
-            if idx % batch_size == 0:
-                sql = sql[:-2]  # remove ending comma and space
-                try:
-                    session.execute(sql)
-                    session.commit()
-                except Exception as e:
-                    self.logger.error(
-                        'Fail to execute sql: %s...%s' % (sql[:100], sql[-100:]))
-                    self.logger.error('Exception: %s' % str(e))
-                sql = sql_prefix
-                if idx % log_gap == 0:
-                    self.logger.info('%d / %d done' %
-                                     (idx, len(need_insert_aid_list)))
-        if sql != sql_prefix:
-            sql = sql[:-2]  # remove ending comma and space
-            try:
-                session.execute(sql)
-                session.commit()
-            except Exception as e:
-                self.logger.error('Fail to execute sql: %s...%s' %
-                                  (sql[:100], sql[-100:]))
-                self.logger.error('Exception: %s' % str(e))
-        self.logger.info('%d / %d done' %
-                         (len(need_insert_aid_list), len(need_insert_aid_list)))
-        self.logger.info('Finish inserting records! %d records added, %d aids not found (record missing)' % (
-            len(need_insert_aid_list) - len(need_insert_but_record_not_found_aid_list),
-            len(need_insert_but_record_not_found_aid_list)))
-        # TODO: extract to util funtion end
-
-        # check need insert but not found aid list
-        # # these aids should have record in aid_record_dict, but not found at present
-        # # possible reasons:
-        # # - now video tid != 30
-        # # - now video code != 0
-        # # - now video state = -4, forward = another video aid
-        # # - ...
-        # self.logger.info('%d c30 need add but not found aids got' % len(need_insert_but_record_not_found_aid_list))
-        # self.logger.info('Now start a branch thread for checking need add but not found aids...')
-        # c30_need_add_but_not_found_aids_checker = C30NeedAddButNotFoundAidsChecker(
-        #     need_insert_but_record_not_found_aid_list)
-        # c30_need_add_but_not_found_aids_checker.start()
-
-        # put need insert but not found aids into queue
-        need_insert_but_not_found_aid_queue: Queue[int] = Queue()
-        for aid in need_insert_but_record_not_found_aid_list:
-            need_insert_but_not_found_aid_queue.put(aid)
-        self.logger.info(f'{len(need_insert_but_record_not_found_aid_list)} c30 need insert but not found aids '
-                         f'put into queue.')
-
-        # create missing video record queue
-        missing_record_queue: Queue[RecordNew] = Queue()
-
-        # create jobs
-        check_c30_need_insert_but_not_found_aid_job_num = min(
-            150, max(len(need_insert_but_record_not_found_aid_list) // 10, 1))  # [1, 150]
-        check_c30_need_insert_but_not_found_aid_job_list = [
-            CheckC30NeedInsertButNotFoundAidsJob(
-                f'job_{i}', need_insert_but_not_found_aid_queue, missing_record_queue, service)
-            for i in range(check_c30_need_insert_but_not_found_aid_job_num)
-        ]
-
-        # start jobs, with a per-second progress heartbeat (greppable: PROGRESS)
-        check_c30_pool = JobPool(
-            check_c30_need_insert_but_not_found_aid_job_list,
-            progress_total=len(need_insert_but_record_not_found_aid_list),
-            progress_label='check-c30-missing',
-            logger_name='C30PipelineRunner')
-        check_c30_pool.start()
-
-        # check no need insert records
-        # if time label is 04:00, we need to add all video records into tdd_video_record table,
-        # therefore need_insert_aid_list contains all c30 aids in db, however, still not cover all records
-        # possible reasons:
-        # - some video moved into c30
-        # - some video code changed to 0
-        # - some video has -403 code, awesome api will also get these video, login session not required
-        # - ...
-        if self.time_label == '04:00':
-            no_need_insert_aid_list = list(
-                set(aid_record_dict.keys()) - set(need_insert_aid_list))
-            self.logger.info('%d c30 no need insert records got' %
-                             len(no_need_insert_aid_list))
-            self.logger.info(
-                'Now start a branch thread for checking need no need insert aids...')
-            c30_no_need_insert_aids_checker = C30NoNeedInsertAidsChecker(
-                no_need_insert_aid_list)
-            c30_no_need_insert_aids_checker.start()
-
-        # wait for jobs (also stops the progress heartbeat) and merge their stats
-        check_c30_need_insert_but_not_found_aid_job_stat_merged = check_c30_pool.join()
-
-        self.logger.info(f'Finish check c30 need insert but not found aid!')
-        self.logger.info(
-            check_c30_need_insert_but_not_found_aid_job_stat_merged.get_summary())
-        check_c30_need_insert_but_not_found_aid_timer = Timer()
-        check_c30_need_insert_but_not_found_aid_timer.start_ts_ms \
-            = check_c30_need_insert_but_not_found_aid_job_stat_merged.start_ts_ms
-        check_c30_need_insert_but_not_found_aid_timer.end_ts_ms \
-            = check_c30_need_insert_but_not_found_aid_job_stat_merged.end_ts_ms
-        sc_send_summary(f'{script_fullname}.', check_c30_need_insert_but_not_found_aid_timer,
-                        check_c30_need_insert_but_not_found_aid_job_stat_merged)
-
-        # collect missing video records
-        missing_record_list: list[RecordNew] = []
-        while not missing_record_queue.empty():
-            missing_record_list.append(missing_record_queue.get())
-
-        # insert missing records
-        # TODO: extract to util funtion start
-        self.logger.info('Now start inserting missing records...')
-        # use sql directly, combine 1000 records into one sql to execute and commit
-        sql_prefix = 'insert into ' \
-                     'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`, ' \
-                     'dislike, now_rank, his_rank, vt, vv) ' \
-                     'values '
-        sql = sql_prefix
-        log_gap = 1000 * max(1, (len(missing_record_list) // 1000 // 10))
-        for idx, record in enumerate(missing_record_list, 1):
-            sql += '(%d, %d, %d, %d, %d, %d, %d, %d, %d, %s, %s, %s, %s, %s), ' % (
-                record.added, record.aid,
-                record.view, record.danmaku, record.reply, record.favorite, record.coin, record.share, record.like,
-                null_or_str(record.dislike), null_or_str(
-                    record.now_rank), null_or_str(record.his_rank),
-                null_or_str(record.vt), null_or_str(record.vv)
-            )
-            if idx % 1000 == 0:
-                sql = sql[:-2]  # remove ending comma and space
-                try:
-                    session.execute(sql)
-                    session.commit()
-                except Exception as e:
-                    self.logger.error(
-                        'Fail to execute sql: %s...%s' % (sql[:100], sql[-100:]))
-                    self.logger.error('Exception: %s' % str(e))
-                sql = sql_prefix
-                if idx % log_gap == 0:
-                    self.logger.info('%d / %d done' %
-                                     (idx, len(missing_record_list)))
-        if sql != sql_prefix:
-            sql = sql[:-2]  # remove ending comma and space
-            try:
-                session.execute(sql)
-                session.commit()
-            except Exception as e:
-                self.logger.error('Fail to execute sql: %s...%s' %
-                                  (sql[:100], sql[-100:]))
-                self.logger.error('Exception: %s' % str(e))
-        self.logger.info('%d / %d done' %
-                         (len(missing_record_list), len(missing_record_list)))
-        self.logger.info('Finish inserting missing records! %d missing records added, %d aids still unresolved' % (
-            len(missing_record_list),
-            len(need_insert_but_record_not_found_aid_list) - len(missing_record_list)))
-        # TODO: extract to util funtion end
-
-        self.logger.info(
-            'c30 video pipeline done! return %d records' % len(aid_record_dict))
-        return_record_list = [record for record in aid_record_dict.values()]
-        return_record_list.extend(missing_record_list)
-
-        for record in return_record_list:
-            self.record_queue.put(record)
-
-        session.close()
-
-    def process_simple(self):
-        # get need insert aid list
-        session = Session()
-        need_insert_aid_list = get_need_insert_aid_list(
-            self.time_label, True, session)
+        need_insert_aid_list = get_need_insert_aid_list(self.time_label, session)
         session.close()
         self.logger.info(
             f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
-        # bulk fetch -> single batch writer -> self.record_queue.
-        # 250 fetch workers (vs C0's 50): this is C30's primary path over a
-        # much larger aid set (~65k+/163k+). Scaling is sub-linear -- the
-        # trimmed worker is a single endpoint, and the box's ~3Mbps OUTBOUND
-        # (request headers + ACKs, ~500B/fetch) caps throughput somewhere
-        # around 400-600/s regardless of worker count. Watch the PROGRESS rate
-        # and SYSSTAT tx: if tx pins at ~3Mbps, more workers won't help.
         fetch_and_batch_insert_records(
             need_insert_aid_list, self.record_queue,
             job_num=250,
-            fetch_label='simple-fetch',
-            writer_label='simple-db-writer',
-            logger_name='C30PipelineRunner',
-            duration_limit_s=60 * 40,  # 40 minutes
-            recovery_path=f'data/record_recovery_c30_{_stamp(self.time_task)}.csv',
-            update_job_num=10, update_label='c30-video-update')
+            fetch_label='record-fetch',
+            writer_label='record-db-writer',
+            logger_name='VideoRecordAcquisitionJob',
+            duration_limit_s=60 * 40,  # 40 minutes, caps the 04:00 full scan
+            recovery_path=f'data/record_recovery_{_stamp(self.time_task)}.csv',
+            update_job_num=10, update_label='record-video-update')
 
         self.logger.info('Finish add need insert aid list!')
-
-    def run(self):
-        self.logger.info('c30 video pipeline start')
-
-        service = Service(mode='worker')
-
-        # Probe the bulk newlist api. It can be "broken" several ways: raise,
-        # return count 0, or (degraded) return an implausibly small count. A
-        # healthy c30 newlist reports hundreds of thousands of archives (~1M,
-        # thousands of pages), so treat anything below this floor as broken and
-        # fall back to the view-only per-aid path -- which also avoids the heavy
-        # update_video + flaky video_tags call.
-        bulk_min_count = 1000
-        try:
-            new_list = service.get_newlist({'rid': 30, 'pn': 1, 'ps': 50})
-            bulk_count = new_list.page.count
-        except Exception as e:
-            self.logger.error(f'Fail to get newlist, very likely api broken. '
-                              f'rid: 30, pn: 1, ps: 50, error: {e}')
-            bulk_count = 0
-
-        if bulk_count >= bulk_min_count:
-            self.logger.info(
-                f'Newlist bulk api healthy (count: {bulk_count}). Go comprehensive process.')
-            self.process_comprehensive()
-        else:
-            self.logger.warning(
-                f'Newlist bulk api empty/broken/degraded (count: {bulk_count}, < {bulk_min_count}). '
-                f'Go simple (view-only per-aid) process.')
-            self.process_simple()
-
 
 # TODO: change to record new
 class RecordsSaveToFileRunner(Thread):
@@ -1471,19 +706,14 @@ def run_hourly_video_record_add(time_task):
     logger.info(
         'Now start hourly video record add, time label: %s..' % time_label)
 
-    # upstream data acquisition pipeline, c30 and c0 pipeline runner, init -> start -> join -> records
-    logger.info('Now start upstream data acquisition pipelines...')
+    # upstream data acquisition: one merged pipeline over all in-scope videos
+    logger.info('Now start upstream data acquisition pipeline...')
 
     records_queue: Queue[RecordNew] = Queue()
 
-    c30_runner = C30PipelineRunner(time_task, records_queue)
-    c0_runner = C0DataAcquisitionJob(time_task, records_queue)
-
-    c30_runner.start()
-    c0_runner.start()
-
-    c30_runner.join()
-    c0_runner.join()
+    acquisition_runner = VideoRecordAcquisitionJob(time_task, records_queue)
+    acquisition_runner.start()
+    acquisition_runner.join()
 
     records = []
     while not records_queue.empty():
