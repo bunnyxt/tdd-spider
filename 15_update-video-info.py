@@ -67,7 +67,6 @@ def update_video_info():
         progress_total=len(bvids),
         progress_label='video-update',
         progress_interval_s=10.0,  # slow long job -- 10s keeps the log readable
-        ensure_conditions=['0_update', '1_update', 'update_exception'],
         logger_name=script_id)
     pool.start()
     logger.info(f'{job_num} job(s) started.')
