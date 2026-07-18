@@ -1,5 +1,6 @@
 from .models import TddVideo, TddMember, TddVideoStaff
 import logging
+import time
 logger_db = logging.getLogger('db')
 
 __all__ = ['DBOperation']
@@ -104,15 +105,40 @@ class DBOperation:
                             (e, {}), exc_info=True)
             return None
 
+    # full-table scans (all bvids / all mids) stream ~1M+ rows and occasionally
+    # trip the connection read_timeout when MySQL is busy (e.g. the 06:00 cron
+    # pile-up crashed 15_ this way). A transient timeout should not lose the
+    # whole daily run, so retry with backoff -- pool_pre_ping (see db/basic.py)
+    # hands back a live connection on the next attempt.
+    _FULL_SCAN_RETRIES = 3
+    _FULL_SCAN_BACKOFF_S = 5.0
+
+    @classmethod
+    def _query_first_col_with_retry(cls, session, sql):
+        # returns list of first-column values, or None if it ultimately fails
+        # (preserves the historical contract of the callers below)
+        for attempt in range(1, cls._FULL_SCAN_RETRIES + 1):
+            try:
+                result = session.execute(sql)
+                return list(r[0] for r in result)
+            except Exception as e:
+                # clear the failed/half-read transaction so the retry starts clean
+                try:
+                    session.rollback()
+                except Exception:
+                    pass
+                if attempt >= cls._FULL_SCAN_RETRIES:
+                    logger_db.error('Query failed after %d attempts: %s, error: %s'
+                                    % (cls._FULL_SCAN_RETRIES, sql, e), exc_info=True)
+                    return None
+                backoff = cls._FULL_SCAN_BACKOFF_S * attempt
+                logger_db.warning('Query attempt %d/%d failed, retrying in %.0fs: %s, error: %s'
+                                  % (attempt, cls._FULL_SCAN_RETRIES, backoff, sql, e))
+                time.sleep(backoff)
+
     @classmethod
     def query_all_video_bvids(cls, session):
-        try:
-            result = session.execute('select bvid from tdd_video')
-            return list(r[0] for r in result)
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {}), exc_info=True)
-            return None
+        return cls._query_first_col_with_retry(session, 'select bvid from tdd_video')
 
     @classmethod
     def query_member_mids(cls, offset, size, session):
@@ -127,13 +153,7 @@ class DBOperation:
 
     @classmethod
     def query_all_member_mids(cls, session):
-        try:
-            result = session.execute('select mid from tdd_member')
-            return list(r[0] for r in result)
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {}), exc_info=True)
-            return None
+        return cls._query_first_col_with_retry(session, 'select mid from tdd_member')
 
     @classmethod
     def _tid_filters(cls, is_tid_30):
