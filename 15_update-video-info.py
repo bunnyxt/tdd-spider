@@ -4,7 +4,7 @@ from serverchan import sc_send_summary
 from util import logging_init, get_week_day, fullname, b2a
 from timer import Timer
 from queue import Queue
-from job import UpdateVideoJob, JobStat
+from job import UpdateVideoJob, JobPool
 import logging
 
 script_id = '15'
@@ -49,32 +49,28 @@ def update_video_info():
     # 51_). This also retires the old `while not queue.empty(): queue.get()`
     # loop, which races -- two workers both see a non-empty queue, both call
     # get(), and the loser blocks forever on the last item.
-    job_num = 20
+    # 50 workers (was 20): this is worker-bound with inbound headroom (the
+    # full-view responses are large but the downlink is fat), so more workers
+    # cut the multi-hour runtime roughly proportionally. It hits the full-view
+    # Lambda -- a different endpoint than 51_'s trimmed one -- and sends little
+    # outbound per request, so it does not meaningfully slow 51_'s hourly runs
+    # even when it overruns. No duration cap: 15_ runs to completion.
+    job_num = 50
     for _ in range(job_num):
-        aid_queue.put(None)
+        aid_queue.put(None)  # one sentinel per worker (sentinel-terminated)
     logger.info(f'{len(bvids)} aids put into queue.')
 
-    # create jobs
-    job_list = []
-    for i in range(job_num):
-        job_list.append(UpdateVideoJob(f'job_{i}', aid_queue, service))
-
-    # start jobs
-    for job in job_list:
-        job.start()
+    # JobPool gives a per-interval PROGRESS heartbeat over the multi-hour run
+    # (previously blind) and merges the workers' stats.
+    pool = JobPool(
+        [UpdateVideoJob(f'job_{i}', aid_queue, service) for i in range(job_num)],
+        progress_total=len(bvids),
+        progress_label='video-update',
+        progress_interval_s=10.0,  # slow long job -- 10s keeps the log readable
+        logger_name=script_id)
+    pool.start()
     logger.info(f'{job_num} job(s) started.')
-
-    # wait for jobs
-    for job in job_list:
-        job.join()
-
-    # collect statistics
-    job_stat_list: list[JobStat] = []
-    for job in job_list:
-        job_stat_list.append(job.stat)
-
-    # merge statistics counters
-    job_stat_merged = sum(job_stat_list, JobStat())
+    job_stat_merged = pool.join()
 
     session.close()
 
@@ -83,7 +79,7 @@ def update_video_info():
     # summary
     logger.info(f'Finish {script_fullname}!')
     logger.info(timer.get_summary())
-    logger.info(job_stat_merged.get_summary())
+    logger.info(job_stat_merged.get_summary('video-update'))
     sc_send_summary(script_fullname, timer, job_stat_merged)
 
 
