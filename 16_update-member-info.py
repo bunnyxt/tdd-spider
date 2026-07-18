@@ -4,7 +4,7 @@ from queue import Queue
 from service import Service
 from serverchan import sc_send_summary
 from timer import Timer
-from job import UpdateMemberJob, JobStat
+from job import UpdateMemberJob, JobPool
 import logging
 
 script_id = '16'
@@ -36,36 +36,33 @@ def update_member_info():
         if idx % 7 == week_day:
             mids.append(mid)
 
-    logger.info(f'Will update {len(mids)} videos info.')
+    logger.info(f'Will update {len(mids)} members info.')
 
     # put mid into queue
     mid_queue: Queue[int] = Queue()
     for mid in mids:
         mid_queue.put(mid)
-    logger.info(f'{mid_queue.qsize()} mids put into queue.')
+    # one sentinel per worker (UpdateMemberJob is sentinel-terminated)
+    # 50 workers (was 20): each member spends most of its ~25s parked in the
+    # member-card anti-crawler 60s sleep, so more workers just means more
+    # members sleeping in parallel -- worth trying to cut the multi-hour runtime.
+    # (The proper fix for the anti-crawler is a separate, thornier change.)
+    job_num = 50
+    for _ in range(job_num):
+        mid_queue.put(None)
+    logger.info(f'{len(mids)} mids put into queue.')
 
-    # create jobs
-    job_num = 20
-    job_list = []
-    for i in range(job_num):
-        job_list.append(UpdateMemberJob(f'job_{i}', mid_queue, service))
-
-    # start jobs
-    for job in job_list:
-        job.start()
+    # JobPool gives a per-30s PROGRESS heartbeat over the multi-hour run
+    # (previously blind) and merges the workers' stats.
+    pool = JobPool(
+        [UpdateMemberJob(f'job_{i}', mid_queue, service) for i in range(job_num)],
+        progress_total=len(mids),
+        progress_label='member-update',
+        progress_interval_s=30.0,  # very slow job (~25s/member) -- 30s is plenty
+        logger_name=script_id)
+    pool.start()
     logger.info(f'{job_num} job(s) started.')
-
-    # wait for jobs
-    for job in job_list:
-        job.join()
-
-    # collect statistics
-    job_stat_list: list[JobStat] = []
-    for job in job_list:
-        job_stat_list.append(job.stat)
-
-    # merge statistics counters
-    job_stat_merged = sum(job_stat_list, JobStat())
+    job_stat_merged = pool.join()
 
     session.close()
 
@@ -74,7 +71,7 @@ def update_member_info():
     # summary
     logger.info(f'Finish {script_fullname}!')
     logger.info(timer.get_summary())
-    logger.info(job_stat_merged.get_summary())
+    logger.info(job_stat_merged.get_summary('member-update'))
     sc_send_summary(script_fullname, timer, job_stat_merged)
 
 
