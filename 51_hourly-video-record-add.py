@@ -188,11 +188,13 @@ class VideoRecordAcquisitionJob(Job):
     (see git history for process_comprehensive et al., removed here). One aid
     set, one worker pool.
 
-    job_num=250: throughput is capped by the box's ~3Mbps OUTBOUND (request
-    headers + ACKs, ~500B/fetch), which saturates around 500-600/s regardless
-    of worker count -- more workers do not help. A single batch writer keeps up
-    comfortably (measured ~1000+ rec/s capacity vs the ~560/s network-capped
-    arrival), so no writer parallelism is needed.
+    job_num=300: matches the total concurrency the old split ran (250 c30 + 50
+    c0), which cleared the ~1.09M full scan in ~32 min. The first merged runs at
+    250 were a consistent ~35 min (~558/s) -- outbound (~3Mbps, request headers
+    + ACKs) is near saturation but not fully capped, so the extra 50 workers buy
+    back those ~3 min and, more usefully, headroom under the 40-min cap. A single
+    batch writer still keeps up comfortably (measured ~1000+ rec/s capacity vs
+    the ~560/s network-capped arrival), so no writer parallelism is needed.
     """
 
     def __init__(self, time_task: str, record_queue: Queue[RecordNew]):
@@ -210,7 +212,7 @@ class VideoRecordAcquisitionJob(Job):
 
         fetch_and_batch_insert_records(
             need_insert_aid_list, self.record_queue,
-            job_num=250,
+            job_num=300,
             fetch_label='record-fetch',
             writer_label='record-db-writer',
             logger_name='VideoRecordAcquisitionJob',
