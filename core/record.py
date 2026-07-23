@@ -1,6 +1,6 @@
 from typing import NamedTuple, Optional
 
-__all__ = ['RecordNew']
+__all__ = ['RecordNew', 'MemberFollowerRecordNew']
 
 
 # Lightweight, immutable, session-independent video record DTO. This is the type
@@ -25,3 +25,12 @@ class RecordNew(NamedTuple):
     his_rank: int
     vt: Optional[int]
     vv: Optional[int]
+
+
+# Lightweight, session-independent member-follower record DTO. Same role as
+# RecordNew for the follower-count time series (fetch -> queue -> batch INSERT
+# into tdd_member_follower_record); ORM objects never cross the thread boundary.
+class MemberFollowerRecordNew(NamedTuple):
+    added: int
+    mid: int
+    follower: int

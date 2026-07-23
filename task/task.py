@@ -3,7 +3,7 @@ from sqlalchemy.orm.session import Session
 from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord, \
     TddMemberLog, TddSprintVideoRecord
 from util import get_ts_s, a2b, same_pic_url, null_or_str
-from core import TddError, RecordNew
+from core import TddError, RecordNew, MemberFollowerRecordNew
 from .error import AlreadyExistError, NotExistError
 
 import logging
@@ -19,6 +19,7 @@ __all__ = ['add_video_record_via_video_view',
            'add_sprint_video_record_via_video_view',
            'add_video', 'update_video',
            'add_member', 'update_member', 'commit_staff', 'add_member_follower_record',
+           'fetch_member_follower_record', 'commit_member_follower_records_batch',
            'get_video_tags_str']
 
 
@@ -698,6 +699,44 @@ def add_member_follower_record(mid: int, service: Service, session: Session):
     DBOperation.add(new_follower_record, session)
 
     return new_follower_record
+
+
+def fetch_member_follower_record(mid: int, service: Service,
+                                 out_stat: dict = None) -> MemberFollowerRecordNew:
+    # Fetch-only: build a session-independent follower record WITHOUT touching
+    # the DB. Pair with commit_member_follower_records_batch (the bulk writer).
+    # out_stat (optional): filled with 'http_ms'.
+    stage_start = time.perf_counter()
+    try:
+        member_relation = service.get_member_relation({'vmid': mid})
+    except ServiceError as e:
+        raise e
+    if out_stat is not None:
+        out_stat['http_ms'] = int((time.perf_counter() - stage_start) * 1000)
+
+    return MemberFollowerRecordNew(
+        added=get_ts_s(),
+        mid=mid,
+        follower=member_relation.follower,
+    )
+
+
+def commit_member_follower_records_batch(records: list, session: Session, out_stat: dict = None) -> None:
+    # Persist many MemberFollowerRecordNew with ONE multi-row INSERT and ONE
+    # commit -- the bulk counterpart of add_member_follower_record, removing the
+    # per-record commit/fsync contention. Raises on failure; caller owns retry.
+    # out_stat (optional): filled with 'db_ms'.
+    if not records:
+        return
+
+    stage_start = time.perf_counter()
+    sql = 'insert into tdd_member_follower_record(added, mid, follower) values '
+    sql += ', '.join(
+        '(%d, %d, %d)' % (r.added, r.mid, r.follower) for r in records)
+    session.execute(sql)
+    session.commit()
+    if out_stat is not None:
+        out_stat['db_ms'] = int((time.perf_counter() - stage_start) * 1000)
 
 
 def get_video_tags_str(aid: int, service: Service) -> str:
