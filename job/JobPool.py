@@ -3,7 +3,6 @@ import logging
 from collections import Counter
 from threading import Thread, Event
 from typing import Optional
-from db import engine
 from .Job import Job
 from .JobStat import JobStat
 
@@ -84,20 +83,6 @@ class JobPool:
     def _fmt_ms(ms: float) -> str:
         return f'{ms / 1000:.2f}s' if ms >= 1000 else f'{ms:.0f}ms'
 
-    @staticmethod
-    def _pool_status_str() -> str:
-        # live DB connection-pool usage: how many connections the process holds
-        # (checked out) right now, vs the base pool size. A worker that holds a
-        # session across a slow HTTP fetch / sleep keeps a connection checked
-        # out the whole time, so this reveals connection pressure directly.
-        # Cheap: attribute reads, no DB round-trip. Best-effort (pool type may
-        # vary), so never let it break the heartbeat.
-        try:
-            pool = engine.pool
-            return f'pool: {pool.checkedout()}/{pool.size()} checked out'
-        except Exception:
-            return ''
-
     def _report_progress(self):
         last_done = 0
         last_ts = time.time()
@@ -137,9 +122,6 @@ class JobPool:
                     cond_str = ', '.join(
                         f'{k}: {v}' for k, v in counts.most_common())
                     msg = f'{msg} | {cond_str}'
-            pool_str = self._pool_status_str()
-            if pool_str:
-                msg = f'{msg} | {pool_str}'
             self.logger.info(msg)
             last_done, last_ts = done, now
             if stopped:
