@@ -21,6 +21,36 @@ RequestMode = Literal['direct', 'worker']
 
 __all__ = ['Service', 'RequestMode']
 
+# Client-side bounds for the trimmed video_view worker specifically, rather than
+# the Service-wide defaults (5.0s / 10.0s), which the other endpoints keep.
+#
+# These are coupled to the worker Lambda's own function timeout, currently 10s.
+# The invariant is:
+#
+#     _TRIMMED_DEADLINE_S > _TRIMMED_TIMEOUT_S > lambda function timeout
+#
+# and both halves matter:
+#
+#   - `timeout` is the requests read timeout: the maximum gap between received
+#     bytes. A Lambda sends nothing at all while it works, so the entire
+#     invocation is one read gap and this value bounds its time-to-first-byte.
+#     If it sits below the Lambda's own timeout, the client abandons a request
+#     the Lambda is still running -- and still being billed for -- instead of
+#     letting the Lambda return its own error. That is strictly worse than a
+#     shorter Lambda timeout: the fetch thread parks longer AND the invocation
+#     costs more.
+#   - `deadline` is the wall-clock budget for the whole trial, and _get() only
+#     checks it once response headers have arrived. Set below `timeout` it would
+#     discard a response that landed just inside `timeout`, on receipt.
+#
+# History: the Lambda ran a 3s timeout until 2026-08-08. Migrating it to arm64
+# shifted p99.9 latency 2549ms -> 2944ms against that 3s wall, which pinned
+# Duration Maximum at exactly 3000ms and took the error rate 0.003% -> 0.225%.
+# Raising the Lambda alone would not have helped, because the old 5.0s Service
+# default would then have become the binding limit.
+_TRIMMED_TIMEOUT_S = 12.0
+_TRIMMED_DEADLINE_S = 15.0
+
 
 class Service:
 
@@ -446,8 +476,14 @@ class Service:
             exit(1)
 
         # get response
+        # timeout/deadline default to the trimmed-worker values rather than the
+        # Service-wide ones: they must clear the worker Lambda's own function
+        # timeout, see _TRIMMED_TIMEOUT_S above. An explicit caller override
+        # still wins.
+        timeout = timeout if timeout is not None else _TRIMMED_TIMEOUT_S
         response = self._get(url, params=params, headers=headers,
-                             retry=retry, timeout=timeout, colddown_factor=colddown_factor)
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
+                             deadline=_TRIMMED_DEADLINE_S)
         if response is None:
             raise ResponseError('video_view_trimmed', params)
 
