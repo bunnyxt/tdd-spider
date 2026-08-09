@@ -2,23 +2,15 @@
 
 Guidance for AI agents (Claude Code and others) working in this repository.
 
-## Reports / knowledge base
+## Work summaries
 
-`docs/reports/` holds dated, point-in-time work summaries — the project's
-running memory of *why* things changed, not just what.
+Dated work summaries and incident write-ups are **not kept in this repo.** They
+live in a private knowledge base outside it, because in practice they accumulate
+infrastructure detail — account IDs, endpoint URLs, cost figures, hostnames —
+that shouldn't sit in a public repository.
 
-- **Before significant work:** skim recent reports in `docs/reports/` for
-  context on how the current state came to be.
-- **After significant work** — a milestone, a multi-PR arc, or an incident
-  worth remembering — write a new report there. Name it
-  `YYYY-MM-DD_short-title.md` (date first, so the folder sorts chronologically).
-- Reports are **immutable snapshots.** Don't edit an old report to reflect new
-  developments; write a new one. Point-in-time is the whole value.
-- Keep the bar **high.** A report per milestone/incident is a knowledge base;
-  a report per session is noise.
-- **No secrets in reports:** no server IPs, worker/endpoint URLs, credentials,
-  or tokens. Describe infrastructure generically ("the prod server", "the
-  worker Lambda").
+Don't create `docs/reports/`. If a milestone or incident is worth recording, ask
+the user where to write it.
 
 ## Repository notes
 
