@@ -2,6 +2,7 @@ from db import Session, TddMemberTotalStatRecord
 from util import logging_init, get_ts_s, get_current_line_no, fullname
 from timer import Timer
 from serverchan import sc_send_critical
+from runrecord import track
 import logging
 
 script_id = '18'
@@ -15,67 +16,74 @@ def member_total_stat_update():
     timer = Timer()
     timer.start()
 
-    session = Session()
+    with track(script_fullname) as recorder:
+        session = Session()
 
-    try:
-        added = get_ts_s()
+        try:
+            added = get_ts_s()
 
-        sql = 'select ' \
-              'v.aid, v.mid as v_mid, ' \
-              'r.view, r.danmaku, r.reply, r.favorite, r.coin, r.share, r.like, ' \
-              's.mid as s_mid ' \
-              'from ' \
-              'tdd_video v ' \
-              'left join tdd_video_record r on v.laststat = r.id ' \
-              'left join tdd_video_staff s on v.aid = s.aid ' \
-              'where ' \
-              'v.mid is not null && v.laststat is not null;'
-        result = session.execute(sql)
-        result = [[r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]] for r in result]
-        result_len = len(result)
-        logger.info(f'Total {result_len} result got.')
+            sql = 'select ' \
+                  'v.aid, v.mid as v_mid, ' \
+                  'r.view, r.danmaku, r.reply, r.favorite, r.coin, r.share, r.like, ' \
+                  's.mid as s_mid ' \
+                  'from ' \
+                  'tdd_video v ' \
+                  'left join tdd_video_record r on v.laststat = r.id ' \
+                  'left join tdd_video_staff s on v.aid = s.aid ' \
+                  'where ' \
+                  'v.mid is not null && v.laststat is not null;'
+            result = session.execute(sql)
+            result = [[r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]] for r in result]
+            result_len = len(result)
+            logger.info(f'Total {result_len} result got.')
 
-        mid_dict = {}
-        for r in result:
-            mid = r[1] if r[9] is None else r[9]  # if has staff, use staff mid instead
-            if mid not in mid_dict.keys():
-                mid_dict[mid] = TddMemberTotalStatRecord(added, mid)  # init mid in dict
-            mid_dict[mid].video_count += 1
-            mid_dict[mid].view += r[2]
-            mid_dict[mid].danmaku += r[3]
-            mid_dict[mid].reply += r[4]
-            mid_dict[mid].favorite += r[5]
-            mid_dict[mid].coin += r[6]
-            mid_dict[mid].share += r[7]
-            mid_dict[mid].like += r[8]
-        mid_dict_len = len(mid_dict)
-        logger.info(f'Total {mid_dict_len} items in mid_dict created.')
+            mid_dict = {}
+            for r in result:
+                mid = r[1] if r[9] is None else r[9]  # if has staff, use staff mid instead
+                if mid not in mid_dict.keys():
+                    mid_dict[mid] = TddMemberTotalStatRecord(added, mid)  # init mid in dict
+                mid_dict[mid].video_count += 1
+                mid_dict[mid].view += r[2]
+                mid_dict[mid].danmaku += r[3]
+                mid_dict[mid].reply += r[4]
+                mid_dict[mid].favorite += r[5]
+                mid_dict[mid].coin += r[6]
+                mid_dict[mid].share += r[7]
+                mid_dict[mid].like += r[8]
+            mid_dict_len = len(mid_dict)
+            logger.info(f'Total {mid_dict_len} items in mid_dict created.')
 
-        cnt = 0
-        for v in mid_dict.values():
-            session.add(v)
-            cnt += 1
-            if cnt % 100 == 0:
+            cnt = 0
+            for v in mid_dict.values():
+                session.add(v)
+                cnt += 1
+                if cnt % 100 == 0:
+                    session.commit()
+                    logger.info(f'{cnt} / {mid_dict_len} added')
+            if cnt % 100 != 0:
                 session.commit()
                 logger.info(f'{cnt} / {mid_dict_len} added')
-        if cnt % 100 != 0:
-            session.commit()
-            logger.info(f'{cnt} / {mid_dict_len} added')
-    except Exception as e:
-        message = f'Exception occurred when updating member total stat! error: {e}'
-        logger.critical(message)
-        sc_send_critical(script_fullname, message, __file__, get_current_line_no())
-        session.rollback()
+        except Exception as e:
+            message = f'Exception occurred when updating member total stat! error: {e}'
+            logger.critical(message)
+            sc_send_critical(script_fullname, message, __file__, get_current_line_no())
+            session.rollback()
+            session.close()
+            exit(1)
+
         session.close()
-        exit(1)
 
-    session.close()
+        timer.stop()
 
-    timer.stop()
+        # run-record metrics (best-effort; a disabled recorder is a no-op).
+        # Only the counts this script already computes -- no fabricated JobStat.
+        recorder.add_metric('member-total-stat', 'result_rows', result_len, 'count')
+        recorder.add_metric('member-total-stat', 'member_count', mid_dict_len, 'count')
+        recorder.add_metric('member-total-stat', 'records_added', cnt, 'count')
 
-    # summary
-    logger.info(f'Finish {script_fullname}!')
-    logger.info(timer.get_summary())
+        # summary
+        logger.info(f'Finish {script_fullname}!')
+        logger.info(timer.get_summary())
 
 
 def main():
