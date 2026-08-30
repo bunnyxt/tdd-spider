@@ -3,6 +3,7 @@ from timer import Timer
 from job import AddSprintVideoRecordJob
 from service import Service
 from serverchan import sc_send_summary
+from runrecord import track
 from util import logging_init, fullname
 from queue import Queue
 import logging
@@ -18,44 +19,48 @@ def add_sprint_video_record():
     timer = Timer()
     timer.start()
 
-    session = Session()
-    service = Service(mode='worker')
+    with track(script_fullname) as recorder:
+        session = Session()
+        service = Service(mode='worker')
 
-    # load processing video aids from db
-    result = session.execute('select aid from tdd_sprint_video where status = "processing"')
-    aids = [r['aid'] for r in result]
-    logger.info(f'Total {len(aids)} videos got.')
+        # load processing video aids from db
+        result = session.execute('select aid from tdd_sprint_video where status = "processing"')
+        aids = [r['aid'] for r in result]
+        logger.info(f'Total {len(aids)} videos got.')
 
-    # put aid into queue
-    aid_queue: Queue[int] = Queue()
-    for aid in aids:
-        aid_queue.put(aid)
-    logger.info(f'{aid_queue.qsize()} aids put into queue.')
+        # put aid into queue
+        aid_queue: Queue[int] = Queue()
+        for aid in aids:
+            aid_queue.put(aid)
+        logger.info(f'{aid_queue.qsize()} aids put into queue.')
 
-    # create job
-    job = AddSprintVideoRecordJob('job', aid_queue, service)
+        # create job
+        job = AddSprintVideoRecordJob('job', aid_queue, service)
 
-    # start job
-    job.start()
+        # start job
+        job.start()
 
-    # wait for job
-    job.join()
+        # wait for job
+        job.join()
 
-    # collect statistic
-    job_stat = job.stat
+        # collect statistic
+        job_stat = job.stat
 
-    session.close()
+        session.close()
 
-    timer.stop()
+        timer.stop()
 
-    # summary
-    logger.info(f'Finish {script_fullname}!')
-    logger.info(timer.get_summary())
-    logger.info(job_stat.get_summary())
-    if job_stat.condition['exception'] > 0 \
-            or job_stat.condition['million_exception'] > 0 \
-            or job_stat.condition['million_success'] > 0:
-        sc_send_summary(script_fullname, timer, job_stat)
+        # run-record metrics (best-effort; a disabled recorder is a no-op)
+        recorder.add_job_stat_metrics('sprint-video-record', job_stat)
+
+        # summary
+        logger.info(f'Finish {script_fullname}!')
+        logger.info(timer.get_summary())
+        logger.info(job_stat.get_summary())
+        if job_stat.condition['exception'] > 0 \
+                or job_stat.condition['million_exception'] > 0 \
+                or job_stat.condition['million_success'] > 0:
+            sc_send_summary(script_fullname, timer, job_stat)
 
 
 def main():
