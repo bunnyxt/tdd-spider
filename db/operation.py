@@ -94,17 +94,6 @@ class DBOperation:
                             (e, {'mid': mid}), exc_info=True)
             return None
 
-    @classmethod
-    def count_table_until_ts(cls, table_name, ts, session):
-        try:
-            result = session.execute(
-                'select count(1) from %s where added <= %d;' % (table_name, ts))
-            return list(r[0] for r in result)
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {}), exc_info=True)
-            return None
-
     # full-table scans (all bvids / all mids) stream ~1M+ rows and occasionally
     # trip the connection read_timeout when MySQL is busy (e.g. the 06:00 cron
     # pile-up crashed 15_ this way). A transient timeout should not lose the
