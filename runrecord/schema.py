@@ -10,11 +10,17 @@ Deliberately NOT stored: ``exit_code`` (a script cannot reliably read its own),
 free-text ``summary`` (it duplicates the structured fields + metrics), and
 ``duration_ms`` (derivable from ``finished_at - started_at``).
 
-``init`` is idempotent and doubles as the migration entry point: it bumps
-``PRAGMA user_version`` and applies any future migration steps in order.
+``init`` is idempotent and doubles as the migration entry point: it applies any
+missing migration steps in order and moves ``PRAGMA user_version`` *forward* only.
+A database written by newer code (``user_version`` > ``SCHEMA_VERSION``) is left
+untouched and ``init`` raises -- it never rewrites the version backwards.
 """
 
-__all__ = ['SCHEMA_VERSION', 'init']
+__all__ = ['SCHEMA_VERSION', 'SchemaTooNewError', 'init']
+
+
+class SchemaTooNewError(RuntimeError):
+    """The database is at a schema version this code does not understand."""
 
 SCHEMA_VERSION = 1
 
@@ -51,15 +57,27 @@ CREATE TABLE IF NOT EXISTS run_log (
 
 
 def init(conn):
-    """Create/upgrade the schema on ``conn``. Idempotent."""
+    """
+    Create/upgrade the schema on ``conn``. Idempotent.
+
+    Raises ``SchemaTooNewError`` if the database is at a higher ``user_version``
+    than this code knows about -- downgrading the version (or writing against an
+    unknown schema) would be silent corruption. ``RunRecorder.start`` turns this
+    into a disabled no-op recorder, so a version skew never breaks a run.
+    """
     current = conn.execute('PRAGMA user_version').fetchone()[0]
+
+    if current > SCHEMA_VERSION:
+        raise SchemaTooNewError(
+            f'run-records database is at schema v{current}, but this code only '
+            f'understands v{SCHEMA_VERSION}')
 
     if current < 1:
         conn.executescript(_DDL_V1)
 
     # future: `if current < 2: conn.executescript(_DDL_V2)` ...
 
-    if current != SCHEMA_VERSION:
-        # PRAGMA does not accept bound parameters
+    if current < SCHEMA_VERSION:
+        # forward only; PRAGMA does not accept bound parameters
         conn.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
     conn.commit()

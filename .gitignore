@@ -18,7 +18,13 @@ __pycache__/
 log/
 data/
 *.csv
-test*
+
+# scratch scripts/notebooks in the repo root (throwaway experiments, never
+# committed). Narrow, root-anchored patterns -- NOT a bare `test*`, which also
+# swallowed the tracked `tests/` suite.
+/test-*.py
+/test-*.ipynb
+/test.py
 
 # run-record SQLite db + its derived files (the default path lives under data/
 # and is already ignored; this also covers a db pointed elsewhere)
@@ -30,8 +36,3 @@ test*
 # config
 conf/conf.ini
 service/endpoints.json
-
-# the committed run-record test suite -- its dir name matches `test*` above
-!/tests/
-!/tests/**
-/tests/**/__pycache__/
