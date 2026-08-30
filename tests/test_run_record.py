@@ -73,6 +73,35 @@ class SchemaTest(unittest.TestCase):
             self.assertNotIn(forbidden, cols)
         conn.close()
 
+    def test_newer_database_is_not_downgraded(self):
+        conn = _connect(self.path)
+        schema.init(conn)
+        # simulate a future schema version written by newer code
+        future = schema.SCHEMA_VERSION + 5
+        conn.execute(f'PRAGMA user_version = {future}')
+        conn.commit()
+
+        with self.assertRaises(schema.SchemaTooNewError):
+            schema.init(conn)
+        # version must be left exactly as it was, never rewritten backwards
+        self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], future)
+        conn.close()
+
+    def test_start_on_a_newer_database_yields_disabled_recorder(self):
+        conn = _connect(self.path)
+        schema.init(conn)
+        future = schema.SCHEMA_VERSION + 5
+        conn.execute(f'PRAGMA user_version = {future}')
+        conn.commit()
+        conn.close()
+
+        rec = RunRecorder.start('s', db_path=self.path)
+        self.assertFalse(rec.enabled)
+        # the database on disk is untouched
+        self.assertEqual(
+            _rows(self.path, 'PRAGMA user_version')[0][0], future)
+        self.assertEqual(_rows(self.path, 'SELECT count(*) FROM run')[0][0], 0)
+
     def test_metric_and_log_semantics(self):
         conn = _connect(self.path)
         schema.init(conn)
