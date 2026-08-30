@@ -78,6 +78,31 @@ nohup python -u <script-name.py> >/dev/null 2>&1 &
 ./run_kill.sh <pid>
 ```
 
+## 查看运行记录
+
+部分脚本会把每次运行写入一条结构化记录（`runrecord/`，SQLite 存于 `data/run-records.sqlite3`）。除命令行查询 `python -m runrecord` 外，还提供一个**只读** Web 页面用于日常巡检：首页展示各脚本最近一次运行的健康状态、最近运行列表，可按脚本和状态筛选，并展开单次运行的指标与日志路径。
+
+该服务仅监听 `127.0.0.1`，不写数据库、无鉴权。在**存放数据库的机器**上前台启动，再从本地通过 SSH 隧道访问（服务器上 Ctrl-C 结束）：
+
+```shell script
+# 在服务器上
+python3 -m runrecord.web \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --db data/run-records.sqlite3
+
+# 在本地工作机上
+ssh -N -L 8765:127.0.0.1:8765 <服务器>
+# 浏览器打开 http://127.0.0.1:8765/
+```
+
+也可在工作机上一条命令完成：
+
+```shell script
+ssh -L 8765:127.0.0.1:8765 <服务器> \
+  'cd <项目目录> && python3 -m runrecord.web --host 127.0.0.1 --port 8765 --db data/run-records.sqlite3'
+```
+
 ## 脚本列表
 
 本系统内置了一些定时数据获取或处理脚本，位于根目录下，文件名满足`数字+下划线+由短横线连接的一组英文单词+.py`格式，例如`16_daily-update-member-info.py`。这里对这些内置的脚本做一个简单的介绍。

@@ -25,3 +25,34 @@ The project is composed of three distinct components, all interconnected with a 
 See the structure below.
 
 ![TianDian Daily structure](./tdd-structure.png "TianDian Daily structure")
+
+## Run records
+
+Some scripts persist one structured row per run into a SQLite store
+(`runrecord/`, `data/run-records.sqlite3`). Besides the CLI (`python -m
+runrecord`), a **read-only** web page gives an at-a-glance health view: the
+latest status of each script, recent runs, filtering by script and status, and
+per-run metrics and log paths.
+
+It listens on `127.0.0.1` only, never writes, and has no auth. Start it in the
+foreground on the host that holds the database, and reach it from a workstation
+over an SSH tunnel (Ctrl-C on the server stops it):
+
+```shell
+# on the server
+python3 -m runrecord.web \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --db data/run-records.sqlite3
+
+# on the workstation
+ssh -N -L 8765:127.0.0.1:8765 <server>
+# open http://127.0.0.1:8765/
+```
+
+Or as a single command from the workstation:
+
+```shell
+ssh -L 8765:127.0.0.1:8765 <server> \
+  'cd <project-directory> && python3 -m runrecord.web --host 127.0.0.1 --port 8765 --db data/run-records.sqlite3'
+```
