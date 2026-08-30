@@ -490,14 +490,16 @@ def _print_detail(r, *, db_path, db_version):
 # --------------------------------------------------------------------------- #
 
 _EPILOG = (
+    '`list` is the default command and may be omitted. --db, --stale-after and\n'
+    '--json may appear before or after an explicit list / show.\n\n'
     'exit codes: 0 ok, 1 no match, 2 bad arguments, 3 incompatible schema, '
     '4 database error, 5 database file not found.\n\n'
     'examples:\n'
-    '  python -m runrecord list\n'
+    '  python -m runrecord\n'
     '  python -m runrecord list --script 51_hourly-video-record-add --since 7d\n'
-    '  python -m runrecord list --status stale --json\n'
+    '  python -m runrecord --json list --status stale\n'
     '  python -m runrecord show --latest --script 51_hourly-video-record-add\n'
-    '  python -m runrecord show a1b2c3d4\n')
+    '  python -m runrecord --db ./run-records.sqlite3 show a1b2c3d4\n')
 
 
 def _add_common(parser):
@@ -518,7 +520,8 @@ def _top_parser():
     parser = argparse.ArgumentParser(
         prog='python -m runrecord',
         description='Read-only query CLI over the run-record store. The default '
-                    'command is "list".',
+                    'command is "list"; --db, --stale-after and --json may '
+                    'appear before or after an explicit list / show.',
         epilog=_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', metavar='{list,show}')
     sub.add_parser('list', help='list recent runs (default)', add_help=False)
@@ -575,16 +578,48 @@ def _dispatch(args):
         conn.close()
 
 
+# options (on any command) that consume the following token as their value;
+# used only to skip over `--opt value` while locating the command token
+_VALUE_OPTS = frozenset((
+    '--db', '--stale-after', '--script', '--status', '--since', '--until', '--limit',
+))
+
+
+def _split_command(argv):
+    """
+    Find an explicit ``list`` / ``show`` token anywhere before the first bare
+    positional, and return ``(command, argv_without_that_token)``.
+
+    This lets the common options (--db, --stale-after, --json) sit on either
+    side of the command: everything is then handed to one flat per-command
+    parser that accepts those options regardless of position.
+    """
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok == '--':
+            break
+        if tok in ('list', 'show'):
+            return tok, argv[:i] + argv[i + 1:]
+        if tok in _VALUE_OPTS:
+            i += 2                     # skip the option and its value
+            continue
+        if tok.startswith('-'):        # a flag / --opt=value / -h -- keep scanning
+            i += 1
+            continue
+        break                          # a bare positional that isn't a command
+    return None, argv
+
+
 def _parse_args(argv):
     """Route to a flat per-command parser; `list` is the default command."""
     if argv and argv[0] in ('-h', '--help'):
         _top_parser().parse_args(argv)  # prints help, raises SystemExit(0)
-    if argv and argv[0] == 'show':
-        parser, rest, command = _show_parser(), argv[1:], 'show'
-    elif argv and argv[0] == 'list':
-        parser, rest, command = _list_parser(), argv[1:], 'list'
-    else:
-        parser, rest, command = _list_parser(), argv, 'list'
+
+    command, rest = _split_command(argv)
+    if command is None:
+        command = 'list'
+    parser = _show_parser() if command == 'show' else _list_parser()
 
     args = parser.parse_args(rest)
     args.command = command

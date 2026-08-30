@@ -410,6 +410,107 @@ class ExitCodeTest(_DbCase):
             conn.close()
 
 
+class GlobalOptionOrderingTest(_DbCase):
+    """--db / --stale-after / --json work before or after an explicit list/show."""
+
+    def _json(self, argv):
+        code, out, err = run_cli(argv)
+        self.assertEqual(code, 0, (argv, err))
+        return json.loads(out)
+
+    def test_formerly_failing_global_before_list(self):
+        # `--json list --limit 1` used to be misrouted -> "unrecognized
+        # arguments: list", exit 2
+        self.seed_basic()
+        payload = self._json(['--json', 'list', '--limit', '1', '--db', self.path])
+        self.assertEqual(payload['count'], 1)
+
+    def test_json_before_and_after_list_match(self):
+        self.seed_basic()
+        before = self._json(['--json', 'list', '--db', self.path])
+        after = self._json(['list', '--json', '--db', self.path])
+        for d in (before, after):
+            d.pop('generated_at')
+        self.assertEqual(before, after)
+        self.assertGreater(before['count'], 0)
+
+    def test_json_before_and_after_show(self):
+        self.seed_basic()
+        rid = 'aaaa1111' + '0' * 24
+        before = self._json(['--json', 'show', rid, '--db', self.path])
+        after = self._json(['show', rid, '--json', '--db', self.path])
+        self.assertEqual(before['runs'][0]['run_id'], rid)
+        self.assertEqual(after['runs'][0]['run_id'], rid)
+
+    def test_db_before_and_after_command(self):
+        self.seed_basic()
+        # a wrong position would fail to resolve the non-default path
+        self._json(['--db', self.path, '--json', 'list'])
+        self._json(['list', '--json', '--db', self.path])
+        self._json(['--db', self.path, '--json', 'show', '--latest'])
+        self._json(['show', '--latest', '--json', '--db', self.path])
+
+    def test_db_in_wrong_position_is_not_silently_ignored(self):
+        # if --db were dropped, this absent path would still error out
+        absent = os.path.join(self.dir, 'nope.sqlite3')
+        code_before, _, _ = run_cli(['--db', absent, 'list'])
+        code_after, _, _ = run_cli(['list', '--db', absent])
+        self.assertEqual(code_before, query.EXIT_NO_DB)
+        self.assertEqual(code_after, query.EXIT_NO_DB)
+
+    def test_stale_after_before_and_after_list_match(self):
+        _make_db(self.path)
+        _insert_run(self.path, 'a' * 32, 's',
+                    datetime.now(timezone.utc) - timedelta(minutes=40))
+        before = self._json(['--stale-after', '1800', '--json', 'list', '--db', self.path])
+        after = self._json(['list', '--json', '--stale-after', '1800', '--db', self.path])
+        self.assertEqual(before['runs'][0]['display_status'], 'stale')
+        self.assertEqual(after['runs'][0]['display_status'], 'stale')
+        self.assertEqual(before['query']['stale_after_s'], 1800)
+        self.assertEqual(after['query']['stale_after_s'], 1800)
+
+    def test_stale_after_before_and_after_show(self):
+        _make_db(self.path)
+        _insert_run(self.path, 'a' * 32, 's',
+                    datetime.now(timezone.utc) - timedelta(minutes=40))
+        before = self._json(['--stale-after', '1800', '--json', 'show', 'a' * 32,
+                             '--db', self.path])
+        after = self._json(['show', 'a' * 32, '--json', '--stale-after', '1800',
+                            '--db', self.path])
+        self.assertEqual(before['runs'][0]['display_status'], 'stale')
+        self.assertEqual(after['runs'][0]['display_status'], 'stale')
+
+    def test_all_three_globals_before_command(self):
+        self.seed_basic()
+        payload = self._json(['--db', self.path, '--stale-after', '99999',
+                              '--json', 'list'])
+        self.assertEqual(payload['query']['stale_after_s'], 99999)
+        self.assertGreater(payload['count'], 0)
+
+    def test_default_command_with_leading_global(self):
+        self.seed_basic()
+        # no explicit `list`, global option first
+        payload = self._json(['--json', '--db', self.path])
+        self.assertEqual(payload['query']['command'], 'list')
+        self.assertGreater(payload['count'], 0)
+
+    def test_bare_invocation_is_list(self):
+        _make_db(self.path)
+        _insert_run(self.path, 'a' * 32, 's', self.now, self.now, status='succeeded')
+        code, out, _ = run_cli(['--db', self.path])
+        self.assertEqual(code, 0)
+        self.assertIn('run(s)', out)
+
+    def test_help_variants(self):
+        for argv in (['-h'], ['--help'], ['list', '-h'], ['show', '-h']):
+            code, out, _ = run_cli(argv)
+            self.assertEqual(code, 0, argv)
+            self.assertIn('usage: python -m runrecord', out)
+        # top-level help documents the flexible ordering
+        _, top, _ = run_cli(['-h'])
+        self.assertIn('before or after', top)
+
+
 class ReadOnlyTest(_DbCase):
     def test_queries_do_not_touch_the_database(self):
         self.seed_basic()
