@@ -15,6 +15,7 @@ from typing import Optional
 from core import RecordNew
 from service import Service
 from job import FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool
+from runrecord import RunRecorder
 from timer import Timer
 import logging
 
@@ -197,11 +198,20 @@ class VideoRecordAcquisitionJob(Job):
     the ~560/s network-capped arrival), so no writer parallelism is needed.
     """
 
+    # pool labels, reused as run-record metric scopes
+    FETCH_LABEL = 'record-fetch'
+    WRITER_LABEL = 'record-db-writer'
+    UPDATE_LABEL = 'record-video-update'
+
     def __init__(self, time_task: str, record_queue: Queue[RecordNew]):
         super().__init__('acquisition')
         self.time_task = time_task      # full stamp, ex: '2026-07-14 08:00'
         self.time_label = time_task[-5:]  # hour only, ex: '08:00'
         self.record_queue = record_queue
+        # merged JobStats, populated by process(); stay None if process() raised
+        self.fetch_stat = None
+        self.writer_stat = None
+        self.update_stat = None
 
     def process(self):
         session = Session()
@@ -210,17 +220,24 @@ class VideoRecordAcquisitionJob(Job):
         self.logger.info(
             f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
-        fetch_and_batch_insert_records(
+        self.fetch_stat, self.writer_stat, self.update_stat = fetch_and_batch_insert_records(
             need_insert_aid_list, self.record_queue,
             job_num=300,
-            fetch_label='record-fetch',
-            writer_label='record-db-writer',
+            fetch_label=self.FETCH_LABEL,
+            writer_label=self.WRITER_LABEL,
             logger_name='VideoRecordAcquisitionJob',
             duration_limit_s=60 * 40,  # 40 minutes, caps the 04:00 full scan
             recovery_path=f'data/record_recovery_{_stamp(self.time_task)}.csv',
-            update_job_num=10, update_label='record-video-update')
+            update_job_num=10, update_label=self.UPDATE_LABEL)
 
         self.logger.info('Finish add need insert aid list!')
+
+    def stats(self) -> dict:
+        """{scope_label: merged JobStat} for the stats that were produced."""
+        pairs = ((self.FETCH_LABEL, self.fetch_stat),
+                 (self.WRITER_LABEL, self.writer_stat),
+                 (self.UPDATE_LABEL, self.update_stat))
+        return {label: stat for label, stat in pairs if stat is not None}
 
 # TODO: change to record new
 class RecordsSaveToFileRunner(Thread):
@@ -703,7 +720,7 @@ class RecentActivityFreqUpdateRunner(Thread):
             'Finish update recent, activity, freq fields of video!')
 
 
-def run_hourly_video_record_add(time_task):
+def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = None):
     time_label = time_task[-5:]  # current time, ex: 19:00
     logger.info(
         'Now start hourly video record add, time label: %s..' % time_label)
@@ -716,6 +733,12 @@ def run_hourly_video_record_add(time_task):
     acquisition_runner = VideoRecordAcquisitionJob(time_task, records_queue)
     acquisition_runner.start()
     acquisition_runner.join()
+
+    # run-record metrics: the key counts of the fetch / db-writer / video-update
+    # JobStats (best-effort; a disabled recorder is a no-op)
+    if recorder is not None:
+        for scope, stat in acquisition_runner.stats().items():
+            recorder.add_job_stat_metrics(scope, stat)
 
     records = []
     while not records_queue.empty():
@@ -774,14 +797,22 @@ def hourly_video_record_add():
     time_task = f'{get_ts_s_str()[:13]}:00'
     logger.info(f'Time task: {time_task}')
 
+    # persisted run record: one row per script start, updated on the way out.
+    # Best-effort -- start() never raises and returns a no-op recorder on failure.
+    recorder = RunRecorder.start(script_fullname)
+    recorder.attach_log_locations()
+
     try:
-        run_hourly_video_record_add(time_task)
+        run_hourly_video_record_add(time_task, recorder)
     except Exception as e:
         message = f'Exception occurred when running hourly video record add! time task: {time_task}, error: {e}'
         logger.critical(message)
+        recorder.finish('failed')
         sc_send_critical(script_fullname, message,
                          __file__, get_current_line_no())
         exit(1)
+
+    recorder.finish('succeeded')
 
     timer.stop()
 

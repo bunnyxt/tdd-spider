@@ -2,3 +2,8 @@ pymysql==0.9.3
 sqlalchemy==1.3.8
 configparser==4.0.2
 requests==2.32.3
+# bundled SQLite runtime for the run-record store: the prod venv-3.11 (Ubuntu
+# 16.04) was built without _sqlite3, so stdlib `import sqlite3` fails there.
+# linux-only -- there is no macOS/Windows wheel, and dev machines use stdlib
+# sqlite3 (the driver shim in runrecord/_sqlite.py prefers it).
+pysqlite3-binary==0.5.4.post2 ; sys_platform == "linux"
