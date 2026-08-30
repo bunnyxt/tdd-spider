@@ -12,6 +12,15 @@ that shouldn't sit in a public repository.
 Don't create `docs/reports/`. If a milestone or incident is worth recording, ask
 the user where to write it.
 
+## Public metadata hygiene
+
+Treat this repository and its GitHub activity as public. Branch names, commit
+messages, pull-request titles and bodies, review comments, and issue text must
+stand on repository-visible evidence alone. Do not mention private planning
+systems, local absolute paths, private session links, server aliases, or
+internal deployment records. Refer to private context only in the private
+system where it lives.
+
 ## Repository notes
 
 - Scripts are numbered by role (`12_`, `51_`, …) and run from cron on the prod
