@@ -22,3 +22,11 @@ the user where to write it.
 - `service/endpoints.json` (worker URLs) and `conf/conf.ini` (DB credentials)
   hold environment secrets and are git-ignored (see `.gitignore`) — never commit
   them. Their `.example` siblings are the tracked templates.
+
+## Tests
+
+- Committed tests live in `tests/`. Run them from the repo root:
+  `venv-3.11/bin/python -m unittest discover -s tests` (stdlib `unittest`, no
+  extra deps; a plain `python` works too where `venv-3.11` isn't set up).
+- Root-level `test-*.py` / `test-*.ipynb` / `test.py` are throwaway scratch and
+  are git-ignored — don't put committed tests there, and don't rely on them.
