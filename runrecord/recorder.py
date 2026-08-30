@@ -13,6 +13,13 @@ Usage (see 51_hourly-video-record-add.py):
         recorder.finish('failed')
         raise
 
+Scripts with a single top-level body can use the ``track`` context manager
+instead, which runs that same lifecycle (see 12_/15_/17_/62_/71_):
+
+    with track('15_update-video-info') as recorder:
+        ... do the work ...
+        recorder.add_job_stat_metrics('video-update', stat)
+
 Every method is best-effort: any failure is logged at WARNING and swallowed, and
 `RunRecorder.start` returns a disabled (no-op) recorder if the database cannot be
 opened. Recording is an index over the logs, never a thing that can break a run.
@@ -23,13 +30,14 @@ import os
 import socket
 import subprocess
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
 from ._sqlite import sqlite3
 from . import schema
 
-__all__ = ['RunRecorder', 'display_status', 'RUNNING', 'SUCCEEDED', 'FAILED']
+__all__ = ['RunRecorder', 'track', 'display_status', 'RUNNING', 'SUCCEEDED', 'FAILED']
 
 logger = logging.getLogger('runrecord')
 
@@ -182,6 +190,46 @@ class RunRecorder:
             pass
         self._conn = None
         self.enabled = False
+
+
+def _is_failure(exc: BaseException) -> bool:
+    """
+    Whether an exception leaving a tracked block should close the run as
+    'failed'. A clean ``exit()`` / ``exit(0)`` is a success; anything else --
+    a real exception, ``exit(1)``, KeyboardInterrupt -- is a failure.
+    """
+    if isinstance(exc, SystemExit):
+        return exc.code not in (0, None)
+    return True
+
+
+@contextmanager
+def track(script_name: str, db_path: Optional[str] = None):
+    """
+    Wrap a script run in the same lifecycle 51_ drives by hand: open a run
+    record, attach the active log-file locations, then close the record on the
+    way out -- 'succeeded' on a clean exit, 'failed' if the body raises (the
+    exception then propagates unchanged). A killed / power-lost process never
+    reaches the exit, so its row is left 'running' for the query side to derive
+    as 'stale' -- the signal that separates "did not finish" from "failed".
+
+        with track('15_update-video-info') as recorder:
+            ... do the work ...
+            recorder.add_job_stat_metrics('video-update', stat)
+
+    Best-effort like every other entry point here: a disabled recorder (no
+    driver, unwritable database, schema too new) turns every call into a no-op
+    and the block runs exactly as if it were not there.
+    """
+    recorder = RunRecorder.start(script_name, db_path=db_path)
+    recorder.attach_log_locations()
+    try:
+        yield recorder
+    except BaseException as e:
+        recorder.finish('failed' if _is_failure(e) else 'succeeded')
+        raise
+    else:
+        recorder.finish('succeeded')
 
 
 def display_status(status: str, started_at: str, finished_at: Optional[str] = None,
