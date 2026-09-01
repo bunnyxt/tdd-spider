@@ -1,5 +1,5 @@
 """
-Tests / reproducible verification for the run-record store (BL-0001).
+Tests / reproducible verification for the run-record store.
 
 Run from the repo root:
 
@@ -106,7 +106,9 @@ class SchemaTest(unittest.TestCase):
         conn = _connect(self.path)
         schema.init(conn)
         metric_cols = [r[1] for r in conn.execute('PRAGMA table_info(run_metric)')]
-        self.assertEqual(metric_cols, ['run_id', 'scope', 'name', 'value', 'unit'])
+        # schema v2 appends the nullable is_key column
+        self.assertEqual(metric_cols,
+                         ['run_id', 'scope', 'name', 'value', 'unit', 'is_key'])
         log_cols = [r[1] for r in conn.execute('PRAGMA table_info(run_log)')]
         self.assertEqual(log_cols, ['run_id', 'level', 'path'])
         conn.close()
