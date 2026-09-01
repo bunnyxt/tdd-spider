@@ -28,7 +28,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from service import Service, ResponseError, CodeError, MisalignmentError  # noqa: E402
-    from service.Service import BATCH_READ_TIMEOUT_S, BATCH_DEADLINE_S  # noqa: E402
+    from service.Service import \
+        VIDEO_VIEW_TRIMMED_BATCH_READ_TIMEOUT_S, VIDEO_VIEW_TRIMMED_BATCH_DEADLINE_S  # noqa: E402
     from util import a2b  # noqa: E402
 except ImportError as e:  # pragma: no cover -- e.g. requests not installed
     raise unittest.SkipTest(f'service dependencies unavailable: {e}')
@@ -112,8 +113,8 @@ class TestBatchHappyPath(unittest.TestCase):
         # single whole-batch trial: retries are the CALLER's per-aid attempts
         self.assertEqual(call['retry'], 1)
         # batch-specific timeout chain, not the 5s/10s single-path defaults
-        self.assertEqual(call['timeout'], BATCH_READ_TIMEOUT_S)
-        self.assertEqual(call['deadline'], BATCH_DEADLINE_S)
+        self.assertEqual(call['timeout'], VIDEO_VIEW_TRIMMED_BATCH_READ_TIMEOUT_S)
+        self.assertEqual(call['deadline'], VIDEO_VIEW_TRIMMED_BATCH_DEADLINE_S)
 
     def test_vt_vv_missing_from_stat_default_to_none(self):
         # the worker backfills vt/vv with null, but the client must not rely
@@ -275,10 +276,35 @@ class TestMisalignment(unittest.TestCase):
         self._assert_misaligned(
             aids, envelope(aids, [json_item(1)], v=2))
 
+    def test_boolean_protocol_version_is_misaligned(self):
+        # True == 1 in Python; the protocol field must be a real int
+        aids = [1]
+        self._assert_misaligned(
+            aids, envelope(aids, [json_item(1)], v=True))
+
     def test_requested_count_mismatch(self):
         aids = [1, 2]
         self._assert_misaligned(
             aids, envelope(aids, [json_item(1), json_item(2)], requested=3))
+
+    def test_boolean_requested_is_misaligned(self):
+        # True == 1 would otherwise slip through a one-aid batch
+        aids = [1]
+        self._assert_misaligned(
+            aids, envelope(aids, [json_item(1)], requested=True))
+
+    def test_json_item_with_missing_or_non_int_status_is_misaligned(self):
+        # the worker always sets an integer status on json items: a missing,
+        # string, or boolean one is a contract violation, not a retryable
+        # upstream hiccup
+        for bad_status in (None, '200', True):
+            aid = 170001
+            item = json_item(aid)
+            if bad_status is None:
+                del item['status']
+            else:
+                item['status'] = bad_status
+            self._assert_misaligned([aid], envelope([aid], [item]))
 
     def test_results_length_mismatch(self):
         aids = [1, 2]

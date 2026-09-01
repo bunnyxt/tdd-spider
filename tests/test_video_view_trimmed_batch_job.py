@@ -1,11 +1,15 @@
 """
-Tests for FetchVideoRecordJob's BATCH mode (batch assembly, per-item retry,
-kill-switch, single-path fallback) and the conf switch behind it.
+Tests for FetchVideoRecordJob's BATCH mode and its pool-shared
+VideoViewTrimmedBatchController: batch assembly, per-item retry, the
+concurrency gate on simultaneous batch invocations, the circuit breaker
+(including the in-flight-response race), single-path fallback, and the conf
+switch behind it all.
 
 The Service is a scripted mock; the DB layer is stubbed out at import time
 (fetch workers never touch the DB anyway -- the stub just satisfies the
-``job`` package's sibling imports). Wall-clock colddown sleeps inside the job
-module are patched to keep the suite fast.
+``job`` package's sibling imports). Synchronous tests drive ``process()``
+directly with the job module's colddown sleeps patched out; the concurrency
+and race tests run REAL job threads against services that block on events.
 
 Run from the repo root:
 
@@ -15,6 +19,8 @@ Run from the repo root:
 import importlib.util
 import os
 import sys
+import threading
+import time
 import types
 import unittest
 import unittest.mock
@@ -30,6 +36,7 @@ if 'db' not in sys.modules:
     _fake_db = types.ModuleType('db')
     _fake_db.__getattr__ = lambda name: type(name, (), {})
     sys.modules['db'] = _fake_db
+
 
 def _load_real_conf_module():
     """
@@ -50,7 +57,7 @@ try:
         ResponseError, CodeError, MisalignmentError,
         VideoViewTrimmed, VideoViewStat, VideoViewTrimmedBatchItem)
     from job import (  # noqa: E402
-        FetchVideoRecordJob, VideoViewTrimmedBatchConfig, VideoViewTrimmedBatchState)
+        FetchVideoRecordJob, VideoViewTrimmedBatchConfig, VideoViewTrimmedBatchController)
     from task import build_video_record_via_video_view  # noqa: E402
     from util import a2b  # noqa: E402
 except ImportError as e:  # pragma: no cover -- e.g. requests not installed
@@ -60,6 +67,8 @@ conf_module = _load_real_conf_module()
 get_video_view_trimmed_batch_conf = conf_module.get_video_view_trimmed_batch_conf
 
 import configparser  # noqa: E402
+
+EVENT_TIMEOUT_S = 10  # generous guard so a broken sync can never hang the suite
 
 
 def make_view(aid, view=100):
@@ -85,6 +94,13 @@ def retryable_item(aid):
         aid=aid, view=None,
         error=ResponseError('video_view_trimmed_batch_item',
                             {'aid': aid, 'kind': 'item_timeout'}))
+
+
+def make_controller(batch_size=2, batch_fraction=1.0, max_concurrent_batches=30,
+                    max_attempts=3):
+    return VideoViewTrimmedBatchController(VideoViewTrimmedBatchConfig(
+        batch_size=batch_size, batch_fraction=batch_fraction,
+        max_concurrent_batches=max_concurrent_batches, max_attempts=max_attempts))
 
 
 class ScriptedService:
@@ -128,40 +144,40 @@ class NoBatchService(ScriptedService):
         raise AssertionError('batch path must not be used')
 
 
-def run_job(service, aids, batch_config, batch_state=None,
-            code_error_queue=True):
-    """Build a job over a prefilled aid queue, run its loop synchronously
-    (no thread), return (job, records, code_error_aids)."""
+def make_job(service, aids, controller, duration_limit_s=None):
+    """Build a job over its own prefilled aid queue (not started)."""
     aid_queue = Queue()
     for aid in aids:
         aid_queue.put(aid)
     record_queue = Queue()
-    code_error_aid_queue = Queue() if code_error_queue else None
+    code_error_aid_queue = Queue()
     job = FetchVideoRecordJob(
         'job_test', aid_queue, record_queue, service,
         code_error_aid_queue=code_error_aid_queue,
-        batch_config=batch_config, batch_state=batch_state)
+        duration_limit_s=duration_limit_s,
+        batch_controller=controller)
     job.logger.disabled = True  # the failure paths log loudly on purpose
+    return job, record_queue, code_error_aid_queue
 
+
+def drain(queue):
+    out = []
+    while not queue.empty():
+        out.append(queue.get())
+    return out
+
+
+def run_job(service, aids, controller):
+    """Run one job's loop synchronously (no thread), colddown sleeps patched
+    out. Returns (job, records, code_error_aids)."""
+    job, record_queue, code_error_aid_queue = make_job(service, aids, controller)
     # keep the retry colddowns out of the test wall clock (time.perf_counter
     # must stay real -- the job measures batch latency with it)
-    import time as real_time
     fake_time = types.SimpleNamespace(
-        sleep=lambda s: None, perf_counter=real_time.perf_counter)
+        sleep=lambda s: None, perf_counter=time.perf_counter)
     with unittest.mock.patch('job.FetchVideoRecordJob.time', fake_time):
         job.process()
-
-    records = []
-    while not record_queue.empty():
-        records.append(record_queue.get())
-    code_error_aids = []
-    if code_error_aid_queue is not None:
-        while not code_error_aid_queue.empty():
-            code_error_aids.append(code_error_aid_queue.get())
-    return job, records, code_error_aids
-
-
-ALWAYS = VideoViewTrimmedBatchConfig(batch_size=2, batch_fraction=1.0)
+    return job, drain(record_queue), drain(code_error_aid_queue)
 
 
 class TestBatchHappyPath(unittest.TestCase):
@@ -169,7 +185,7 @@ class TestBatchHappyPath(unittest.TestCase):
     def test_records_flow_through_batches(self):
         service = ScriptedService()
         aids = [101, 102, 103, 104]
-        job, records, _ = run_job(service, aids, ALWAYS, VideoViewTrimmedBatchState())
+        job, records, _ = run_job(service, aids, make_controller())
 
         self.assertEqual(service.batch_calls, [[101, 102], [103, 104]])
         self.assertEqual(service.single_calls, [])
@@ -182,8 +198,7 @@ class TestBatchHappyPath(unittest.TestCase):
 
     def test_partial_batch_flushes_when_queue_drains(self):
         service = ScriptedService()
-        job, records, _ = run_job(
-            service, [101, 102, 103], ALWAYS, VideoViewTrimmedBatchState())
+        job, records, _ = run_job(service, [101, 102, 103], make_controller())
 
         self.assertEqual(service.batch_calls, [[101, 102], [103]])
         self.assertEqual(len(records), 3)
@@ -191,8 +206,7 @@ class TestBatchHappyPath(unittest.TestCase):
     def test_code_error_routes_to_update_queue(self):
         service = ScriptedService(batch_script=[
             lambda aids: [ok_item(aids[0]), code_error_item(aids[1])]])
-        job, records, code_error_aids = run_job(
-            service, [101, 102], ALWAYS, VideoViewTrimmedBatchState())
+        job, records, code_error_aids = run_job(service, [101, 102], make_controller())
 
         self.assertEqual([r.aid for r in records], [101])
         self.assertEqual(code_error_aids, [102])
@@ -202,8 +216,7 @@ class TestBatchHappyPath(unittest.TestCase):
 
     def test_duplicate_aid_in_buffer_takes_single_path(self):
         service = ScriptedService()
-        job, records, _ = run_job(
-            service, [101, 101, 102], ALWAYS, VideoViewTrimmedBatchState())
+        job, records, _ = run_job(service, [101, 101, 102], make_controller())
 
         # never the same token twice in one batch: the second 101 goes single
         self.assertEqual(service.batch_calls, [[101, 102]])
@@ -217,8 +230,7 @@ class TestPerItemRetry(unittest.TestCase):
     def test_only_failed_items_are_retried(self):
         service = ScriptedService(batch_script=[
             lambda aids: [ok_item(aids[0]), retryable_item(aids[1])]])
-        job, records, _ = run_job(
-            service, [101, 102], ALWAYS, VideoViewTrimmedBatchState())
+        job, records, _ = run_job(service, [101, 102], make_controller())
 
         # retry batch contains ONLY the failed item
         self.assertEqual(service.batch_calls, [[101, 102], [102]])
@@ -229,8 +241,7 @@ class TestPerItemRetry(unittest.TestCase):
     def test_attempts_exhausted_becomes_other_exception(self):
         service = ScriptedService(batch_script=[
             lambda aids: [retryable_item(aids[0])]] * 3)
-        job, records, _ = run_job(
-            service, [101], ALWAYS, VideoViewTrimmedBatchState())
+        job, records, _ = run_job(service, [101], make_controller())
 
         # max_attempts=3 total tries, aligned with the single path's retry=3
         self.assertEqual(service.batch_calls, [[101], [101], [101]])
@@ -240,82 +251,233 @@ class TestPerItemRetry(unittest.TestCase):
         self.assertEqual(job.stat.total_count, 1)
 
 
-class TestWholeBatchFailureAndKillSwitch(unittest.TestCase):
+class TestWholeBatchFailureAndBreaker(unittest.TestCase):
 
     def test_whole_batch_failure_charges_every_aid_one_attempt(self):
         service = ScriptedService(batch_script=[
             ResponseError('video_view_trimmed_batch', {})])
-        state = VideoViewTrimmedBatchState()
-        job, records, _ = run_job(service, [101, 102], ALWAYS, state)
+        controller = make_controller()
+        job, records, _ = run_job(service, [101, 102], controller)
 
         # failure, then a successful retry batch with BOTH aids
         self.assertEqual(service.batch_calls, [[101, 102], [101, 102]])
         self.assertEqual(sorted(r.aid for r in records), [101, 102])
         self.assertEqual(job.stat.condition['batch_whole_failure'], 1)
-        self.assertTrue(state.is_enabled())  # one failure does not trip
-
-    def test_three_consecutive_whole_batch_failures_trip_the_kill_switch(self):
-        service = ScriptedService(batch_script=[
-            ResponseError('video_view_trimmed_batch', {})] * 3)
-        state = VideoViewTrimmedBatchState()
-        job, records, _ = run_job(service, [101, 102], ALWAYS, state)
-
-        self.assertEqual(job.stat.condition['batch_whole_failure'], 3)
-        self.assertFalse(state.is_enabled())
-        # the batch's aids came back over the single path -- no data lost
-        self.assertEqual(sorted(service.single_calls), [101, 102])
-        self.assertEqual(sorted(r.aid for r in records), [101, 102])
-        self.assertEqual(job.stat.condition['batch_fallback_single'], 2)
+        self.assertTrue(controller.is_enabled())  # one failure does not trip
 
     def test_unexpected_exception_is_a_whole_batch_failure_not_a_dead_thread(self):
         # a bug-shaped exception must degrade like a transport failure, never
         # kill the worker thread mid-run
         service = ScriptedService(batch_script=[ValueError('boom')])
-        state = VideoViewTrimmedBatchState()
-        job, records, _ = run_job(service, [101, 102], ALWAYS, state)
+        job, records, _ = run_job(service, [101, 102], make_controller())
 
         self.assertEqual(job.stat.condition['batch_whole_failure'], 1)
         self.assertEqual(sorted(r.aid for r in records), [101, 102])
 
-    def test_batch_success_resets_the_consecutive_counter(self):
-        state = VideoViewTrimmedBatchState()
-        state.record_whole_batch_failure()
-        state.record_whole_batch_failure()
-        state.record_batch_success()
-        self.assertFalse(state.record_whole_batch_failure())  # back to 1
-        self.assertTrue(state.is_enabled())
+    def test_three_consecutive_whole_batch_failures_trip_the_breaker(self):
+        service = ScriptedService(batch_script=[
+            ResponseError('video_view_trimmed_batch', {})] * 3)
+        controller = make_controller()
+        job, records, _ = run_job(service, [101, 102], controller)
+
+        self.assertEqual(job.stat.condition['batch_whole_failure'], 3)
+        self.assertFalse(controller.is_enabled())
+        # the batch's aids came back over the single path -- no data lost
+        self.assertEqual(sorted(service.single_calls), [101, 102])
+        self.assertEqual(sorted(r.aid for r in records), [101, 102])
+        self.assertEqual(job.stat.condition['batch_fallback_single'], 2)
+
+    def test_breaker_counts_in_completion_order_and_success_resets(self):
+        # the documented definition: N failures recorded with no validated
+        # success recorded between them, in COMPLETION order -- interleaved
+        # successes (e.g. from other in-flight batches) reset the streak
+        controller = make_controller()
+        self.assertFalse(controller.record_whole_batch_failure())  # 1
+        self.assertFalse(controller.record_whole_batch_failure())  # 2
+        controller.record_batch_success()                          # reset
+        self.assertFalse(controller.record_whole_batch_failure())  # 1
+        self.assertFalse(controller.record_whole_batch_failure())  # 2
+        self.assertTrue(controller.is_enabled())
+        self.assertTrue(controller.record_whole_batch_failure())   # 3 -> trip
+        self.assertFalse(controller.is_enabled())
 
     def test_misalignment_trips_immediately_and_falls_back(self):
         service = ScriptedService(batch_script=[
             MisalignmentError('video_view_trimmed_batch', {}, {}, 'aid echo mismatch')])
-        state = VideoViewTrimmedBatchState()
-        job, records, _ = run_job(service, [101, 102, 103, 104], ALWAYS, state)
+        controller = make_controller()
+        job, records, _ = run_job(service, [101, 102, 103, 104], controller)
 
         # exactly ONE batch call; its aids and every later aid go single path
         self.assertEqual(service.batch_calls, [[101, 102]])
-        self.assertFalse(state.is_enabled())
+        self.assertFalse(controller.is_enabled())
         self.assertEqual(sorted(service.single_calls), [101, 102, 103, 104])
         self.assertEqual(sorted(r.aid for r in records), [101, 102, 103, 104])
         self.assertEqual(job.stat.condition['batch_misalignment'], 1)
         self.assertEqual(job.stat.condition['batch_fallback_single'], 2)
 
-    def test_kill_switch_is_shared_across_jobs(self):
-        # a state tripped by one job disables the path for its siblings
-        state = VideoViewTrimmedBatchState()
-        self.assertTrue(state.trip('misalignment seen by job_0'))
-        self.assertFalse(state.trip('job_1 saw it too'))  # only first trips
+    def test_breaker_is_shared_across_jobs(self):
+        # a controller tripped by one job disables the path for its siblings
+        controller = make_controller()
+        self.assertTrue(controller.trip('misalignment seen by job_0'))
+        self.assertFalse(controller.trip('job_1 saw it too'))  # only first trips
 
         service = NoBatchService()
-        job, records, _ = run_job(service, [101, 102], ALWAYS, state)
+        job, records, _ = run_job(service, [101, 102], controller)
         self.assertEqual(sorted(r.aid for r in records), [101, 102])
         self.assertEqual(service.single_calls, [101, 102])
 
 
+class BlockingBatchService(ScriptedService):
+    """Batch calls track in-flight concurrency and block until released."""
+
+    def __init__(self, hold_s=0.0, release_event=None):
+        super().__init__()
+        self._lock = threading.Lock()
+        self._in_flight = 0
+        self.max_in_flight = 0
+        self.hold_s = hold_s
+        self.release_event = release_event
+        self.entered = threading.Event()  # set when any batch call is in flight
+
+    def get_video_view_trimmed_batch(self, aids, **kwargs):
+        with self._lock:
+            self.batch_calls.append(list(aids))
+            self._in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self._in_flight)
+        self.entered.set()
+        try:
+            if self.release_event is not None:
+                assert self.release_event.wait(EVENT_TIMEOUT_S), 'release never came'
+            elif self.hold_s:
+                time.sleep(self.hold_s)
+            return [ok_item(aid) for aid in aids]
+        finally:
+            with self._lock:
+                self._in_flight -= 1
+
+
+class TestConcurrencyGate(unittest.TestCase):
+    """Real threads: the gate must bound SIMULTANEOUS batch invocations."""
+
+    def test_in_flight_batches_never_exceed_the_cap(self):
+        cap = 2
+        controller = make_controller(batch_size=2, max_concurrent_batches=cap)
+        service = BlockingBatchService(hold_s=0.02)
+        aid_queue = Queue()
+        for aid in range(1, 49):  # 48 aids -> 24 batches
+            aid_queue.put(aid)
+        record_queue = Queue()
+        jobs = []
+        for i in range(6):  # 6 threads contending for 2 slots
+            job = FetchVideoRecordJob(
+                f'job_{i}', aid_queue, record_queue, service,
+                code_error_aid_queue=Queue(), batch_controller=controller)
+            job.logger.disabled = True
+            jobs.append(job)
+        for job in jobs:
+            job.start()
+        for job in jobs:
+            job.join(EVENT_TIMEOUT_S)
+            self.assertFalse(job.is_alive(), 'job did not finish')
+
+        self.assertLessEqual(service.max_in_flight, cap)
+        self.assertEqual(len(drain(record_queue)), 48)  # nothing lost to the gate
+        # observability: with 24 batches over 2 slots the gate must have bitten
+        throttled = sum(j.stat.condition['batch_concurrency_throttled'] for j in jobs)
+        self.assertGreaterEqual(throttled, 1)
+
+    def test_deadline_while_waiting_for_a_slot_exits_cleanly(self):
+        # job A holds the only slot with its batch blocked in flight; job B
+        # must give up at its run deadline instead of waiting forever
+        release = threading.Event()
+        controller = make_controller(batch_size=1, max_concurrent_batches=1)
+        service = BlockingBatchService(release_event=release)
+
+        job_a, records_a, _ = make_job(service, [301], controller)
+        job_b, records_b, _ = make_job(service, [302], controller,
+                                       duration_limit_s=1)
+        job_a.start()
+        self.assertTrue(service.entered.wait(EVENT_TIMEOUT_S))  # A holds the slot
+        job_b.start()
+        job_b.join(EVENT_TIMEOUT_S)
+        self.assertFalse(job_b.is_alive(), 'job B hung waiting for a slot')
+        release.set()
+        job_a.join(EVENT_TIMEOUT_S)
+        self.assertFalse(job_a.is_alive())
+
+        self.assertEqual(job_b.stat.condition['duration_limit_reached'], 1)
+        self.assertEqual(job_b.stat.condition['batch_concurrency_throttled'], 1)
+        self.assertEqual(drain(records_b), [])  # 302 dropped at the deadline
+        self.assertEqual([r.aid for r in drain(records_a)], [301])
+
+
+class RaceBatchService(ScriptedService):
+    """
+    Orchestrates the breaker/in-flight race: job B's batch (aids starting at
+    201) blocks in flight; job A's batch (101...) waits until B is in flight,
+    then fails with a misalignment, tripping the breaker. B's response then
+    returns AFTER the trip and must be discarded by the job.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._lock = threading.Lock()
+        self.b_in_flight = threading.Event()
+        self.b_release = threading.Event()
+
+    def get_video_view_trimmed_batch(self, aids, **kwargs):
+        with self._lock:
+            self.batch_calls.append(list(aids))
+        if aids[0] == 201:  # job B
+            self.b_in_flight.set()
+            assert self.b_release.wait(EVENT_TIMEOUT_S), 'b_release never came'
+            return [ok_item(aid) for aid in aids]
+        # job A: only misalign once B is provably in flight
+        assert self.b_in_flight.wait(EVENT_TIMEOUT_S), 'B never got in flight'
+        raise MisalignmentError('video_view_trimmed_batch', {}, {}, 'aid echo mismatch')
+
+    def get_video_view_trimmed(self, params, **kwargs):
+        with self._lock:
+            self.single_calls.append(params['aid'])
+        return make_view(params['aid'])
+
+
+class TestBreakerInFlightRace(unittest.TestCase):
+
+    def test_response_in_flight_during_trip_is_discarded_and_refetched(self):
+        controller = make_controller(batch_size=2, max_concurrent_batches=2)
+        service = RaceBatchService()
+        job_b, records_b, _ = make_job(service, [201, 202], controller)
+        job_a, records_a, _ = make_job(service, [101, 102], controller)
+
+        job_b.start()
+        self.assertTrue(service.b_in_flight.wait(EVENT_TIMEOUT_S))
+        job_a.start()
+        job_a.join(EVENT_TIMEOUT_S)  # A misaligns, trips, falls back, finishes
+        self.assertFalse(job_a.is_alive())
+        self.assertFalse(controller.is_enabled())
+        # only now does B's (healthy-looking) response come back
+        service.b_release.set()
+        job_b.join(EVENT_TIMEOUT_S)
+        self.assertFalse(job_b.is_alive())
+
+        # B re-checked the breaker on return: response discarded wholesale,
+        # its aids refetched over the single path -- nothing lost, nothing
+        # written from the untrusted response, nothing duplicated
+        self.assertEqual(job_b.stat.condition['batch_discarded_after_trip'], 1)
+        self.assertEqual(sorted(service.single_calls), [101, 102, 201, 202])
+        self.assertEqual(sorted(r.aid for r in drain(records_a)), [101, 102])
+        self.assertEqual(sorted(r.aid for r in drain(records_b)), [201, 202])
+        self.assertEqual(job_b.stat.condition['batch_fallback_single'], 2)
+        # exactly one batch call each: neither job retried the dead path
+        self.assertEqual(len(service.batch_calls), 2)
+
+
 class TestBatchPathOff(unittest.TestCase):
 
-    def test_no_config_means_single_path_only(self):
+    def test_no_controller_means_single_path_only(self):
         service = NoBatchService()
-        job, records, _ = run_job(service, [101, 102], None, None)
+        job, records, _ = run_job(service, [101, 102], None)
 
         self.assertEqual(service.single_calls, [101, 102])
         self.assertEqual(sorted(r.aid for r in records), [101, 102])
@@ -325,9 +487,8 @@ class TestBatchPathOff(unittest.TestCase):
 
     def test_fraction_zero_never_batches(self):
         service = NoBatchService()
-        config = VideoViewTrimmedBatchConfig(batch_size=2, batch_fraction=0.0)
         job, records, _ = run_job(
-            service, [101, 102], config, VideoViewTrimmedBatchState())
+            service, [101, 102], make_controller(batch_fraction=0.0))
 
         self.assertEqual(service.single_calls, [101, 102])
         self.assertEqual(len(records), 2)
@@ -339,6 +500,38 @@ class TestRecordMapping(unittest.TestCase):
         record = build_video_record_via_video_view(101, make_view(101, view='--'))
         self.assertEqual(record.view, -1)
         self.assertEqual(record.bvid, a2b(101))  # BV prefix stripped
+
+    def test_every_field_maps_through(self):
+        aid = 456930
+        view = VideoViewTrimmed(
+            bvid='BV' + a2b(aid), aid=aid,
+            stat=VideoViewStat(aid=aid, view=11, danmaku=12, reply=13,
+                               favorite=14, coin=15, share=16, now_rank=17,
+                               his_rank=18, like=19, dislike=20, vt=21, vv=22))
+        record = build_video_record_via_video_view(aid, view)
+
+        self.assertEqual(record.aid, aid)
+        self.assertEqual(record.bvid, a2b(aid))
+        self.assertEqual(record.view, 11)
+        self.assertEqual(record.danmaku, 12)
+        self.assertEqual(record.reply, 13)
+        self.assertEqual(record.favorite, 14)
+        self.assertEqual(record.coin, 15)
+        self.assertEqual(record.share, 16)
+        self.assertEqual(record.now_rank, 17)
+        self.assertEqual(record.his_rank, 18)
+        self.assertEqual(record.like, 19)
+        self.assertEqual(record.dislike, 20)
+        self.assertEqual(record.vt, 21)
+        self.assertEqual(record.vv, 22)
+        self.assertGreater(record.added, 0)
+
+    def test_bvid_prefix_removal_is_removeprefix_not_lstrip(self):
+        # lstrip('BV') would strip any run of leading B/V characters; the
+        # mapping must remove exactly one 'BV' prefix
+        view = make_view(101)._replace(bvid='BVVB1x')
+        self.assertEqual(
+            build_video_record_via_video_view(101, view).bvid, 'VB1x')
 
 
 class TestConf(unittest.TestCase):
@@ -352,40 +545,55 @@ class TestConf(unittest.TestCase):
 
     def test_missing_section_is_disabled(self):
         self._with_config('[db_mysql]\nuser = u\n')
-        self.assertEqual(get_video_view_trimmed_batch_conf(), (0, 0.0))
+        self.assertEqual(get_video_view_trimmed_batch_conf(), (0, 0.0, 0))
 
     def test_enabled_values_pass_through(self):
         self._with_config(
+            '[video_view_trimmed_batch]\nbatch_size = 10\nbatch_fraction = 0.05\n'
+            'max_concurrent_batches = 20\n')
+        self.assertEqual(get_video_view_trimmed_batch_conf(), (10, 0.05, 20))
+
+    def test_max_concurrent_defaults_when_absent(self):
+        self._with_config(
             '[video_view_trimmed_batch]\nbatch_size = 10\nbatch_fraction = 0.05\n')
-        self.assertEqual(get_video_view_trimmed_batch_conf(), (10, 0.05))
+        self.assertEqual(
+            get_video_view_trimmed_batch_conf(),
+            (10, 0.05, conf_module.VIDEO_VIEW_TRIMMED_BATCH_MAX_CONCURRENT_DEFAULT))
 
     def test_zero_size_or_fraction_is_disabled(self):
         self._with_config(
             '[video_view_trimmed_batch]\nbatch_size = 0\nbatch_fraction = 1\n')
-        self.assertEqual(get_video_view_trimmed_batch_conf(), (0, 0.0))
+        self.assertEqual(get_video_view_trimmed_batch_conf(), (0, 0.0, 0))
         self._with_config(
             '[video_view_trimmed_batch]\nbatch_size = 10\nbatch_fraction = 0\n')
-        self.assertEqual(get_video_view_trimmed_batch_conf(), (0, 0.0))
+        self.assertEqual(get_video_view_trimmed_batch_conf(), (0, 0.0, 0))
+
+    def test_nonpositive_concurrency_disables_the_path(self):
+        # a cap <= 0 would deadlock the gate; fail safe to off, never guess
+        self._with_config(
+            '[video_view_trimmed_batch]\nbatch_size = 10\nbatch_fraction = 1\n'
+            'max_concurrent_batches = 0\n')
+        self.assertEqual(get_video_view_trimmed_batch_conf(), (0, 0.0, 0))
 
     def test_negative_values_are_disabled(self):
         self._with_config(
             '[video_view_trimmed_batch]\nbatch_size = -5\nbatch_fraction = 0.5\n')
-        self.assertEqual(get_video_view_trimmed_batch_conf(), (0, 0.0))
+        self.assertEqual(get_video_view_trimmed_batch_conf(), (0, 0.0, 0))
 
     def test_size_is_capped_at_worker_max(self):
         self._with_config(
             '[video_view_trimmed_batch]\nbatch_size = 100\nbatch_fraction = 1\n')
-        self.assertEqual(get_video_view_trimmed_batch_conf(), (50, 1.0))
+        self.assertEqual(get_video_view_trimmed_batch_conf()[0], 50)
 
     def test_fraction_is_clamped_to_one(self):
         self._with_config(
             '[video_view_trimmed_batch]\nbatch_size = 10\nbatch_fraction = 1.5\n')
-        self.assertEqual(get_video_view_trimmed_batch_conf(), (10, 1.0))
+        self.assertEqual(get_video_view_trimmed_batch_conf()[1], 1.0)
 
     def test_unparsable_values_are_disabled(self):
         self._with_config(
             '[video_view_trimmed_batch]\nbatch_size = lots\nbatch_fraction = 1\n')
-        self.assertEqual(get_video_view_trimmed_batch_conf(), (0, 0.0))
+        self.assertEqual(get_video_view_trimmed_batch_conf(), (0, 0.0, 0))
 
 
 if __name__ == '__main__':

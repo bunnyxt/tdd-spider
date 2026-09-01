@@ -12,6 +12,10 @@ sckey = your sckey
 ; (or a missing section) keeps behavior byte-identical to the single-aid path.
 ; batch_size: aids per batch request (worker default caps at 50)
 ; batch_fraction: 0-1 share of aids routed through the batch path
+; max_concurrent_batches: pool-wide cap on simultaneous batch invocations
+;   (upstream in-flight from the batch path = batch_size x this; default 30,
+;   an initial assumption pending calibration)
 [video_view_trimmed_batch]
 batch_size = 0
 batch_fraction = 0
+max_concurrent_batches = 30

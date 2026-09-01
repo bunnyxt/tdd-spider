@@ -34,7 +34,10 @@ def build_video_record_via_video_view(aid: int, video_view) -> RecordNew:
     return RecordNew(
         added=added,
         aid=aid,
-        bvid=video_view.bvid.lstrip('BV'),
+        # removeprefix, not lstrip('BV'): lstrip strips any RUN of leading
+        # B/V characters. Identical output for every real bvid (they all
+        # start 'BV1'), but only removeprefix is correct by construction.
+        bvid=video_view.bvid.removeprefix('BV'),
         view=view,
         danmaku=video_view.stat.danmaku,
         reply=video_view.stat.reply,

@@ -22,7 +22,9 @@ logger = logging.getLogger('Service')
 RequestMode = Literal['direct', 'worker']
 
 __all__ = ['Service', 'RequestMode',
-           'BATCH_PROTOCOL_VERSION', 'BATCH_READ_TIMEOUT_S', 'BATCH_DEADLINE_S']
+           'VIDEO_VIEW_TRIMMED_BATCH_PROTOCOL_VERSION',
+           'VIDEO_VIEW_TRIMMED_BATCH_READ_TIMEOUT_S',
+           'VIDEO_VIEW_TRIMMED_BATCH_DEADLINE_S']
 
 # --- trimmed video_view batch path tunables ---------------------------------
 # INITIAL HYPOTHESES pending load-test calibration against the deployed batch
@@ -36,9 +38,9 @@ __all__ = ['Service', 'RequestMode',
 # of headroom per step -- the single-path incident where client timeout ==
 # function timeout (5s == 5s) turned worker-side timeouts into opaque
 # client-side ones, and this chain is how that stays fixed.
-BATCH_PROTOCOL_VERSION = 1
-BATCH_READ_TIMEOUT_S = 8.0
-BATCH_DEADLINE_S = 12.0
+VIDEO_VIEW_TRIMMED_BATCH_PROTOCOL_VERSION = 1
+VIDEO_VIEW_TRIMMED_BATCH_READ_TIMEOUT_S = 8.0
+VIDEO_VIEW_TRIMMED_BATCH_DEADLINE_S = 12.0
 
 
 class Service:
@@ -594,8 +596,8 @@ class Service:
         # get response (batch-specific timeout/deadline; single whole-batch
         # trial, see docstring)
         response = self._get(url, params=params, headers=headers,
-                             retry=1, timeout=BATCH_READ_TIMEOUT_S,
-                             deadline=BATCH_DEADLINE_S)
+                             retry=1, timeout=VIDEO_VIEW_TRIMMED_BATCH_READ_TIMEOUT_S,
+                             deadline=VIDEO_VIEW_TRIMMED_BATCH_DEADLINE_S)
         if response is None:
             raise ResponseError('video_view_trimmed_batch', params)
 
@@ -605,11 +607,16 @@ class Service:
         # validate the batch envelope. The v check is the double insurance
         # against a config error pointing this path at a non-batch endpoint
         # (e.g. the single-aid worker answers ?aids= with an upstream -400
-        # passthrough -- valid JSON, no v).
-        if not isinstance(response, dict) or response.get('v') != BATCH_PROTOCOL_VERSION:
-            raise misaligned(f'Response is not a batch protocol v{BATCH_PROTOCOL_VERSION} envelope.')
-        if response.get('requested') != len(aids):
-            raise misaligned(f'Response requested {response.get("requested")} != {len(aids)} aids sent.')
+        # passthrough -- valid JSON, no v). Protocol fields are checked
+        # strictly by TYPE as well as value: bool == int in Python, so
+        # without `type(x) is int` a JSON `true` would pass a `== 1` check.
+        version = response.get('v') if isinstance(response, dict) else None
+        if type(version) is not int or version != VIDEO_VIEW_TRIMMED_BATCH_PROTOCOL_VERSION:
+            raise misaligned(f'Response is not a batch protocol '
+                             f'v{VIDEO_VIEW_TRIMMED_BATCH_PROTOCOL_VERSION} envelope.')
+        requested = response.get('requested')
+        if type(requested) is not int or requested != len(aids):
+            raise misaligned(f'Response requested {requested!r} != {len(aids)} aids sent.')
         results = response.get('results')
         if not isinstance(results, list) or len(results) != len(aids):
             raise misaligned(f'Response results is not a list of length {len(aids)}.')
@@ -642,15 +649,22 @@ class Service:
             if not isinstance(body, dict):
                 raise misaligned(f'Result {index} kind json has no dict body.')
 
+            # the worker always sets an integer upstream status on json items;
+            # a missing or non-int one (bool included) is a contract violation,
+            # not an upstream hiccup to retry
+            status = item.get('status')
+            if type(status) is not int:
+                raise misaligned(f'Result {index} kind json has non-int status {status!r}.')
+
             # non-200 upstream: NEVER trust the body, code == 0 included --
             # the single path retries non-200 without parsing (see _get), so
             # trusting it here would be a semantic change, not a batch detail
-            if item.get('status') != 200:
+            if status != 200:
                 items.append(VideoViewTrimmedBatchItem(
                     aid=aid, view=None,
                     error=ResponseError('video_view_trimmed_batch_item',
                                         {**item_params, 'kind': kind,
-                                         'status': item.get('status')})))
+                                         'status': status})))
                 continue
 
             # from here on: same check set as get_video_view_trimmed, except
