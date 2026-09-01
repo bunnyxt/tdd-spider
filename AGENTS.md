@@ -37,5 +37,8 @@ system where it lives.
 - Committed tests live in `tests/`. Run them from the repo root:
   `venv-3.11/bin/python -m unittest discover -s tests` (stdlib `unittest`, no
   extra deps; a plain `python` works too where `venv-3.11` isn't set up).
+- Worker (`.mjs`) tests are Node-based and live in `tests/` too. Run them from
+  the repo root with `node --test tests/` (built-in `node:test`, no deps,
+  Node ≥ 18; upstream traffic is mocked, no network needed).
 - Root-level `test-*.py` / `test-*.ipynb` / `test.py` are throwaway scratch and
   are git-ignored — don't put committed tests there, and don't rely on them.
