@@ -9,6 +9,11 @@
     "workers": [
     ]
   },
+  "get_video_view_trimmed_batch": {
+    "direct": "invalid://api.bilibili.com/x/web-interface/view",
+    "workers": [
+    ]
+  },
   "get_video_tags": {
     "direct": "http://api.bilibili.com/x/tag/archive/tags",
     "workers": [

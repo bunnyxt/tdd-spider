@@ -1,6 +1,7 @@
 from core import TddError
 
-__all__ = ['ServiceError', 'ResponseError', 'ValidationError', 'FormatError', 'CodeError']
+__all__ = ['ServiceError', 'ResponseError', 'ValidationError', 'FormatError', 'CodeError',
+           'MisalignmentError']
 
 
 class ServiceError(TddError):
@@ -48,3 +49,24 @@ class CodeError(ValidationError):
 
     def __str__(self):
         return f'<CodeError(target={self.target},params={self.params},response={self.response},code={self.code})>'
+
+
+class MisalignmentError(ValidationError):
+    """
+    A batch response is structurally 200-OK JSON but violates the batch
+    contract or an item's identity checks (protocol version, results
+    order/length, aid echo, body.data.aid, bvid, stat.aid). Unlike FormatError
+    (one bad payload) this means the whole batch PATH cannot be trusted --
+    wrong endpoint, protocol break, or misrouted data -- so callers must
+    discard the entire batch result and trip their kill-switch, not skip the
+    offending item.
+    """
+
+    def __init__(self, target: str, params: dict, response: dict, message: str):
+        super().__init__(target, params, response)
+        self.message = message
+
+    def __str__(self):
+        # no self.response here: a full batch body can run to ~100KB (50 items
+        # x 2KB snippets) and this string lands in critical log lines
+        return f'<MisalignmentError(target={self.target},params={self.params},message={self.message})>'

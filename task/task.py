@@ -13,6 +13,7 @@ logger = logging.getLogger('task')
 
 __all__ = ['add_video_record_via_video_view',
            'fetch_video_record_via_video_view',
+           'build_video_record_via_video_view',
            'commit_video_records_batch',
            'commit_video_record_via_video_view',
            'commit_video_record_via_newlist_archive_stat',
@@ -21,6 +22,32 @@ __all__ = ['add_video_record_via_video_view',
            'add_member', 'update_member', 'commit_staff', 'add_member_follower_record',
            'fetch_member_follower_record', 'commit_member_follower_records_batch',
            'get_video_tags_str']
+
+
+def build_video_record_via_video_view(aid: int, video_view) -> RecordNew:
+    # Pure mapping: an already-fetched (and validated) trimmed video view ->
+    # RecordNew. Shared by the single-aid fetch below and the batch fetch path
+    # so quirks like the '--' hidden view count live in exactly one place.
+    added = get_ts_s()
+    view = -1 if video_view.stat.view == '--' else video_view.stat.view
+
+    return RecordNew(
+        added=added,
+        aid=aid,
+        bvid=video_view.bvid.lstrip('BV'),
+        view=view,
+        danmaku=video_view.stat.danmaku,
+        reply=video_view.stat.reply,
+        favorite=video_view.stat.favorite,
+        coin=video_view.stat.coin,
+        share=video_view.stat.share,
+        like=video_view.stat.like,
+        dislike=video_view.stat.dislike,
+        now_rank=video_view.stat.now_rank,
+        his_rank=video_view.stat.his_rank,
+        vt=video_view.stat.vt,
+        vv=video_view.stat.vv,
+    )
 
 
 def fetch_video_record_via_video_view(aid: int, service: Service,
@@ -42,26 +69,7 @@ def fetch_video_record_via_video_view(aid: int, service: Service,
     if out_stat is not None:
         out_stat['http_ms'] = int((time.perf_counter() - stage_start) * 1000)
 
-    added = get_ts_s()
-    view = -1 if video_view.stat.view == '--' else video_view.stat.view
-
-    return RecordNew(
-        added=added,
-        aid=aid,
-        bvid=video_view.bvid.lstrip('BV'),
-        view=view,
-        danmaku=video_view.stat.danmaku,
-        reply=video_view.stat.reply,
-        favorite=video_view.stat.favorite,
-        coin=video_view.stat.coin,
-        share=video_view.stat.share,
-        like=video_view.stat.like,
-        dislike=video_view.stat.dislike,
-        now_rank=video_view.stat.now_rank,
-        his_rank=video_view.stat.his_rank,
-        vt=video_view.stat.vt,
-        vv=video_view.stat.vv,
-    )
+    return build_video_record_via_video_view(aid, video_view)
 
 
 def add_video_record_via_video_view(aid: int, service: Service, session: Session,

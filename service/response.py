@@ -2,6 +2,7 @@ from typing import Optional, NamedTuple
 
 __all__ = [
     'VideoViewOwner', 'VideoViewStat', 'VideoViewStaffItem', 'VideoView', 'VideoViewTrimmed',
+    'VideoViewTrimmedBatchItem',
     'VideoTag', 'VideoTags',
     'MemberCard',
     'MemberRelation',
@@ -67,6 +68,24 @@ class VideoViewTrimmed(NamedTuple):
     bvid: str
     aid: int
     stat: VideoViewStat
+
+
+# per-aid outcome of Service.get_video_view_trimmed_batch. Exactly one of
+# view/error is set:
+# - view:  the item passed every check -- usable exactly like a single
+#          get_video_view_trimmed result
+# - error: CodeError     -> upstream said no (deleted/hidden/-403); route it
+#                           the same way as a single-path CodeError
+#          ResponseError -> transient per-item failure (item timeout, fetch
+#                           error, non-JSON upstream, non-200 upstream status);
+#                           the caller owns the retry, this item only
+# Failures that invalidate the WHOLE batch (transport failure, contract or
+# identity violation) never appear here -- get_video_view_trimmed_batch raises
+# for those instead of returning items.
+class VideoViewTrimmedBatchItem(NamedTuple):
+    aid: int
+    view: Optional[VideoViewTrimmed]
+    error: Optional[Exception]
 
 
 class VideoTag(NamedTuple):

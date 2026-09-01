@@ -6,20 +6,39 @@ import time
 import random
 from pathlib import Path
 from typing import Optional, Callable, Literal
-from .error import ResponseError, FormatError, CodeError
+from .error import ResponseError, FormatError, CodeError, MisalignmentError
 from .response import \
     VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, VideoViewTrimmed, \
+    VideoViewTrimmedBatchItem, \
     VideoTag, VideoTags, \
     MemberCard, \
     MemberRelation, \
     NewlistPage, NewlistArchiveStat, NewlistArchiveOwner, NewlistArchive, Newlist
+from util import a2b
 import logging
 
 logger = logging.getLogger('Service')
 
 RequestMode = Literal['direct', 'worker']
 
-__all__ = ['Service', 'RequestMode']
+__all__ = ['Service', 'RequestMode',
+           'BATCH_PROTOCOL_VERSION', 'BATCH_READ_TIMEOUT_S', 'BATCH_DEADLINE_S']
+
+# --- trimmed video_view batch path tunables ---------------------------------
+# INITIAL HYPOTHESES pending load-test calibration against the deployed batch
+# worker -- do not treat as approved final values. The timeout-chain invariant
+# that MUST hold whatever the calibrated numbers become:
+#
+#   client deadline (12s) > client read timeout (8s)
+#     > batch fn timeout (6s, Lambda side) > per-item timeout (4.5s, worker)
+#
+# i.e. each inner layer gives up before the outer one abandons it, with >= 2s
+# of headroom per step -- the single-path incident where client timeout ==
+# function timeout (5s == 5s) turned worker-side timeouts into opaque
+# client-side ones, and this chain is how that stays fixed.
+BATCH_PROTOCOL_VERSION = 1
+BATCH_READ_TIMEOUT_S = 8.0
+BATCH_DEADLINE_S = 12.0
 
 
 class Service:
@@ -27,7 +46,7 @@ class Service:
     def __init__(
             self, headers: Optional[dict] = None, retry: int = 3, timeout: float = 5.0, colddown_factor: float = 1.0,
             mode: RequestMode = 'direct', pool_maxsize: int = 256, deadline: float = 10.0,
-            min_throughput_bps: float = 80_000.0
+            min_throughput_bps: float = 80_000.0, endpoints: Optional[dict] = None
     ):
         # set default config
         self._headers = headers if headers is not None else {}
@@ -61,20 +80,24 @@ class Service:
         self._session.mount('http://', adapter)
         self._session.mount('https://', adapter)
 
-        # load endpoints
-        try:
-            with Path(__file__).with_name('endpoints.json').open('r') as f:
-                self.endpoints = json.load(f)
-        except FileNotFoundError:
-            logger.critical("The file 'endpoints.json' was not found.")
-            exit(1)
-        except json.JSONDecodeError:
-            logger.critical('Invalid JSON format in endpoints.json.')
-            exit(1)
-        except Exception as e:
-            logger.critical(
-                f'An unexpected error occurred when load and parse endpoints.json file. {e}')
-            exit(1)
+        # load endpoints (injectable for tests; production always loads the
+        # git-ignored endpoints.json next to this file)
+        if endpoints is not None:
+            self.endpoints = endpoints
+        else:
+            try:
+                with Path(__file__).with_name('endpoints.json').open('r') as f:
+                    self.endpoints = json.load(f)
+            except FileNotFoundError:
+                logger.critical("The file 'endpoints.json' was not found.")
+                exit(1)
+            except json.JSONDecodeError:
+                logger.critical('Invalid JSON format in endpoints.json.')
+                exit(1)
+            except Exception as e:
+                logger.critical(
+                    f'An unexpected error occurred when load and parse endpoints.json file. {e}')
+                exit(1)
 
         # define User Agent list
         self._ua_list = [
@@ -502,6 +525,199 @@ class Service:
                 vv=response['data']['stat'].get('vv', None),
             ),
         )
+
+    def get_video_view_trimmed_batch(
+            self, aids: list[int], headers: Optional[dict] = None,
+            mode: Optional[RequestMode] = None
+    ) -> list[VideoViewTrimmedBatchItem]:
+        """
+        aids: aid ints, already de-duplicated by the caller (the batch worker
+              forwards duplicate tokens as-is per its contract)
+        mode: 'worker' only
+
+        Batched counterpart of get_video_view_trimmed against the batch worker
+        (service/workers/video_view/aws_lambda_batch.mjs, contract v1): one GET
+        with ?aids=a,b,c returns per-item envelopes, same order as the input.
+
+        Error model, three tiers. A top-level HTTP 200 does NOT mean the items
+        succeeded -- every item is judged on its own status + kind + body.code:
+
+        - returns list[VideoViewTrimmedBatchItem], same length/order as aids.
+          An item is trusted (view set) only when kind == 'json' AND upstream
+          status == 200 AND body.code == 0 AND the full single-path format
+          check set AND the identity checks all pass. kind == 'json' with
+          status == 200 and code != 0 carries a CodeError (identical routing
+          to the single path). Everything transient (item_timeout, fetch_error,
+          non_json, or ANY non-200 upstream status -- the single path never
+          parses non-200 bodies, so a code==0 body on a 500 is NOT trusted)
+          carries a ResponseError: retry this item only.
+        - raises ResponseError: whole-batch transport failure -- HTTP != 200 /
+          unparsable top level (includes the worker's own 400/500 envelopes),
+          or no batch worker endpoint configured. The caller owns the retry
+          and counts one attempt for every aid in the batch.
+        - raises MisalignmentError: top level parsed but violates the batch
+          contract (v != 1, requested/results length mismatch) or an item
+          fails an identity/format check (aid echo, body.data.aid, bvid,
+          stat.aid, missing keys). The whole batch result is untrustworthy:
+          the caller must discard it entirely and trip its kill-switch.
+
+        No internal retry (retry=1 below): whole-batch retries belong to the
+        caller's per-aid attempt accounting; stacking Service-level retries
+        under them would multiply Lambda invocations invisibly.
+
+        A missing/empty endpoints entry raises ResponseError instead of the
+        sibling methods' critical+exit: the batch path has a designed fallback
+        (kill-switch -> single path), so config drift here must degrade the
+        run, never kill it.
+        """
+        # config mode
+        mode = mode if mode is not None else self._mode
+
+        # validate params
+        if mode != 'worker':
+            logger.critical(f'Endpoint "get_video_view_trimmed_batch" is worker-only '
+                            f'(no direct API serves the batch contract), got mode: {mode}.')
+            exit(1)
+
+        params = {'aids': ','.join(str(aid) for aid in aids)}
+
+        # get endpoint url (worker-only). Unlike the siblings, missing config
+        # is a loud *recoverable* failure -- see docstring.
+        try:
+            url = random.choice(
+                self.endpoints['get_video_view_trimmed_batch']['workers'])
+        except (KeyError, IndexError):
+            logger.error('Endpoint "get_video_view_trimmed_batch" not found or has no '
+                         'worker configured; treating as whole-batch failure.')
+            raise ResponseError('video_view_trimmed_batch', params)
+
+        # get response (batch-specific timeout/deadline; single whole-batch
+        # trial, see docstring)
+        response = self._get(url, params=params, headers=headers,
+                             retry=1, timeout=BATCH_READ_TIMEOUT_S,
+                             deadline=BATCH_DEADLINE_S)
+        if response is None:
+            raise ResponseError('video_view_trimmed_batch', params)
+
+        def misaligned(message: str):
+            return MisalignmentError('video_view_trimmed_batch', params, response, message)
+
+        # validate the batch envelope. The v check is the double insurance
+        # against a config error pointing this path at a non-batch endpoint
+        # (e.g. the single-aid worker answers ?aids= with an upstream -400
+        # passthrough -- valid JSON, no v).
+        if not isinstance(response, dict) or response.get('v') != BATCH_PROTOCOL_VERSION:
+            raise misaligned(f'Response is not a batch protocol v{BATCH_PROTOCOL_VERSION} envelope.')
+        if response.get('requested') != len(aids):
+            raise misaligned(f'Response requested {response.get("requested")} != {len(aids)} aids sent.')
+        results = response.get('results')
+        if not isinstance(results, list) or len(results) != len(aids):
+            raise misaligned(f'Response results is not a list of length {len(aids)}.')
+
+        # validate items: same order as the input, each judged independently
+        items: list[VideoViewTrimmedBatchItem] = []
+        for index, (aid, item) in enumerate(zip(aids, results)):
+            item_params = {'aid': aid}
+            if not isinstance(item, dict):
+                raise misaligned(f'Result {index} is not a dict.')
+            # aid echo: the worker echoes the raw token, and we sent str(aid)
+            if item.get('aid') != str(aid):
+                raise misaligned(
+                    f'Result {index} echoes aid {item.get("aid")!r}, expected {str(aid)!r}.')
+            kind = item.get('kind')
+
+            if kind in ('item_timeout', 'fetch_error', 'non_json'):
+                # transient, this item only. non_json matches the single path,
+                # where an unparsable body is retried then given up on.
+                items.append(VideoViewTrimmedBatchItem(
+                    aid=aid, view=None,
+                    error=ResponseError('video_view_trimmed_batch_item',
+                                        {**item_params, 'kind': kind})))
+                continue
+
+            if kind != 'json':
+                raise misaligned(f'Result {index} has unknown kind {kind!r}.')
+
+            body = item.get('body')
+            if not isinstance(body, dict):
+                raise misaligned(f'Result {index} kind json has no dict body.')
+
+            # non-200 upstream: NEVER trust the body, code == 0 included --
+            # the single path retries non-200 without parsing (see _get), so
+            # trusting it here would be a semantic change, not a batch detail
+            if item.get('status') != 200:
+                items.append(VideoViewTrimmedBatchItem(
+                    aid=aid, view=None,
+                    error=ResponseError('video_view_trimmed_batch_item',
+                                        {**item_params, 'kind': kind,
+                                         'status': item.get('status')})))
+                continue
+
+            # from here on: same check set as get_video_view_trimmed, except
+            # any violation is a misalignment (the batch worker BUILT this
+            # envelope; a malformed one means the path is broken, not that one
+            # video is odd), plus the identity checks
+            for key in ['code', 'message', 'ttl']:
+                if key not in body.keys():
+                    raise misaligned(f'Result {index} body should contain key {key}.')
+
+            if body['code'] != 0:
+                # upstream said no -- identical semantics to the single-path
+                # CodeError (same target so downstream logging matches)
+                items.append(VideoViewTrimmedBatchItem(
+                    aid=aid, view=None,
+                    error=CodeError('video_view_trimmed', item_params, body, body['code'])))
+                continue
+
+            if type(body.get('data')) != dict:
+                raise misaligned(f'Result {index} body data should be a dict.')
+            data = body['data']
+            for key in ['bvid', 'aid', 'stat']:
+                if key not in data.keys():
+                    raise misaligned(f'Result {index} body data should contain key {key}.')
+            if type(data['stat']) != dict:
+                raise misaligned(f'Result {index} body data stat should be a dict.')
+            stat = data['stat']
+            for key in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share',
+                        'now_rank', 'his_rank', 'like', 'dislike']:
+                if key not in stat.keys():
+                    raise misaligned(f'Result {index} body data stat should contain key {key}.')
+
+            # identity checks: strong misrouting/misalignment detectors. bvid
+            # is independently computable from aid, so a payload from another
+            # video (or another endpoint) cannot satisfy both.
+            if data['aid'] != aid:
+                raise misaligned(f'Result {index} body data aid {data["aid"]!r} != {aid}.')
+            if data['bvid'] != 'BV' + a2b(aid):
+                raise misaligned(
+                    f'Result {index} body data bvid {data["bvid"]!r} != computed for aid {aid}.')
+            if stat['aid'] not in (aid, 0):  # 0 has upstream precedent (see task.py)
+                raise misaligned(f'Result {index} body data stat aid {stat["aid"]!r} != {aid} or 0.')
+
+            items.append(VideoViewTrimmedBatchItem(
+                aid=aid,
+                view=VideoViewTrimmed(
+                    bvid=data['bvid'],
+                    aid=data['aid'],
+                    stat=VideoViewStat(
+                        aid=stat['aid'],
+                        view=stat['view'],
+                        danmaku=stat['danmaku'],
+                        reply=stat['reply'],
+                        favorite=stat['favorite'],
+                        coin=stat['coin'],
+                        share=stat['share'],
+                        now_rank=stat['now_rank'],
+                        his_rank=stat['his_rank'],
+                        like=stat['like'],
+                        dislike=stat['dislike'],
+                        vt=stat.get('vt', None),
+                        vv=stat.get('vv', None),
+                    ),
+                ),
+                error=None))
+
+        return items
 
     def get_video_tags(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,

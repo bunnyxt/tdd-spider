@@ -13,8 +13,10 @@ from serverchan import sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from typing import Optional
 from core import RecordNew
+from conf import get_video_view_trimmed_batch_conf
 from service import Service
-from job import FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool
+from job import FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool, \
+    VideoViewTrimmedBatchConfig, VideoViewTrimmedBatchState
 from runrecord import RunRecorder
 from timer import Timer
 import logging
@@ -103,6 +105,24 @@ def fetch_and_batch_insert_records(
     # job_num so bumping workers can't silently break keep-alive.
     service = Service(mode='worker', pool_maxsize=job_num + 32)
 
+    # trimmed video_view batch path, conf-driven and OFF by default (missing
+    # section == batch_size 0 == single-aid path only, byte-identical to the
+    # pre-batch behavior). One shared state = one run-wide kill-switch.
+    batch_size, batch_fraction = get_video_view_trimmed_batch_conf()
+    batch_config = None
+    batch_state = None
+    fetch_ensure_conditions = ['success', 'code_error', 'other_exception',
+                               'record_dropped_queue_full', 'duration_limit_reached']
+    if batch_size > 0 and batch_fraction > 0:
+        batch_config = VideoViewTrimmedBatchConfig(
+            batch_size=batch_size, batch_fraction=batch_fraction)
+        batch_state = VideoViewTrimmedBatchState()
+        log.info(f'video_view_trimmed batch path ENABLED: batch_size={batch_size}, '
+                 f'batch_fraction={batch_fraction}, max_attempts={batch_config.max_attempts}')
+        fetch_ensure_conditions += ['batch_request', 'batch_whole_failure',
+                                    'batch_misalignment', 'batch_item_retry',
+                                    'batch_fallback_single', 'batch_duplicate_single_path']
+
     # put aid into queue
     aid_queue: Queue[int] = Queue()
     for aid in need_insert_aid_list:
@@ -127,12 +147,12 @@ def fetch_and_batch_insert_records(
     fetch_pool = JobPool(
         [FetchVideoRecordJob(f'job_{i}', aid_queue, fetched_record_queue, service,
                              code_error_aid_queue=code_error_aid_queue,
-                             duration_limit_s=duration_limit_s)
+                             duration_limit_s=duration_limit_s,
+                             batch_config=batch_config, batch_state=batch_state)
          for i in range(job_num)],
         progress_total=len(need_insert_aid_list),
         progress_label=fetch_label,
-        ensure_conditions=['success', 'code_error', 'other_exception',
-                           'record_dropped_queue_full', 'duration_limit_reached'],
+        ensure_conditions=fetch_ensure_conditions,
         logger_name=logger_name)
     writer_pool = JobPool(
         [BatchInsertVideoRecordJob('writer_0', fetched_record_queue, record_queue,
