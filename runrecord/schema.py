@@ -14,6 +14,14 @@ free-text ``summary`` (it duplicates the structured fields + metrics), and
 missing migration steps in order and moves ``PRAGMA user_version`` *forward* only.
 A database written by newer code (``user_version`` > ``SCHEMA_VERSION``) is left
 untouched and ``init`` raises -- it never rewrites the version backwards.
+
+v2 adds the nullable ``run_metric.is_key`` column -- generic display metadata
+that marks a metric as "reasonable to show by default in a cross-script
+overview". It carries no health, direction, threshold or alerting meaning and
+never changes a run's status. ``NULL`` (every row written before v2, and every
+row the recorder does not flag explicitly) means "fall back to the name-based
+convention"; see ``runrecord.keymetric``. The migration is a plain additive
+``ALTER TABLE ... ADD COLUMN`` so it preserves every existing row.
 """
 
 __all__ = ['SCHEMA_VERSION', 'SchemaTooNewError', 'init']
@@ -22,7 +30,7 @@ __all__ = ['SCHEMA_VERSION', 'SchemaTooNewError', 'init']
 class SchemaTooNewError(RuntimeError):
     """The database is at a schema version this code does not understand."""
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _DDL_V1 = """
 CREATE TABLE IF NOT EXISTS run (
@@ -56,6 +64,19 @@ CREATE TABLE IF NOT EXISTS run_log (
 """
 
 
+def _apply_v2(conn):
+    """
+    v2: add the nullable ``run_metric.is_key`` column.
+
+    Guarded on the column already being present so a half-applied migration
+    (process died between the ``ALTER`` and the ``PRAGMA user_version`` bump)
+    re-runs cleanly instead of failing with "duplicate column name".
+    """
+    columns = {row[1] for row in conn.execute('PRAGMA table_info(run_metric)')}
+    if 'is_key' not in columns:
+        conn.execute('ALTER TABLE run_metric ADD COLUMN is_key INTEGER')
+
+
 def init(conn):
     """
     Create/upgrade the schema on ``conn``. Idempotent.
@@ -75,7 +96,10 @@ def init(conn):
     if current < 1:
         conn.executescript(_DDL_V1)
 
-    # future: `if current < 2: conn.executescript(_DDL_V2)` ...
+    if current < 2:
+        _apply_v2(conn)
+
+    # future: `if current < 3: _apply_v3(conn)` ...
 
     if current < SCHEMA_VERSION:
         # forward only; PRAGMA does not accept bound parameters

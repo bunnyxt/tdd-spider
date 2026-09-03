@@ -132,14 +132,25 @@ class RunRecorder:
             logger.warning(f'run record: failed to attach log locations ({e!r})')
 
     def add_metric(self, scope: str, name: str, value: float,
-                   unit: Optional[str] = None) -> None:
+                   unit: Optional[str] = None,
+                   key: Optional[bool] = None) -> None:
+        """
+        Persist one metric. ``key`` is optional display metadata:
+        leave it ``None`` to let the name-based convention decide at read time
+        (the default, and what ``add_job_stat_metrics`` does for ``total_count``
+        and the error-like counters), pass ``True`` to mark a genuine output
+        metric as key at its record site, or ``False`` to suppress the
+        convention for an otherwise key-looking name.
+        """
         if not self.enabled:
             return
         try:
             self._conn.execute(
-                'INSERT OR REPLACE INTO run_metric (run_id, scope, name, value, unit) '
-                'VALUES (?, ?, ?, ?, ?)',
-                (self.run_id, scope, name, float(value), unit))
+                'INSERT OR REPLACE INTO run_metric '
+                '(run_id, scope, name, value, unit, is_key) '
+                'VALUES (?, ?, ?, ?, ?, ?)',
+                (self.run_id, scope, name, float(value), unit,
+                 None if key is None else int(bool(key))))
             self._conn.commit()
         except Exception as e:
             logger.warning(f'run record: failed to add metric {scope}/{name} ({e!r})')
