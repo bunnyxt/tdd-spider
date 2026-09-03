@@ -384,6 +384,33 @@ class TestConcurrencyGate(unittest.TestCase):
         self.assertEqual(drain(records_b), [])  # 302 dropped at the deadline
         self.assertEqual([r.aid for r in drain(records_a)], [301])
 
+    def test_deadline_during_final_partial_flush_still_counts_duration_limit(self):
+        # queue already EMPTY, job B is flushing its last partial batch (one
+        # aid, batch_size 2) and waits for the slot job A holds; the deadline
+        # passes during that wait. B breaks straight out after the drop -- the
+        # loop top never runs again -- so the drop path itself must record
+        # the duration-limit hit, exactly once.
+        release = threading.Event()
+        controller = make_controller(batch_size=2, max_concurrent_batches=1)
+        service = BlockingBatchService(release_event=release)
+
+        job_a, records_a, _ = make_job(service, [301, 302], controller)
+        job_b, records_b, _ = make_job(service, [303], controller,
+                                       duration_limit_s=1)
+        job_a.start()
+        self.assertTrue(service.entered.wait(EVENT_TIMEOUT_S))  # A holds the slot
+        job_b.start()
+        job_b.join(EVENT_TIMEOUT_S)
+        self.assertFalse(job_b.is_alive(), 'job B hung waiting for a slot')
+        release.set()
+        job_a.join(EVENT_TIMEOUT_S)
+        self.assertFalse(job_a.is_alive())
+
+        self.assertEqual(job_b.stat.condition['batch_dropped_at_deadline'], 1)
+        self.assertEqual(job_b.stat.condition['duration_limit_reached'], 1)
+        self.assertEqual(drain(records_b), [])
+        self.assertEqual(sorted(r.aid for r in drain(records_a)), [301, 302])
+
 
 class RaceBatchService(ScriptedService):
     """

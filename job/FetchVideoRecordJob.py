@@ -79,6 +79,9 @@ class FetchVideoRecordJob(Job):
         self.code_error_aid_queue = code_error_aid_queue
         self.duration_limit_s = duration_limit_s
         self.duration_limit_due_ts_s = None
+        # set once the job has counted its duration-limit hit, so the
+        # several places that can observe the deadline never double-count
+        self._duration_limit_counted = False
         self.put_timeout_s = put_timeout_s
         # ONE controller instance is shared by the whole pool: it carries the
         # batch knobs plus the two cross-job concerns (concurrency gate,
@@ -90,6 +93,16 @@ class FetchVideoRecordJob(Job):
     def _deadline_reached(self) -> bool:
         return (self.duration_limit_due_ts_s is not None
                 and get_ts_s() >= self.duration_limit_due_ts_s)
+
+    def _count_duration_limit_reached(self):
+        """Mark this job as having hit its duration limit -- exactly once,
+        whichever code path saw the deadline first. The pool summary's
+        duration_limit_reached is THE number that says whether the 04:00 full
+        scan finished inside its window, so every deadline exit must land in
+        it, and never twice for one job."""
+        if not self._duration_limit_counted:
+            self._duration_limit_counted = True
+            self.stat.condition['duration_limit_reached'] += 1
 
     def _put_record(self, record) -> bool:
         """Bounded put with a timeout. False -> queue still full, caller decides."""
@@ -221,7 +234,7 @@ class FetchVideoRecordJob(Job):
                                  if buffer else '')
                 self.logger.info(f'Duration limit reached. Now exit. '
                                  f'{self.aid_queue.qsize()} aid(s) left unfetched.{buffered_note}')
-                self.stat.condition['duration_limit_reached'] += 1
+                self._count_duration_limit_reached()
                 break
 
             try:
@@ -396,11 +409,14 @@ class FetchVideoRecordJob(Job):
 
     def _drop_at_deadline(self, aids: list) -> bool:
         """The run deadline passed while this batch was still waiting to be
-        sent: same treatment as aids left in the queue at the deadline (the
-        loop-top check ends the job next), but counted so it is visible."""
+        sent: same treatment as aids left in the queue at the deadline, but
+        counted so it is visible. Also records the duration-limit hit itself:
+        when this is the final flush after the queue drained, the caller
+        breaks straight out and the loop-top check never runs again."""
         self.logger.info(f'Duration limit reached before the batch could be sent. '
                          f'{len(aids)} buffered aid(s) dropped.')
         self.stat.condition['batch_dropped_at_deadline'] += len(aids)
+        self._count_duration_limit_reached()
         return True
 
     def _fallback_to_single(self, aids: list) -> bool:
