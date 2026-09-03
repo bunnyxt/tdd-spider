@@ -1,11 +1,13 @@
 """
-Read-only web page over the run-record store (BL-0006).
+Read-only web page over the run-record store.
 
 A single-file, standard-library-only server for the daily "is everything
-healthy?" glance. It never writes: the database is opened read-only and only
-``SELECT`` / ``PRAGMA`` run. All the query logic (schema check, fetch, the
-``running``->``stale`` derivation, id-prefix resolution) is reused from
-``runrecord.query`` rather than reimplemented.
+healthy?" glance and for scanning a metric across a script's runs. It never
+writes: the database is opened read-only and only ``SELECT`` / ``PRAGMA`` run.
+All the query logic (schema check, fetch, the ``running``->``stale``
+derivation, id-prefix resolution, key-metric selection, the aligned per-run
+series) is reused from ``runrecord.query`` / ``runrecord.series`` rather than
+reimplemented.
 
 Run it on demand, in the foreground, on the box that holds the database::
 
@@ -23,8 +25,22 @@ warning.
 Routes:
 
 ===========================  =================================================
-  ``GET /``                  health banner + recent runs. Query params:
-                             ``script`` (exact), ``status``
+  ``GET /``                  script overview: health banner + one row per
+                             script_name (latest run time, lifecycle, duration,
+                             a few key metrics). Query params: ``since``
+                             (``24h`` / ``7d`` / ISO; drops a script whose last
+                             run is older), ``max_metrics`` (default 4),
+                             ``format=json``.
+  ``GET /script/<name>``     one script's runs aligned into a per-run metric
+                             time series with simple SVG line charts and a
+                             per-run table. Query params: ``metric``
+                             (repeatable, ``scope/name`` or ``duration``;
+                             default = the runs' key metrics + duration),
+                             ``since`` / ``until``, ``limit`` (default 20, the
+                             newest N in the window, shown oldest first),
+                             ``format=json``.
+  ``GET /runs``              the recent-runs stream. Query params: ``script``
+                             (exact), ``status``
                              (running|succeeded|failed|stale), ``since``
                              (``24h`` / ``7d`` / ISO), ``limit`` (default 50),
                              ``refresh`` (seconds; adds a meta-refresh),
@@ -41,6 +57,10 @@ Routes:
 
 A database problem (missing file, schema newer than this code, partially
 created) renders a plain error page with a 503/500 status -- never a traceback.
+
+The charts encode only the magnitude of the values that are present. A missing
+run is a gap, never a zero; a non-succeeded run is drawn with a hollow marker.
+Nothing on the page interprets a line going up or down as good or bad.
 """
 
 import argparse
@@ -50,11 +70,13 @@ import socket
 import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
+from . import series as _series
 from .recorder import _resolve_db_path, DEFAULT_STALE_AFTER_S
 from .query import (
     QueryError,
+    EXIT_DB_ERROR,
     EXIT_NO_DB,
     EXIT_NO_MATCH,
     EXIT_SCHEMA,
@@ -62,12 +84,16 @@ from .query import (
     _STATUS_CHOICES,
     _check_schema,
     _connect_ro,
+    _explicit_key_flags,
     _fetch_runs,
+    _fmt_num,
     _human_duration,
     _local,
     _local_tz_label,
+    _parse_metric_arg,
     _parse_time,
     _persisted_prefilter,
+    _pick_key_metrics,
     _record,
     _resolve_one,
     _select_by_status,
@@ -81,7 +107,10 @@ DEFAULT_PORT = 8765
 # interface", so it must never be classified as loopback (it would silently skip
 # the exposure warning). main() rejects an empty --host outright.
 _LOOPBACK_NAMES = {'127.0.0.1', '::1', 'localhost'}
-_DEFAULT_LIMIT = 50
+_RUNS_LIMIT = 50
+_OVERVIEW_MAX_METRICS = 4
+_TREND_LIMIT = 20
+_DURATION_TOKEN = 'duration'
 
 
 # --------------------------------------------------------------------------- #
@@ -103,11 +132,17 @@ def _all_records(conn, stale_after, *, script=None, since=None,
     return [_record(r, now=now, stale_after=stale_after) for r in rows]
 
 
-def _health(conn, stale_after):
-    """Latest run per script, bucketed. Feeds both the banner and /healthz."""
+def _latest_per_script(conn, stale_after, *, since=None):
+    """The most recent run of every script, newest-first rows deduped by name."""
     latest = {}
-    for rec in _all_records(conn, stale_after):
+    for rec in _all_records(conn, stale_after, since=since):
         latest.setdefault(rec['script_name'], rec)  # rows are DESC by started_at
+    return latest
+
+
+def _health(conn, stale_after):
+    """Latest run per script, bucketed. Feeds the banner and /healthz."""
+    latest = _latest_per_script(conn, stale_after)
     buckets = {'succeeded': [], 'running': [], 'failed': [], 'stale': []}
     for rec in latest.values():
         buckets.setdefault(rec['display_status'], []).append(rec)
@@ -125,10 +160,68 @@ def _health(conn, stale_after):
     }
 
 
+def _overview_records(conn, stale_after, *, since, max_metrics):
+    """One record per script: its latest run + that run's key metrics.
+
+    Mirrors the CLI ``overview`` command: newest run per script_name, each with
+    up to ``max_metrics`` key metrics rendered inline (never dynamic columns).
+    """
+    now = datetime.now(timezone.utc)
+    rows = _fetch_runs(conn, since=since, order='DESC')
+    latest = {}
+    for r in rows:
+        latest.setdefault(r[1], r)  # r[1] == script_name; DESC keeps the newest
+    out = []
+    for name in sorted(latest):
+        rec = _record(latest[name], now=now, stale_after=stale_after,
+                      conn=conn, detail=True)
+        flags = _explicit_key_flags(conn, rec['run_id'])
+        rec['key_metrics'] = _pick_key_metrics(rec['metrics'], flags, max_metrics)
+        out.append(rec)
+    return out
+
+
+def _script_seen(conn, name):
+    """True if ``name`` has ever recorded a run (any window)."""
+    return bool(_fetch_runs(conn, script=name, order='DESC', limit=1))
+
+
 def _detail_record(conn, run_id, stale_after):
     now = datetime.now(timezone.utc)
     row = _resolve_one(conn, run_id)  # raises QueryError on miss / ambiguity
     return _record(row, now=now, stale_after=stale_after, conn=conn, detail=True)
+
+
+def _trend_data(conn, name, stale_after, *, metric_tokens, since, until, limit):
+    """
+    Assemble the aligned per-run series for one script.
+
+    ``metric_tokens`` is the raw list of ``?metric`` values (already stripped);
+    empty means "the runs' key metrics plus the built-in duration series".
+    Points come back oldest -> newest so the charts and table read
+    left-to-right in time. Mirrors the CLI ``trend`` command.
+    """
+    now = datetime.now(timezone.utc)
+    selected = [_parse_metric_arg(tok) for tok in metric_tokens]
+    if not selected:
+        selected = [(m['scope'], m['name']) for m in _series.default_key_metrics(
+            conn, name, since=since, until=until, limit=limit)]
+        selected.append(_series.DURATION_SERIES)
+
+    result = _series.fetch_series(
+        conn, name, metrics=selected, since=since, until=until,
+        order='DESC', limit=limit, now=now, stale_after_s=stale_after)
+    result['points'].reverse()
+    return result
+
+
+def _available_choices(conn, name, *, since, until, limit):
+    """The metric identities offered by the picker: recorded metrics + duration."""
+    rows = _series.available_metrics(
+        conn, name, since=since, until=until, limit=limit)
+    choices = [(f'{r["scope"]}/{r["name"]}', r['unit'], r['key']) for r in rows]
+    choices.append((_DURATION_TOKEN, 'seconds', False))
+    return choices
 
 
 # --------------------------------------------------------------------------- #
@@ -139,7 +232,7 @@ _STYLE = """
 :root {
   color-scheme: light dark;
   --fg: #1b1b1b; --bg: #fafafa; --muted: #666; --line: #ddd;
-  --card: #fff; --accent: #2563eb;
+  --card: #fff; --accent: #2563eb; --chart: #475569;
   --ok: #15803d; --ok-bg: #dcfce7;
   --warn: #b45309; --warn-bg: #fef3c7;
   --bad: #b91c1c; --bad-bg: #fee2e2;
@@ -148,7 +241,7 @@ _STYLE = """
 @media (prefers-color-scheme: dark) {
   :root {
     --fg: #e6e6e6; --bg: #16181c; --muted: #9aa0a6; --line: #33363b;
-    --card: #1e2126; --accent: #60a5fa;
+    --card: #1e2126; --accent: #60a5fa; --chart: #94a3b8;
     --ok: #4ade80; --ok-bg: #16351f;
     --warn: #fbbf24; --warn-bg: #3a2c0b;
     --bad: #f87171; --bad-bg: #3a1616;
@@ -171,17 +264,21 @@ a:hover { text-decoration: underline; }
 .banner .headline { font-weight: 600; }
 .banner ul { margin: .5rem 0 0; padding-left: 1.25rem; }
 .counts { color: var(--muted); font-size: .9rem; }
-form.filters { margin: 1rem 0; display: flex; flex-wrap: wrap; gap: .5rem; }
+form.filters { margin: 1rem 0; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 form.filters input, form.filters select { padding: .3rem .4rem; font: inherit;
   color: var(--fg); background: var(--card); border: 1px solid var(--line);
   border-radius: 4px; }
 form.filters button { padding: .3rem .7rem; font: inherit; cursor: pointer;
   border: 1px solid var(--line); border-radius: 4px; background: var(--card);
   color: var(--fg); }
+.tablewrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: .9rem; }
-th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--line); }
+th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--line);
+  white-space: nowrap; }
 th { color: var(--muted); font-weight: 600; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.metrics { color: var(--muted); font-size: .85rem; }
+td.metrics .tok { margin-right: .8rem; display: inline-block; }
 tr:hover td { background: var(--card); }
 .pill { display: inline-block; padding: .05rem .45rem; border-radius: 999px;
   font-size: .8rem; font-weight: 600; }
@@ -197,7 +294,29 @@ dl.core dd { margin: 0; font-variant-numeric: tabular-nums; }
 .scope > .name { font-weight: 600; margin-bottom: .2rem; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
 .empty { color: var(--muted); font-style: italic; }
+.hint { color: var(--muted); font-size: .8rem; margin: .25rem 0 1rem; }
+form.picker { margin: 1rem 0; }
+form.picker .opts { display: flex; flex-wrap: wrap; gap: .35rem .9rem; margin: .4rem 0; }
+form.picker label { font-size: .85rem; }
+form.picker button { padding: .3rem .7rem; font: inherit; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 4px; background: var(--card);
+  color: var(--fg); }
+figure.series { margin: 1rem 0; border: 1px solid var(--line); border-radius: 6px;
+  padding: .5rem .75rem; background: var(--card); }
+figure.series figcaption { font-size: .85rem; }
+figure.series .sub { color: var(--muted); font-size: .8rem; }
+svg.chart { width: 100%; max-width: 32rem; height: auto; display: block;
+  margin: .35rem 0; }
+svg.chart .line { fill: none; stroke: var(--chart); stroke-width: 1.5; }
+svg.chart .dot { fill: var(--chart); }
+svg.chart .dot-open { fill: var(--bg); stroke: var(--chart); stroke-width: 1; }
+svg.chart .frame { fill: none; stroke: var(--line); stroke-width: 1; }
+.legend { color: var(--muted); font-size: .8rem; margin: .5rem 0 1rem; }
 footer { margin-top: 2rem; color: var(--muted); font-size: .8rem; }
+@media (max-width: 40rem) {
+  body { padding: 1rem; }
+  th, td { padding: .35rem .4rem; }
+}
 """
 
 
@@ -224,6 +343,10 @@ def _e(value):
     return html.escape('' if value is None else str(value))
 
 
+def _script_href(name):
+    return '/script/' + quote(name, safe='')
+
+
 def _banner_html(health):
     cls = 'banner degraded' if health['degraded'] else 'banner'
     if health['degraded']:
@@ -245,17 +368,286 @@ def _banner_html(health):
     return f'<div class="{cls}">{body}{counts}</div>'
 
 
+# -- overview (GET /) ------------------------------------------------------- #
+
+def _overview_since_form(params):
+    since = _e(params.get('since', ''))
+    mm = _e(params.get('max_metrics', str(_OVERVIEW_MAX_METRICS)))
+    return (
+        '<form class="filters" method="get" action="/">'
+        f'<input type="text" name="since" placeholder="since (24h / 7d / ISO)" value="{since}">'
+        f'<label>key metrics <input type="number" name="max_metrics" min="0" '
+        f'value="{mm}" style="width:4rem"></label>'
+        '<button type="submit">apply</button>'
+        '</form>')
+
+
+def _key_metric_tokens(key_metrics):
+    if not key_metrics:
+        return '<span class="empty">no key metrics</span>'
+    return ''.join(
+        f'<span class="tok">{_e(m["scope"])}/{_e(m["name"])}='
+        f'{_e(_fmt_num(m["value"]))}</span>'
+        for m in key_metrics)
+
+
+def _overview_table(records):
+    if not records:
+        return '<p class="empty">no runs recorded</p>'
+    rows = []
+    for r in records:
+        rows.append(
+            '<tr>'
+            f'<td><a href="{_e(_script_href(r["script_name"]))}">'
+            f'{_e(r["script_name"])}</a></td>'
+            f'<td>{_e(_local(r["started_at"]))}</td>'
+            f'<td>{_pill(r["display_status"])}</td>'
+            f'<td class="num">{_e(_human_duration(r["duration_s"]))}</td>'
+            f'<td class="metrics">{_key_metric_tokens(r["key_metrics"])}</td>'
+            '</tr>')
+    return (
+        '<div class="tablewrap"><table><thead><tr>'
+        '<th>script</th><th>latest run (local)</th><th>status</th>'
+        '<th class="num">duration</th><th>key metrics</th>'
+        '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div>')
+
+
+def _overview_html(health, records, params, db_version):
+    meta = (f'schema v{db_version} &middot; {len(records)} script(s) &middot; '
+            f'times {_local_tz_label()} &middot; '
+            f'<a href="/runs">recent runs stream &rarr;</a>')
+    body = (
+        '<h1>run records</h1>'
+        f'<div class="meta">{meta}</div>'
+        + _banner_html(health)
+        + _overview_since_form(params)
+        + '<h2>scripts</h2>'
+        + _overview_table(records))
+    return _page('run records', body)
+
+
+# -- single-script trend (GET /script/<name>) ----------------------------- #
+
+def _metric_picker(name, choices, selected_tokens, params):
+    """A no-JS checkbox form; submitting reloads /script/<name> with ?metric=."""
+    hidden = []
+    for k in ('since', 'until', 'limit'):
+        if params.get(k):
+            hidden.append(
+                f'<input type="hidden" name="{k}" value="{_e(params[k])}">')
+    opts = []
+    for token, unit, key in choices:
+        checked = ' checked' if token in selected_tokens else ''
+        tag = ' [key]' if key else ''
+        u = f' ({_e(unit)})' if unit else ''
+        opts.append(
+            f'<label><input type="checkbox" name="metric" value="{_e(token)}"{checked}> '
+            f'{_e(token)}{u}{tag}</label>')
+    if not opts:
+        return '<p class="hint">this script has recorded no numeric metrics.</p>'
+    return (
+        f'<form class="picker" method="get" action="{_e(_script_href(name))}">'
+        + ''.join(hidden)
+        + '<div class="opts">' + ''.join(opts) + '</div>'
+        + '<button type="submit">update charts</button>'
+        + ' <span class="hint">no selection = the runs\' key metrics + duration</span>'
+        + '</form>')
+
+
+def _svg_chart(values, statuses, *, width=280, height=64, pad=8):
+    """
+    A fixed-viewBox line sketch of ``values`` over the runs, oldest -> newest.
+
+    Encodes only the min..max range of the values that are present. A missing
+    run breaks the line (never a zero); a non-succeeded run gets a hollow
+    marker. No axis labels, no colour meaning.
+    """
+    n = len(values)
+    present = [v for v in values if v is not None]
+    frame = (f'<rect class="frame" x="0.5" y="0.5" '
+             f'width="{width - 1}" height="{height - 1}" rx="3"/>')
+    if not present or n == 0:
+        return (f'<svg class="chart" viewBox="0 0 {width} {height}" '
+                f'role="img" aria-label="no values">{frame}'
+                f'<text x="{width / 2}" y="{height / 2 + 4}" '
+                f'text-anchor="middle" fill="var(--muted)" '
+                f'font-size="10">no values</text></svg>')
+
+    lo, hi = min(present), max(present)
+    span = (hi - lo) or 1.0
+    inner_w, inner_h = width - 2 * pad, height - 2 * pad
+
+    def px(i):
+        return pad + (inner_w * i / (n - 1)) if n > 1 else width / 2
+
+    def py(v):
+        if hi == lo:
+            return height / 2
+        return pad + inner_h * (1 - (v - lo) / span)
+
+    segments, cur = [], []
+    for i, v in enumerate(values):
+        if v is None:
+            if len(cur) > 1:
+                segments.append(cur)
+            cur = []
+        else:
+            cur.append((px(i), py(v)))
+    if len(cur) > 1:
+        segments.append(cur)
+
+    lines = ''.join(
+        '<polyline class="line" points="'
+        + ' '.join(f'{x:.1f},{y:.1f}' for x, y in seg) + '"/>'
+        for seg in segments)
+
+    dots = []
+    for i, (v, st) in enumerate(zip(values, statuses)):
+        if v is None:
+            continue
+        cx, cy = px(i), py(v)
+        if st == 'succeeded':
+            dots.append(f'<circle class="dot" cx="{cx:.1f}" cy="{cy:.1f}" r="2"/>')
+        else:
+            dots.append(f'<circle class="dot-open" cx="{cx:.1f}" cy="{cy:.1f}" '
+                        f'r="2.5"/>')
+
+    return (f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
+            f'aria-label="magnitude trend, {len(present)} of {n} runs have a value">'
+            f'{frame}{lines}{"".join(dots)}</svg>')
+
+
+def _series_label(s):
+    unit = f' ({_e(s["unit"])})' if s.get('unit') else ''
+    tag = ' [key]' if s.get('key') else ''
+    return f'{_e(s["scope"])}/{_e(s["name"])}{unit}{tag}'
+
+
+def _trend_value(point, scope, name):
+    return point['values'].get(scope, {}).get(name)
+
+
+def _trend_figures(series_defs, points):
+    if not series_defs:
+        return ('<p class="empty">no key metrics recorded by these runs &mdash; '
+                'pick one or more metrics above.</p>')
+    figs = []
+    for s in series_defs:
+        raw = [_trend_value(p, s['scope'], s['name']) for p in points]
+        statuses = [p['display_status'] for p in points]
+        present = [v for v in raw if v is not None]
+        missing = sum(1 for v in raw if v is None)
+        # the built-in duration series reads as wall-clock time, not raw seconds
+        fmt = (_human_duration
+               if (s['scope'], s['name']) == _series.DURATION_SERIES
+               else _fmt_num)
+        ends = (f'{fmt(present[0])} &rarr; {fmt(present[-1])}'
+                if present else 'no values')
+        sub = ends + (f' &middot; {missing} missing' if missing else '')
+        figs.append(
+            '<figure class="series">'
+            f'<figcaption>{_series_label(s)}</figcaption>'
+            + _svg_chart(raw, statuses)
+            + f'<div class="sub">{sub}</div>'
+            '</figure>')
+    return ''.join(figs)
+
+
+def _trend_table(series_defs, points):
+    # the fixed "duration" column already shows the built-in duration series
+    # (human-readable); don't add a second raw run/duration_s column for it
+    cols = [s for s in series_defs
+            if (s['scope'], s['name']) != _series.DURATION_SERIES]
+    head = ['<th>run</th><th>started (local)</th><th>status</th>',
+            '<th class="num">duration</th>']
+    for s in cols:
+        head.append(f'<th class="num">{_e(s["scope"])}/{_e(s["name"])}</th>')
+    rows = []
+    for p in points:
+        cells = [
+            f'<td><a href="/run/{_e(p["run_id"])}"><code>'
+            f'{_e(p["run_id"][:12])}</code></a></td>',
+            f'<td>{_e(_local(p["started_at"]))}</td>',
+            f'<td>{_pill(p["display_status"])}</td>',
+            f'<td class="num">{_e(_human_duration(p["duration_s"]))}</td>',
+        ]
+        for s in cols:
+            cells.append(
+                f'<td class="num">'
+                f'{_e(_fmt_num(_trend_value(p, s["scope"], s["name"])))}</td>')
+        rows.append('<tr>' + ''.join(cells) + '</tr>')
+    return (
+        '<div class="tablewrap"><table><thead><tr>' + ''.join(head)
+        + '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div>')
+
+
+_LEGEND = (
+    '<div class="legend">&#9679; finished run &middot; &#9711; '
+    'running / failed / stale run &middot; a gap is a run with no value '
+    '(never zero). The line shows magnitude only &mdash; not a health signal.'
+    '</div>')
+
+
+def _trend_html(name, result, choices, selected_tokens, params, db_version):
+    points = result['points']
+    series_defs = result['series']
+    since = params.get('since') or '-'
+    until = params.get('until') or 'now'
+    limit = params.get('limit', str(_TREND_LIMIT))
+    meta = (f'schema v{db_version} &middot; {len(points)} run(s) &middot; '
+            f'times {_local_tz_label()} &middot; <a href="/">&larr; overview</a> '
+            f'&middot; <a href="/runs?script={quote(name, safe="")}">runs</a>')
+    window = (f'window: since {_e(since)} &middot; until {_e(until)} &middot; '
+              f'limit {_e(limit)} newest, shown oldest first')
+
+    body = [
+        f'<h1>{_e(name)}</h1>',
+        f'<div class="meta">{meta}</div>',
+        f'<div class="hint">{window}</div>',
+        _trend_window_form(name, params),
+        _metric_picker(name, choices, selected_tokens, params),
+    ]
+    if not points:
+        body.append('<p class="empty">no runs in the selected window.</p>')
+        return _page(f'{name} trend', ''.join(body))
+
+    body.append(_LEGEND)
+    body.append(_trend_figures(series_defs, points))
+    body.append('<h2>runs</h2>')
+    body.append(_trend_table(series_defs, points))
+    return _page(f'{name} trend', ''.join(body))
+
+
+def _trend_window_form(name, params):
+    since = _e(params.get('since', ''))
+    until = _e(params.get('until', ''))
+    limit = _e(params.get('limit', str(_TREND_LIMIT)))
+    metrics = ''.join(
+        f'<input type="hidden" name="metric" value="{_e(m)}">'
+        for m in params.get('_metric_list', []))
+    return (
+        f'<form class="filters" method="get" action="{_e(_script_href(name))}">'
+        + metrics
+        + f'<input type="text" name="since" placeholder="since (24h / 7d / ISO)" value="{since}">'
+        + f'<input type="text" name="until" placeholder="until" value="{until}">'
+        + f'<input type="number" name="limit" min="1" value="{limit}" style="width:5rem">'
+        + '<button type="submit">apply</button>'
+        + '</form>')
+
+
+# -- recent-runs stream (GET /runs) -------------------------------------- #
+
 def _filter_form(params):
     script = _e(params.get('script', ''))
     since = _e(params.get('since', ''))
-    limit = _e(params.get('limit', str(_DEFAULT_LIMIT)))
+    limit = _e(params.get('limit', str(_RUNS_LIMIT)))
     cur_status = params.get('status', '')
     opts = ['<option value="">any status</option>']
     for s in _STATUS_CHOICES:
         sel = ' selected' if s == cur_status else ''
         opts.append(f'<option value="{s}"{sel}>{s}</option>')
     return (
-        '<form class="filters" method="get" action="/">'
+        '<form class="filters" method="get" action="/runs">'
         f'<input type="text" name="script" placeholder="script name" value="{script}">'
         f'<select name="status">{"".join(opts)}</select>'
         f'<input type="text" name="since" placeholder="since (24h / 7d / ISO)" value="{since}">'
@@ -272,35 +664,37 @@ def _runs_table(records):
         rows.append(
             '<tr>'
             f'<td>{_e(_local(r["started_at"]))}</td>'
-            f'<td>{_e(r["script_name"])}</td>'
+            f'<td><a href="{_e(_script_href(r["script_name"]))}">'
+            f'{_e(r["script_name"])}</a></td>'
             f'<td>{_pill(r["display_status"])}</td>'
             f'<td class="num">{_e(_human_duration(r["duration_s"]))}</td>'
             f'<td><a href="/run/{_e(r["run_id"])}"><code>{_e(r["run_id"][:12])}</code></a></td>'
             '</tr>')
     return (
-        '<table><thead><tr>'
+        '<div class="tablewrap"><table><thead><tr>'
         '<th>started (local)</th><th>script</th><th>status</th>'
         '<th class="num">duration</th><th>run id</th>'
-        '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table>')
+        '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div>')
 
 
-def _index_html(health, records, params, db_version, refresh):
+def _runs_html(records, params, db_version, refresh):
     meta = (f'schema v{db_version} &middot; {len(records)} run(s) shown &middot; '
-            f'times {_local_tz_label()}')
+            f'times {_local_tz_label()} &middot; <a href="/">&larr; overview</a>')
     body = (
-        '<h1>run records</h1>'
+        '<h1>recent runs</h1>'
         f'<div class="meta">{meta}</div>'
-        + _banner_html(health)
         + _filter_form(params)
-        + '<h2>recent runs</h2>'
         + _runs_table(records))
-    return _page('run records', body, refresh=refresh)
+    return _page('recent runs', body, refresh=refresh)
 
+
+# -- run detail (GET /run/<id>) ---------------------------------------- #
 
 def _detail_html(rec, db_version):
     core = [
         ('run id', f'<code>{_e(rec["run_id"])}</code>'),
-        ('script', _e(rec['script_name'])),
+        ('script', f'<a href="{_e(_script_href(rec["script_name"]))}">'
+                   f'{_e(rec["script_name"])}</a>'),
         ('host', _e(rec['host'])),
         ('code version', _e(rec['code_version'] or '-')),
         ('started', _e(f'{_local(rec["started_at"])}  ({rec["started_at"]})')),
@@ -341,17 +735,13 @@ def _detail_html(rec, db_version):
     body = (
         f'<h1>{_e(rec["script_name"])}</h1>'
         f'<div class="meta">schema v{db_version} &middot; '
-        f'<a href="/">&larr; all runs</a></div>'
+        f'<a href="/">&larr; overview</a> &middot; '
+        f'<a href="{_e(_script_href(rec["script_name"]))}">trend</a> &middot; '
+        f'<a href="/runs">runs</a></div>'
         f'<dl class="core">{core_html}</dl>'
         '<h2>metrics</h2>' + metrics_html +
         '<h2>logs</h2>' + logs_html)
     return _page(f'run {rec["run_id"][:12]}', body)
-
-
-def _fmt_num(value):
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)
 
 
 def _error_html(message):
@@ -363,7 +753,7 @@ def _error_html(message):
 
 
 # --------------------------------------------------------------------------- #
-# JSON rendering (mirrors runrecord.query's document shape)
+# JSON rendering (mirrors runrecord.query / runrecord.series document shapes)
 # --------------------------------------------------------------------------- #
 
 def _json_bytes(payload):
@@ -407,12 +797,17 @@ class _Handler(BaseHTTPRequestHandler):
     def _route(self, *, body):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip('/') or '/'
-        params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+        multi = parse_qs(parsed.query)
+        params = {k: v[0] for k, v in multi.items()}
         try:
             if path == '/':
-                self._index(params, body=body)
+                self._overview(params, body=body)
+            elif path == '/runs':
+                self._runs(params, body=body)
             elif path == '/healthz':
                 self._healthz(body=body)
+            elif path.startswith('/script/'):
+                self._script(path[len('/script/'):], params, multi, body=body)
             elif path.startswith('/run/'):
                 self._detail(path[len('/run/'):], params, body=body)
             else:
@@ -422,6 +817,7 @@ class _Handler(BaseHTTPRequestHandler):
             status = {
                 EXIT_NO_DB: 503, EXIT_SCHEMA: 503,
                 EXIT_NO_MATCH: 404, EXIT_USAGE: 400,
+                EXIT_DB_ERROR: 503,
             }.get(e.exit_code, 500)
             if params.get('format') == 'json':
                 self._send(status, _json_bytes({'error': str(e)}),
@@ -438,21 +834,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- routes ---------------------------------------------------------- #
 
-    def _index(self, params, *, body):
+    def _overview(self, params, *, body):
         conn, db_version = _open(self.db_path)
         try:
             health = _health(conn, self.stale_after)
             since = _parse_time(params['since']) if params.get('since') else None
-            status = params.get('status') or None
-            if status is not None and status not in _STATUS_CHOICES:
-                raise QueryError(f'unknown status {status!r}')
-            records = _all_records(
-                conn, self.stale_after,
-                script=params.get('script') or None, since=since,
-                persisted_status=_persisted_prefilter(status))
-            records = _select_by_status(records, status)
-            limit = _parse_limit(params.get('limit'))
-            records = records[:limit]
+            max_metrics = _parse_max_metrics(params.get('max_metrics'))
+            records = _overview_records(
+                conn, self.stale_after, since=since, max_metrics=max_metrics)
         finally:
             conn.close()
 
@@ -463,6 +852,99 @@ class _Handler(BaseHTTPRequestHandler):
                 'health': {k: v for k, v in health.items() if k != 'unhealthy'},
                 'unhealthy': [r['script_name'] for r in health['unhealthy']],
                 'count': len(records),
+                'scripts': [
+                    {**{k: v for k, v in r.items() if k != 'logs'}}
+                    for r in records
+                ],
+            }
+            self._send(200, _json_bytes(payload),
+                       'application/json; charset=utf-8', body=body)
+            return
+
+        page = _overview_html(health, records, params, db_version)
+        self._send(200, page.encode('utf-8'), 'text/html; charset=utf-8',
+                   body=body)
+
+    def _script(self, name, params, multi, *, body):
+        name = unquote(name.split('?')[0]).strip()
+        if not name:
+            raise QueryError('no script name given', EXIT_NO_MATCH)
+
+        metric_tokens = [t.strip() for t in multi.get('metric', []) if t.strip()]
+        params = dict(params)
+        params['_metric_list'] = metric_tokens
+
+        conn, db_version = _open(self.db_path)
+        try:
+            if not _script_seen(conn, name):
+                raise QueryError(f'no runs recorded for script {name!r}',
+                                 EXIT_NO_MATCH)
+            since = _parse_time(params['since']) if params.get('since') else None
+            until = _parse_time(params['until']) if params.get('until') else None
+            limit = _parse_limit(params.get('limit'), _TREND_LIMIT)
+            result = _trend_data(
+                conn, name, self.stale_after, metric_tokens=metric_tokens,
+                since=since, until=until, limit=limit)
+            choices = _available_choices(
+                conn, name, since=since, until=until, limit=limit)
+        finally:
+            conn.close()
+
+        selected_tokens = set(metric_tokens) or {
+            f'{s["scope"]}/{s["name"]}' if (s['scope'], s['name'])
+            != _series.DURATION_SERIES else _DURATION_TOKEN
+            for s in result['series']}
+
+        if params.get('format') == 'json':
+            payload = {
+                'schema_version': db_version,
+                'generated_at': datetime.now(timezone.utc).isoformat(),
+                'query': {
+                    'command': 'trend',
+                    'script': name,
+                    'since': since.isoformat() if since else None,
+                    'until': until.isoformat() if until else None,
+                    'limit': limit,
+                    'metrics': ([list(_parse_metric_arg(t)) for t in metric_tokens]
+                                or None),
+                    'stale_after_s': self.stale_after,
+                },
+                'script_name': result['script_name'],
+                'series': result['series'],
+                'count': len(result['points']),
+                'points': result['points'],
+            }
+            self._send(200, _json_bytes(payload),
+                       'application/json; charset=utf-8', body=body)
+            return
+
+        page = _trend_html(name, result, choices, selected_tokens, params,
+                           db_version)
+        self._send(200, page.encode('utf-8'), 'text/html; charset=utf-8',
+                   body=body)
+
+    def _runs(self, params, *, body):
+        conn, db_version = _open(self.db_path)
+        try:
+            since = _parse_time(params['since']) if params.get('since') else None
+            status = params.get('status') or None
+            if status is not None and status not in _STATUS_CHOICES:
+                raise QueryError(f'unknown status {status!r}', EXIT_USAGE)
+            records = _all_records(
+                conn, self.stale_after,
+                script=params.get('script') or None, since=since,
+                persisted_status=_persisted_prefilter(status))
+            records = _select_by_status(records, status)
+            limit = _parse_limit(params.get('limit'), _RUNS_LIMIT)
+            records = records[:limit]
+        finally:
+            conn.close()
+
+        if params.get('format') == 'json':
+            payload = {
+                'schema_version': db_version,
+                'generated_at': datetime.now(timezone.utc).isoformat(),
+                'count': len(records),
                 'runs': records,
             }
             self._send(200, _json_bytes(payload),
@@ -470,7 +952,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         refresh = _parse_refresh(params.get('refresh'))
-        page = _index_html(health, records, params, db_version, refresh)
+        page = _runs_html(records, params, db_version, refresh)
         self._send(200, page.encode('utf-8'), 'text/html; charset=utf-8',
                    body=body)
 
@@ -524,15 +1006,27 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(payload)
 
 
-def _parse_limit(raw):
+def _parse_limit(raw, default):
     if raw is None or raw == '':
-        return _DEFAULT_LIMIT
+        return default
     try:
         n = int(raw)
     except ValueError:
-        raise QueryError(f'invalid limit {raw!r}')
+        raise QueryError(f'invalid limit {raw!r}', EXIT_USAGE)
     if n < 1:
-        raise QueryError('limit must be >= 1')
+        raise QueryError('limit must be >= 1', EXIT_USAGE)
+    return n
+
+
+def _parse_max_metrics(raw):
+    if raw is None or raw == '':
+        return _OVERVIEW_MAX_METRICS
+    try:
+        n = int(raw)
+    except ValueError:
+        raise QueryError(f'invalid max_metrics {raw!r}', EXIT_USAGE)
+    if n < 0:
+        raise QueryError('max_metrics must be >= 0', EXIT_USAGE)
     return n
 
 
