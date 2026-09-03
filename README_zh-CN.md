@@ -80,7 +80,14 @@ nohup python -u <script-name.py> >/dev/null 2>&1 &
 
 ## 查看运行记录
 
-部分脚本会把每次运行写入一条结构化记录（`runrecord/`，SQLite 存于 `data/run-records.sqlite3`）。除命令行查询 `python -m runrecord` 外，还提供一个**只读** Web 页面用于日常巡检：首页展示各脚本最近一次运行的健康状态、最近运行列表，可按脚本和状态筛选，并展开单次运行的指标与日志路径。
+部分脚本会把每次运行写入一条结构化记录（`runrecord/`，SQLite 存于 `data/run-records.sqlite3`）。除命令行查询 `python -m runrecord`（含 `overview` / `trend` 子命令）外，还提供一个**只读** Web 页面用于日常巡检：
+
+- `/` —— 脚本概览：每个脚本一行，显示其最近一次运行的状态、耗时和少量 key metrics，另有健康横幅。
+- `/script/<name>` —— 单个脚本的近期运行按 run 对齐成指标时间序列，用简单的 SVG 折线展示（默认 key metrics + 内建 duration，可用复选框表单选择其他指标）。缺失的 run 显示为断点而非 0；折线只表达数值大小，不暗示好坏。
+- `/runs` —— 最近运行列表，可按脚本、状态、时间筛选。
+- `/run/<id>` —— 单次运行详情：核心字段、按 scope 分组的指标、日志路径。
+
+每个页面同样支持 `?format=json`。
 
 该服务仅监听 `127.0.0.1`，不写数据库、无鉴权。在**存放数据库的机器**上前台启动，再从本地通过 SSH 隧道访问（服务器上 Ctrl-C 结束）：
 

@@ -30,9 +30,19 @@ See the structure below.
 
 Some scripts persist one structured row per run into a SQLite store
 (`runrecord/`, `data/run-records.sqlite3`). Besides the CLI (`python -m
-runrecord`), a **read-only** web page gives an at-a-glance health view: the
-latest status of each script, recent runs, filtering by script and status, and
-per-run metrics and log paths.
+runrecord`, with `overview` and `trend` sub-commands), a **read-only** web page
+gives an at-a-glance view:
+
+- `/` — a per-script overview: one row per script with its latest run's status,
+  duration and a few key metrics, plus a health banner.
+- `/script/<name>` — one script's recent runs aligned into a per-run metric time
+  series, with simple SVG line charts (key metrics + a built-in duration series;
+  pick other metrics with the checkbox form). A missing run is a gap, never a
+  zero; the charts show magnitude only and imply nothing about good or bad.
+- `/runs` — the recent-runs stream, filterable by script, status and time.
+- `/run/<id>` — one run in full: core fields, metrics grouped by scope, log paths.
+
+Every page also serves `?format=json`.
 
 It listens on `127.0.0.1` only, never writes, and has no auth. Start it in the
 foreground on the host that holds the database, and reach it from a workstation
