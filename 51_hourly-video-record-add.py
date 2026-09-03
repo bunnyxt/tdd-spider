@@ -122,12 +122,12 @@ def fetch_and_batch_insert_records(
                  f'batch_fraction={batch_fraction}, '
                  f'max_concurrent_batches={max_concurrent_batches} '
                  f'(upstream in-flight from batch path <= '
-                 f'{batch_size * max_concurrent_batches}), '
-                 f'max_attempts={batch_controller.config.max_attempts}')
+                 f'{batch_size * max_concurrent_batches})')
         fetch_ensure_conditions += ['batch_request', 'batch_whole_failure',
-                                    'batch_misalignment', 'batch_item_retry',
+                                    'batch_misalignment', 'batch_item_fallback_single',
                                     'batch_fallback_single', 'batch_duplicate_single_path',
-                                    'batch_concurrency_throttled', 'batch_discarded_after_trip']
+                                    'batch_concurrency_throttled', 'batch_discarded_after_trip',
+                                    'batch_dropped_at_deadline']
 
     # put aid into queue
     aid_queue: Queue[int] = Queue()

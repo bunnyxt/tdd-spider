@@ -1,6 +1,5 @@
 from .Job import Job
-from .VideoViewTrimmedBatchController import \
-    VideoViewTrimmedBatchController, BatchEntry, BatchDispatchResult
+from .VideoViewTrimmedBatchController import VideoViewTrimmedBatchController
 from service import Service, CodeError, MisalignmentError
 from timer import Timer
 from queue import Queue, Empty, Full
@@ -38,13 +37,22 @@ class FetchVideoRecordJob(Job):
     - batch_controller set -> _run_batch_path_loop(): a batch_fraction share
       of aids is buffered into batches of batch_size and fetched through
       Service.get_video_view_trimmed_batch; everything else takes the single
-      path. Per-item outcomes route exactly like the single path; only failed
-      ITEMS are retried (max_attempts per aid, mixed into later batches). The
-      pool-shared controller bounds simultaneous batch invocations and owns
-      the circuit breaker (see its docstring for the precise breaker
-      definition); once the breaker fires, every remaining aid -- including
-      results still in flight, which are discarded on return -- takes the
-      untouched single-aid path.
+      path. Reliability-first policy -- the batch path is an optimisation
+      layered on the single path, never a second retry machine:
+        * item ok          -> record, exactly as the single path would
+        * item CodeError   -> code_error_aid_queue, exactly as the single path
+        * item transient   -> THAT aid is refetched over the single path
+                              right away (Service's own retry=3 handles it)
+        * whole-batch fail -> every aid of the batch is refetched over the
+                              single path, and the breaker is tripped: the
+                              path is unavailable, stop using it this run
+        * misalignment     -> same fallback, breaker tripped: the path's DATA
+                              cannot be trusted
+      The pool-shared controller bounds simultaneous batch invocations and
+      holds the breaker; once tripped, every remaining aid -- including
+      responses still in flight, which are discarded on return -- takes the
+      untouched single-aid path. No aid is ever dropped because of the batch
+      path; the worst case is a few extra single-aid calls.
     """
 
     # give up on a record after this long stuck on a full queue, so a dead
@@ -53,7 +61,7 @@ class FetchVideoRecordJob(Job):
     MAX_PUT_WAIT_S = 300.0
 
     # wait for a batch-invocation slot in slices this long, re-checking the
-    # run deadline and the circuit breaker between waits
+    # run deadline and the breaker between waits
     SLOT_WAIT_SLICE_S = 1.0
 
     def __init__(self, name: str, aid_queue: Queue[int], record_queue: 'Queue[Optional[RecordNew]]',
@@ -201,12 +209,11 @@ class FetchVideoRecordJob(Job):
 
     def _run_batch_path_loop(self):
         """Pull aids, route each to the batch buffer or the single path, and
-        dispatch batches. Failure policy, retry accounting and the breaker all
-        live in _dispatch_batch / the controller; this loop only moves aids."""
+        dispatch full batches (plus the partial one left when the queue
+        drains). Nothing comes back from a dispatch: every aid handed to
+        _dispatch_batch is resolved there, one way or another."""
         config = self.batch_controller.config
-        # entries waiting for dispatch; retried items re-enter here and mix
-        # with new aids
-        buffer: list[BatchEntry] = []
+        buffer: list[int] = []  # aids waiting for dispatch
 
         while True:
             if self._deadline_reached():
@@ -220,24 +227,13 @@ class FetchVideoRecordJob(Job):
             try:
                 aid = self.aid_queue.get_nowait()
             except Empty:
-                if buffer:
-                    # flush the partial batch (and keep looping: its retries
-                    # re-enter the buffer until resolved or exhausted). With no
-                    # new aids left a retry-only buffer would redispatch back to
-                    # back; colddown first, mirroring the single path's
-                    # between-trial sleep (Service._get)
-                    if all(entry.attempts_spent > 0 for entry in buffer):
-                        time.sleep(random.random() * 0.5 + 0.75)
-                    result = self._dispatch_batch(buffer)
-                    if result.should_stop:
-                        return
-                    buffer = result.retries
-                    continue
+                if buffer and not self._dispatch_batch(buffer):
+                    return
                 break
 
             if (self.batch_controller.is_enabled()
                     and random.random() < config.batch_fraction):
-                if any(entry.aid == aid for entry in buffer):
+                if aid in buffer:
                     # duplicate of an aid already buffered: the worker contract
                     # leaves de-duplication to the caller, so never send the
                     # same token twice in one batch -- this occurrence takes
@@ -246,24 +242,28 @@ class FetchVideoRecordJob(Job):
                     if not self._fetch_single(aid):
                         return
                 else:
-                    buffer.append(BatchEntry(aid=aid, attempts_spent=0))
+                    buffer.append(aid)
                     if len(buffer) >= config.batch_size:
-                        result = self._dispatch_batch(buffer)
-                        if result.should_stop:
+                        if not self._dispatch_batch(buffer):
                             return
-                        buffer = result.retries
+                        buffer = []
             else:
                 if not self._fetch_single(aid):
                     return
 
     # --- batch dispatch -------------------------------------------------------
 
-    def _dispatch_batch(self, entries: list) -> BatchDispatchResult:
-        """Run one assembled batch through gate -> HTTP -> interpretation."""
+    def _dispatch_batch(self, aids: list) -> bool:
+        """
+        Resolve one assembled batch: gate -> HTTP -> per-item routing, with
+        every failure mode ending in the single-aid path (see the class
+        docstring). Returns False only when the job must exit (record writer
+        stalled or dead), the same contract as _fetch_single.
+        """
         # breaker check before spending a slot; a batch assembled just before
         # the trip goes straight to the single path
         if not self.batch_controller.is_enabled():
-            return self._fallback_result(entries)
+            return self._fallback_to_single(aids)
 
         # concurrency gate: bounds simultaneous batch invocations pool-wide
         if not self.batch_controller.try_acquire_slot(0):
@@ -273,30 +273,52 @@ class FetchVideoRecordJob(Job):
             self.stat.condition['batch_concurrency_throttled'] += 1
             while not self.batch_controller.try_acquire_slot(self.SLOT_WAIT_SLICE_S):
                 if self._deadline_reached():
-                    # hand the entries back untouched; the loop-top deadline
-                    # check is the single place that logs and counts the drop
-                    return BatchDispatchResult(retries=entries, should_stop=False)
+                    # the run is over: same treatment as aids left in the
+                    # queue at the deadline, but counted so it is visible
+                    self.logger.info(f'Duration limit reached while waiting for a batch '
+                                     f'slot. {len(aids)} buffered aid(s) dropped.')
+                    self.stat.condition['batch_dropped_at_deadline'] += len(aids)
+                    return True
                 if not self.batch_controller.is_enabled():
-                    return self._fallback_result(entries)
+                    return self._fallback_to_single(aids)
 
-        aids = [entry.aid for entry in entries]
         self.stat.condition['batch_request'] += 1
         batch_start = time.perf_counter()
         try:
             try:
                 items = self.service.get_video_view_trimmed_batch(aids)
             finally:
-                # release before any fallback/retry work -- holding a slot
-                # through single-path refetches would starve the batch path
+                # release before any fallback work -- holding a slot through
+                # single-path refetches would starve the batch path
                 self.batch_controller.release_slot()
         except MisalignmentError as e:
-            return self._on_misalignment(e, aids, entries)
+            # the path's data cannot be trusted (wrong endpoint, protocol
+            # break, misrouted payloads): discard the whole result, stop using
+            # the path this run, refetch these aids over the single path
+            self.stat.condition['batch_misalignment'] += 1
+            if self.batch_controller.trip(f'misalignment: {e}'):
+                self.logger.critical(
+                    f'Batch path misalignment -- batch path disabled for the rest of '
+                    f'this run, remaining aids take the single-aid path. error: {e}')
+            else:
+                self.logger.error(f'Batch path misalignment (path already disabled). '
+                                  f'aids: {aids}, error: {e}')
+            return self._fallback_to_single(aids)
         except Exception as e:
-            # broad on purpose, like the single path's except Exception: a
-            # bug-shaped error must degrade like a transport failure, never
-            # kill a worker thread mid-run
-            batch_ms = int((time.perf_counter() - batch_start) * 1000)
-            return self._on_whole_batch_failure(e, aids, entries, batch_ms)
+            # nothing per-item arrived (transport failure, worker error
+            # envelope, endpoint unconfigured, or an unexpected bug -- broad
+            # on purpose, like the single path's except Exception): the path
+            # is unavailable, stop using it this run rather than retrying it,
+            # and refetch these aids over the single path
+            self.stat.condition['batch_whole_failure'] += 1
+            if self.batch_controller.trip(f'whole-batch failure: {e}'):
+                self.logger.critical(
+                    f'Whole-batch failure -- batch path disabled for the rest of this '
+                    f'run, remaining aids take the single-aid path. aids: {aids}, error: {e}')
+            else:
+                self.logger.error(f'Whole-batch failure (path already disabled). '
+                                  f'aids: {aids}, error: {e}')
+            return self._fallback_to_single(aids)
         batch_ms = int((time.perf_counter() - batch_start) * 1000)
 
         # RE-CHECK the breaker before interpreting anything: this response may
@@ -311,107 +333,50 @@ class FetchVideoRecordJob(Job):
             self.logger.warning(
                 f'Discarding an in-flight batch response returned after the batch path '
                 f'was disabled; refetching over the single-aid path. aids: {aids}')
-            return self._fallback_result(entries)
+            return self._fallback_to_single(aids)
 
-        self.batch_controller.record_batch_success()
         self.logger.debug(f'BATCH TIMING aids={aids} http={batch_ms}ms')
 
         # per-item routing, mirroring the single path outcome for outcome
-        retries = []
-        for entry, item in zip(entries, items):
+        for aid, item in zip(aids, items):
             if item.view is not None:
-                record = build_video_record_via_video_view(entry.aid, item.view)
-                if not self._put_record_with_backpressure(entry.aid, record):
-                    return BatchDispatchResult(retries=[], should_stop=True)
+                record = build_video_record_via_video_view(aid, item.view)
+                if not self._put_record_with_backpressure(aid, record):
+                    return False
             elif isinstance(item.error, CodeError):
                 if self.code_error_aid_queue is not None:
-                    self.code_error_aid_queue.put(entry.aid)
+                    self.code_error_aid_queue.put(aid)
                     self.logger.info(f'Code error, queued for video update. '
-                                     f'aid: {entry.aid}, error: {item.error}')
+                                     f'aid: {aid}, error: {item.error}')
                 else:
                     self.logger.error(
-                        f'Fail to fetch video record. aid: {entry.aid}, error: {item.error}')
+                        f'Fail to fetch video record. aid: {aid}, error: {item.error}')
                 self.stat.condition['code_error'] += 1
             else:
-                # transient per-item failure: retry THIS item only
-                attempts_spent = entry.attempts_spent + 1
-                if attempts_spent >= self.batch_controller.config.max_attempts:
-                    self.logger.error(f'Fail to fetch video record (batch attempts '
-                                      f'exhausted). aid: {entry.aid}, error: {item.error}')
-                    self.stat.condition['other_exception'] += 1
-                else:
-                    self.stat.condition['batch_item_retry'] += 1
-                    retries.append(BatchEntry(entry.aid, attempts_spent))
-                    continue  # not final: no per-aid bookkeeping yet
-            self._finalize_batch_aid(batch_ms)
-        return BatchDispatchResult(retries=retries, should_stop=False)
-
-    def _on_misalignment(self, error, aids, entries) -> BatchDispatchResult:
-        """The batch path returned data that cannot be trusted (wrong endpoint,
-        protocol break, misrouted payloads). Not a per-item problem: discard
-        the WHOLE batch result, fire the breaker for the rest of the run,
-        refetch these aids over the single path."""
-        self.stat.condition['batch_misalignment'] += 1
-        if self.batch_controller.trip(f'misalignment: {error}'):
-            self.logger.critical(
-                f'Batch path misalignment -- batch path disabled for the rest of '
-                f'this run, remaining aids take the single-aid path. error: {error}')
-        else:
-            self.logger.error(f'Batch path misalignment (path already disabled). '
-                              f'aids: {aids}, error: {error}')
-        return self._fallback_result(entries)
-
-    def _on_whole_batch_failure(self, error, aids, entries, batch_ms) -> BatchDispatchResult:
-        """Nothing per-item arrived (transport failure, worker error envelope,
-        endpoint unconfigured, or an unexpected bug): every aid in the batch
-        pays one attempt; the breaker counts one completion-order failure."""
-        self.stat.condition['batch_whole_failure'] += 1
-        self.logger.error(f'Whole-batch failure. aids: {aids}, error: {error}')
-        if self.batch_controller.record_whole_batch_failure():
-            self.logger.critical(
-                f'{VideoViewTrimmedBatchController.CONSECUTIVE_WHOLE_BATCH_FAILURE_LIMIT} '
-                f'consecutive whole-batch failures -- batch path disabled for the '
-                f'rest of this run, remaining aids take the single-aid path.')
-            return self._fallback_result(entries)
-        if not self.batch_controller.is_enabled():
-            # another job fired the breaker while this batch was in flight;
-            # retrying over the dead path would only burn attempts
-            return self._fallback_result(entries)
-        # colddown before the retry wave, mirroring the single path's
-        # between-trial sleep (Service._get)
-        time.sleep(random.random() * 0.5 + 0.75)
-        retries = []
-        for entry in entries:
-            attempts_spent = entry.attempts_spent + 1
-            if attempts_spent >= self.batch_controller.config.max_attempts:
-                self.logger.error(f'Fail to fetch video record (batch attempts '
-                                  f'exhausted). aid: {entry.aid}, error: {error}')
-                self.stat.condition['other_exception'] += 1
-                self._finalize_batch_aid(batch_ms)
-            else:
-                retries.append(BatchEntry(entry.aid, attempts_spent))
-        return BatchDispatchResult(retries=retries, should_stop=False)
-
-    def _fallback_result(self, entries: list) -> BatchDispatchResult:
-        """Send a discarded batch down the single path, as a dispatch result."""
-        return BatchDispatchResult(
-            retries=[], should_stop=not self._fallback_batch_to_single(entries))
-
-    def _fallback_batch_to_single(self, entries: list) -> bool:
-        """Run every entry of a discarded batch through the single-aid path
-        (which brings its own internal retries). False -> job must exit."""
-        for entry in entries:
-            self.stat.condition['batch_fallback_single'] += 1
-            if not self._fetch_single(entry.aid):
-                return False
+                # transient per-item failure (item timeout, fetch error,
+                # non-JSON or non-200 upstream): THIS aid goes over the
+                # single path now, whose own retry=3 is the retry policy.
+                # _fetch_single does its own per-aid bookkeeping.
+                self.logger.debug(f'Batch item failed, refetching over the single-aid '
+                                  f'path. aid: {aid}, error: {item.error}')
+                self.stat.condition['batch_item_fallback_single'] += 1
+                if not self._fetch_single(aid):
+                    return False
+                continue
+            # per-aid closing bookkeeping for an aid resolved by the batch.
+            # batch_ms is the whole batch round-trip: it is the wall-clock
+            # latency this aid experienced, which keeps http_ms / STAGE AVG
+            # comparable with the single path's per-aid timing
+            self.stat.condition['http_ms'] += batch_ms
+            self.stat.total_count += 1
+            self.stat.total_duration_ms += batch_ms
         return True
 
-    def _finalize_batch_aid(self, batch_ms: int):
-        """Per-aid closing bookkeeping for an aid whose FINAL outcome came from
-        a batch (success / code_error / attempts exhausted -- not a retry).
-        batch_ms is the whole batch round-trip: it is the wall-clock latency
-        this aid experienced, which keeps http_ms / STAGE AVG comparable with
-        the single path's per-aid timing."""
-        self.stat.condition['http_ms'] += batch_ms
-        self.stat.total_count += 1
-        self.stat.total_duration_ms += batch_ms
+    def _fallback_to_single(self, aids: list) -> bool:
+        """Run every aid of a discarded batch through the single-aid path
+        (which brings its own internal retries). False -> job must exit."""
+        for aid in aids:
+            self.stat.condition['batch_fallback_single'] += 1
+            if not self._fetch_single(aid):
+                return False
+        return True

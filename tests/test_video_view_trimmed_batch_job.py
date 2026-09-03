@@ -1,15 +1,15 @@
 """
 Tests for FetchVideoRecordJob's BATCH mode and its pool-shared
-VideoViewTrimmedBatchController: batch assembly, per-item retry, the
-concurrency gate on simultaneous batch invocations, the circuit breaker
-(including the in-flight-response race), single-path fallback, and the conf
-switch behind it all.
+VideoViewTrimmedBatchController: batch assembly, per-item routing with
+single-path fallback for every failure mode, the concurrency gate on
+simultaneous batch invocations, the circuit breaker (including the
+in-flight-response race), and the conf switch behind it all.
 
 The Service is a scripted mock; the DB layer is stubbed out at import time
 (fetch workers never touch the DB anyway -- the stub just satisfies the
 ``job`` package's sibling imports). Synchronous tests drive ``process()``
-directly with the job module's colddown sleeps patched out; the concurrency
-and race tests run REAL job threads against services that block on events.
+directly; the concurrency and race tests run REAL job threads against
+services that block on events.
 
 Run from the repo root:
 
@@ -23,7 +23,6 @@ import threading
 import time
 import types
 import unittest
-import unittest.mock
 from queue import Queue
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -89,18 +88,17 @@ def code_error_item(aid, code=-404):
         error=CodeError('video_view_trimmed', {'aid': aid}, {'code': code}, code))
 
 
-def retryable_item(aid):
+def transient_item(aid):
     return VideoViewTrimmedBatchItem(
         aid=aid, view=None,
         error=ResponseError('video_view_trimmed_batch_item',
                             {'aid': aid, 'kind': 'item_timeout'}))
 
 
-def make_controller(batch_size=2, batch_fraction=1.0, max_concurrent_batches=30,
-                    max_attempts=3):
+def make_controller(batch_size=2, batch_fraction=1.0, max_concurrent_batches=30):
     return VideoViewTrimmedBatchController(VideoViewTrimmedBatchConfig(
         batch_size=batch_size, batch_fraction=batch_fraction,
-        max_concurrent_batches=max_concurrent_batches, max_attempts=max_attempts))
+        max_concurrent_batches=max_concurrent_batches))
 
 
 class ScriptedService:
@@ -168,15 +166,10 @@ def drain(queue):
 
 
 def run_job(service, aids, controller):
-    """Run one job's loop synchronously (no thread), colddown sleeps patched
-    out. Returns (job, records, code_error_aids)."""
+    """Run one job's loop synchronously (no thread).
+    Returns (job, records, code_error_aids)."""
     job, record_queue, code_error_aid_queue = make_job(service, aids, controller)
-    # keep the retry colddowns out of the test wall clock (time.perf_counter
-    # must stay real -- the job measures batch latency with it)
-    fake_time = types.SimpleNamespace(
-        sleep=lambda s: None, perf_counter=time.perf_counter)
-    with unittest.mock.patch('job.FetchVideoRecordJob.time', fake_time):
-        job.process()
+    job.process()
     return job, drain(record_queue), drain(code_error_aid_queue)
 
 
@@ -225,81 +218,62 @@ class TestBatchHappyPath(unittest.TestCase):
         self.assertEqual(len(records), 3)
 
 
-class TestPerItemRetry(unittest.TestCase):
+class TestFailureFallback(unittest.TestCase):
+    """Every batch failure mode ends in the single-aid path; nothing is
+    retried inside the batch path and nothing is lost."""
 
-    def test_only_failed_items_are_retried(self):
+    def test_transient_item_falls_back_to_single_path_alone(self):
         service = ScriptedService(batch_script=[
-            lambda aids: [ok_item(aids[0]), retryable_item(aids[1])]])
-        job, records, _ = run_job(service, [101, 102], make_controller())
+            lambda aids: [ok_item(aids[0]), transient_item(aids[1])]])
+        controller = make_controller()
+        job, records, _ = run_job(service, [101, 102, 103, 104], controller)
 
-        # retry batch contains ONLY the failed item
-        self.assertEqual(service.batch_calls, [[101, 102], [102]])
-        self.assertEqual(sorted(r.aid for r in records), [101, 102])
-        self.assertEqual(job.stat.condition['batch_item_retry'], 1)
-        self.assertEqual(job.stat.condition['success'], 2)
+        # only the failed item went single; the batch path stayed in use
+        self.assertEqual(service.batch_calls, [[101, 102], [103, 104]])
+        self.assertEqual(service.single_calls, [102])
+        self.assertTrue(controller.is_enabled())
+        self.assertEqual(sorted(r.aid for r in records), [101, 102, 103, 104])
+        self.assertEqual(job.stat.condition['batch_item_fallback_single'], 1)
+        self.assertEqual(job.stat.condition['success'], 4)
+        self.assertEqual(job.stat.total_count, 4)
 
-    def test_attempts_exhausted_becomes_other_exception(self):
-        service = ScriptedService(batch_script=[
-            lambda aids: [retryable_item(aids[0])]] * 3)
+    def test_transient_item_fallback_reports_the_single_path_outcome(self):
+        # the single path's own retry=3 is the retry policy; if IT gives up,
+        # the aid is a plain other_exception exactly like today
+        service = ScriptedService(
+            batch_script=[lambda aids: [transient_item(aids[0])]],
+            single_error=ResponseError('video_view_trimmed', {'aid': 101}))
         job, records, _ = run_job(service, [101], make_controller())
 
-        # max_attempts=3 total tries, aligned with the single path's retry=3
-        self.assertEqual(service.batch_calls, [[101], [101], [101]])
+        self.assertEqual(service.single_calls, [101])
         self.assertEqual(records, [])
-        self.assertEqual(service.single_calls, [])  # exhausted != fallback
         self.assertEqual(job.stat.condition['other_exception'], 1)
         self.assertEqual(job.stat.total_count, 1)
 
-
-class TestWholeBatchFailureAndBreaker(unittest.TestCase):
-
-    def test_whole_batch_failure_charges_every_aid_one_attempt(self):
+    def test_whole_batch_failure_falls_back_and_disables_the_path(self):
         service = ScriptedService(batch_script=[
             ResponseError('video_view_trimmed_batch', {})])
         controller = make_controller()
-        job, records, _ = run_job(service, [101, 102], controller)
+        job, records, _ = run_job(service, [101, 102, 103, 104], controller)
 
-        # failure, then a successful retry batch with BOTH aids
-        self.assertEqual(service.batch_calls, [[101, 102], [101, 102]])
-        self.assertEqual(sorted(r.aid for r in records), [101, 102])
+        # exactly ONE batch call: its aids and every later aid go single path
+        self.assertEqual(service.batch_calls, [[101, 102]])
+        self.assertFalse(controller.is_enabled())
+        self.assertEqual(sorted(service.single_calls), [101, 102, 103, 104])
+        self.assertEqual(sorted(r.aid for r in records), [101, 102, 103, 104])
         self.assertEqual(job.stat.condition['batch_whole_failure'], 1)
-        self.assertTrue(controller.is_enabled())  # one failure does not trip
+        self.assertEqual(job.stat.condition['batch_fallback_single'], 2)
 
     def test_unexpected_exception_is_a_whole_batch_failure_not_a_dead_thread(self):
         # a bug-shaped exception must degrade like a transport failure, never
         # kill the worker thread mid-run
         service = ScriptedService(batch_script=[ValueError('boom')])
-        job, records, _ = run_job(service, [101, 102], make_controller())
-
-        self.assertEqual(job.stat.condition['batch_whole_failure'], 1)
-        self.assertEqual(sorted(r.aid for r in records), [101, 102])
-
-    def test_three_consecutive_whole_batch_failures_trip_the_breaker(self):
-        service = ScriptedService(batch_script=[
-            ResponseError('video_view_trimmed_batch', {})] * 3)
         controller = make_controller()
         job, records, _ = run_job(service, [101, 102], controller)
 
-        self.assertEqual(job.stat.condition['batch_whole_failure'], 3)
+        self.assertEqual(job.stat.condition['batch_whole_failure'], 1)
         self.assertFalse(controller.is_enabled())
-        # the batch's aids came back over the single path -- no data lost
-        self.assertEqual(sorted(service.single_calls), [101, 102])
         self.assertEqual(sorted(r.aid for r in records), [101, 102])
-        self.assertEqual(job.stat.condition['batch_fallback_single'], 2)
-
-    def test_breaker_counts_in_completion_order_and_success_resets(self):
-        # the documented definition: N failures recorded with no validated
-        # success recorded between them, in COMPLETION order -- interleaved
-        # successes (e.g. from other in-flight batches) reset the streak
-        controller = make_controller()
-        self.assertFalse(controller.record_whole_batch_failure())  # 1
-        self.assertFalse(controller.record_whole_batch_failure())  # 2
-        controller.record_batch_success()                          # reset
-        self.assertFalse(controller.record_whole_batch_failure())  # 1
-        self.assertFalse(controller.record_whole_batch_failure())  # 2
-        self.assertTrue(controller.is_enabled())
-        self.assertTrue(controller.record_whole_batch_failure())   # 3 -> trip
-        self.assertFalse(controller.is_enabled())
 
     def test_misalignment_trips_immediately_and_falls_back(self):
         service = ScriptedService(batch_script=[
@@ -307,7 +281,6 @@ class TestWholeBatchFailureAndBreaker(unittest.TestCase):
         controller = make_controller()
         job, records, _ = run_job(service, [101, 102, 103, 104], controller)
 
-        # exactly ONE batch call; its aids and every later aid go single path
         self.assertEqual(service.batch_calls, [[101, 102]])
         self.assertFalse(controller.is_enabled())
         self.assertEqual(sorted(service.single_calls), [101, 102, 103, 104])
@@ -407,6 +380,7 @@ class TestConcurrencyGate(unittest.TestCase):
 
         self.assertEqual(job_b.stat.condition['duration_limit_reached'], 1)
         self.assertEqual(job_b.stat.condition['batch_concurrency_throttled'], 1)
+        self.assertEqual(job_b.stat.condition['batch_dropped_at_deadline'], 1)
         self.assertEqual(drain(records_b), [])  # 302 dropped at the deadline
         self.assertEqual([r.aid for r in drain(records_a)], [301])
 
