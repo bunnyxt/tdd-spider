@@ -447,6 +447,126 @@ class TestBreakerInFlightRace(unittest.TestCase):
         self.assertEqual(len(service.batch_calls), 2)
 
 
+class GatedQueue(Queue):
+    """An aid queue whose Nth get_nowait blocks until `gate` is opened -- lets
+    a test freeze a job between two dequeues while another job acts."""
+
+    def __init__(self, gate_before_get_number):
+        super().__init__()
+        self.gate = threading.Event()
+        self._gate_before = gate_before_get_number
+        self._gets = 0
+
+    def get_nowait(self):
+        self._gets += 1
+        if self._gets == self._gate_before:
+            assert self.gate.wait(EVENT_TIMEOUT_S), 'gate never opened'
+        return super().get_nowait()
+
+
+class TestPartialBufferOnTrip(unittest.TestCase):
+
+    def test_job_holding_a_partial_buffer_flushes_it_when_the_breaker_opens(self):
+        # job A buffers 101 (batch_size 3, so no dispatch), then is frozen on
+        # its next dequeue; job B trips the breaker meanwhile. When A resumes
+        # it must resolve its buffered 101 over the single path BEFORE
+        # handling the aid it just dequeued -- not at queue-empty, not at the
+        # deadline.
+        controller = make_controller(batch_size=3, max_concurrent_batches=2)
+        service = RaceBatchService()  # B's 201-batch would block; unused here
+        service.get_video_view_trimmed_batch = lambda aids, **kw: (_ for _ in ()).throw(
+            MisalignmentError('video_view_trimmed_batch', {}, {}, 'aid echo mismatch'))
+
+        aid_queue_a = GatedQueue(gate_before_get_number=2)
+        for aid in (101, 102):
+            aid_queue_a.put(aid)
+        records_a = Queue()
+        job_a = FetchVideoRecordJob('job_a', aid_queue_a, records_a, service,
+                                    code_error_aid_queue=Queue(), batch_controller=controller)
+        job_a.logger.disabled = True
+        job_b, records_b, _ = make_job(service, [201, 202], controller)
+
+        job_a.start()
+        # A is now parked inside its second get_nowait with 101 buffered
+        job_b.start()
+        job_b.join(EVENT_TIMEOUT_S)
+        self.assertFalse(job_b.is_alive())
+        self.assertFalse(controller.is_enabled())  # B tripped it
+        aid_queue_a.gate.set()
+        job_a.join(EVENT_TIMEOUT_S)
+        self.assertFalse(job_a.is_alive())
+
+        # 101 (the buffer) was refetched before 102 (the fresh dequeue)
+        a_singles = [aid for aid in service.single_calls if aid in (101, 102)]
+        self.assertEqual(a_singles, [101, 102])
+        self.assertEqual(job_a.stat.condition['batch_fallback_single'], 1)
+        self.assertNotIn('batch_dropped_at_deadline', job_a.stat.condition)
+        self.assertEqual(sorted(r.aid for r in drain(records_a)), [101, 102])
+        self.assertEqual(sorted(r.aid for r in drain(records_b)), [201, 202])
+
+
+class SlotRaceService(ScriptedService):
+    """
+    Orchestrates the slot/breaker race: job A's batch (301...) holds the only
+    slot and blocks until `trip_now` is set, then fails with a misalignment
+    (tripping the breaker and releasing the slot). Job B, waiting for that
+    slot, then acquires it -- and must NOT send its batch.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._lock = threading.Lock()
+        self.trip_now = threading.Event()
+
+    def get_video_view_trimmed_batch(self, aids, **kwargs):
+        with self._lock:
+            self.batch_calls.append(list(aids))
+        assert self.trip_now.wait(EVENT_TIMEOUT_S), 'trip_now never came'
+        raise MisalignmentError('video_view_trimmed_batch', {}, {}, 'aid echo mismatch')
+
+    def get_video_view_trimmed(self, params, **kwargs):
+        with self._lock:
+            self.single_calls.append(params['aid'])
+        return make_view(params['aid'])
+
+
+class TestSlotAcquiredAfterTrip(unittest.TestCase):
+
+    def test_waiter_that_gets_the_slot_after_a_trip_releases_it_and_falls_back(self):
+        controller = make_controller(batch_size=2, max_concurrent_batches=1)
+        service = SlotRaceService()
+        job_a, records_a, _ = make_job(service, [301, 302], controller)
+        job_b, records_b, _ = make_job(service, [303, 304], controller)
+
+        job_a.start()
+        deadline = time.time() + EVENT_TIMEOUT_S
+        while len(service.batch_calls) < 1:  # A holds the slot, in flight
+            self.assertLess(time.time(), deadline, 'A never got in flight')
+            time.sleep(0.005)
+        job_b.start()
+        while job_b.stat.condition['batch_concurrency_throttled'] < 1:  # B waits
+            self.assertLess(time.time(), deadline, 'B never waited for the slot')
+            time.sleep(0.005)
+        # another thread (A) trips the breaker and releases the slot while B
+        # is blocked waiting for it
+        service.trip_now.set()
+        job_a.join(EVENT_TIMEOUT_S)
+        job_b.join(EVENT_TIMEOUT_S)
+        self.assertFalse(job_a.is_alive())
+        self.assertFalse(job_b.is_alive())
+
+        self.assertFalse(controller.is_enabled())
+        # B acquired the freed slot but never sent: only A's batch exists
+        self.assertEqual(service.batch_calls, [[301, 302]])
+        self.assertEqual(job_b.stat.condition['batch_request'], 0)
+        self.assertEqual(job_b.stat.condition['batch_fallback_single'], 2)
+        self.assertEqual(sorted(r.aid for r in drain(records_b)), [303, 304])
+        self.assertEqual(sorted(r.aid for r in drain(records_a)), [301, 302])
+        # the slot B abandoned was given back: with cap=1 it is free again
+        self.assertTrue(controller.try_acquire_slot(0))
+        controller.release_slot()
+
+
 class TestBatchPathOff(unittest.TestCase):
 
     def test_no_controller_means_single_path_only(self):

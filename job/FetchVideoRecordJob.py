@@ -231,8 +231,19 @@ class FetchVideoRecordJob(Job):
                     return
                 break
 
-            if (self.batch_controller.is_enabled()
-                    and random.random() < config.batch_fraction):
+            # observe the breaker ONCE per aid. If it fired while this buffer
+            # was assembling, resolve the buffer over the single path right
+            # now -- before touching the aid just dequeued -- instead of
+            # holding it until the queue drains (where a deadline could drop
+            # it). No job keeps a batch buffer past the moment it sees the
+            # breaker open.
+            batch_enabled = self.batch_controller.is_enabled()
+            if buffer and not batch_enabled:
+                if not self._fallback_to_single(buffer):
+                    return
+                buffer = []
+
+            if batch_enabled and random.random() < config.batch_fraction:
                 if aid in buffer:
                     # duplicate of an aid already buffered: the worker contract
                     # leaves de-duplication to the caller, so never send the
@@ -273,20 +284,27 @@ class FetchVideoRecordJob(Job):
             self.stat.condition['batch_concurrency_throttled'] += 1
             while not self.batch_controller.try_acquire_slot(self.SLOT_WAIT_SLICE_S):
                 if self._deadline_reached():
-                    # the run is over: same treatment as aids left in the
-                    # queue at the deadline, but counted so it is visible
-                    self.logger.info(f'Duration limit reached while waiting for a batch '
-                                     f'slot. {len(aids)} buffered aid(s) dropped.')
-                    self.stat.condition['batch_dropped_at_deadline'] += len(aids)
-                    return True
+                    return self._drop_at_deadline(aids)
                 if not self.batch_controller.is_enabled():
                     return self._fallback_to_single(aids)
 
-        self.stat.condition['batch_request'] += 1
+        # SLOT HELD from here to the finally below -- exactly one release on
+        # every path. The breaker may have fired, or the deadline passed,
+        # between the last check and the successful acquire (typically while
+        # blocked in the wait above), so re-check BEFORE sending; when
+        # abandoning, the slot is given back first and the fallback/drop work
+        # runs unthrottled afterwards.
+        abandon = None
         batch_start = time.perf_counter()
         try:
             try:
-                items = self.service.get_video_view_trimmed_batch(aids)
+                if not self.batch_controller.is_enabled():
+                    abandon = 'tripped'
+                elif self._deadline_reached():
+                    abandon = 'deadline'
+                else:
+                    self.stat.condition['batch_request'] += 1
+                    items = self.service.get_video_view_trimmed_batch(aids)
             finally:
                 # release before any fallback work -- holding a slot through
                 # single-path refetches would starve the batch path
@@ -319,6 +337,10 @@ class FetchVideoRecordJob(Job):
                 self.logger.error(f'Whole-batch failure (path already disabled). '
                                   f'aids: {aids}, error: {e}')
             return self._fallback_to_single(aids)
+        if abandon == 'tripped':
+            return self._fallback_to_single(aids)
+        if abandon == 'deadline':
+            return self._drop_at_deadline(aids)
         batch_ms = int((time.perf_counter() - batch_start) * 1000)
 
         # RE-CHECK the breaker before interpreting anything: this response may
@@ -370,6 +392,15 @@ class FetchVideoRecordJob(Job):
             self.stat.condition['http_ms'] += batch_ms
             self.stat.total_count += 1
             self.stat.total_duration_ms += batch_ms
+        return True
+
+    def _drop_at_deadline(self, aids: list) -> bool:
+        """The run deadline passed while this batch was still waiting to be
+        sent: same treatment as aids left in the queue at the deadline (the
+        loop-top check ends the job next), but counted so it is visible."""
+        self.logger.info(f'Duration limit reached before the batch could be sent. '
+                         f'{len(aids)} buffered aid(s) dropped.')
+        self.stat.condition['batch_dropped_at_deadline'] += len(aids)
         return True
 
     def _fallback_to_single(self, aids: list) -> bool:
