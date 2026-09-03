@@ -99,9 +99,14 @@ ssh -N -L 8765:127.0.0.1:8765 <服务器>
 也可在工作机上一条命令完成：
 
 ```shell script
-ssh -L 8765:127.0.0.1:8765 <服务器> \
-  'cd <项目目录> && python3 -m runrecord.web --host 127.0.0.1 --port 8765 --db data/run-records.sqlite3'
+ssh -t \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -L 8765:127.0.0.1:8765 <服务器> \
+  'cd <项目目录> && exec python3 -m runrecord.web --host 127.0.0.1 --port 8765 --db data/run-records.sqlite3'
 ```
+
+PTY 使前台 Web 进程跟随 SSH session 的生命周期，keepalive 则会及时发现已经失效的连接。
 
 ## 脚本列表
 

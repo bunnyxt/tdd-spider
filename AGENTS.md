@@ -21,6 +21,26 @@ systems, local absolute paths, private session links, server aliases, or
 internal deployment records. Refer to private context only in the private
 system where it lives.
 
+This restriction also applies to every tracked file, including source comments,
+docstrings, tests, fixtures, examples, and repository documentation. Never add
+private ticket IDs (such as `BL-...`), knowledge-base paths, local absolute
+paths, agent/session links, or internal planning notes to tracked content.
+
+Before committing or opening a pull request, inspect the added lines in the
+public diff for private-context leaks. Use an equivalent check when the base is
+not `origin/master`:
+
+```bash
+git diff --unified=0 origin/master...HEAD \
+  | rg '^\+' \
+  | rg 'BL-[0-9]+|/Users/|Projects/kb|Projects/bl|claude\.ai|private (backlog|ticket)|session link'
+```
+
+Any match must be reviewed and removed unless the matched text is itself part
+of this public-hygiene instruction. Existing historical matches do not justify
+adding new ones; keep checks scoped to the current diff rather than treating
+the whole repository as clean.
+
 ## Repository notes
 
 - Scripts are numbered by role (`12_`, `51_`, …) and run from cron on the prod

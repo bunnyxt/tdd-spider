@@ -53,6 +53,12 @@ ssh -N -L 8765:127.0.0.1:8765 <server>
 Or as a single command from the workstation:
 
 ```shell
-ssh -L 8765:127.0.0.1:8765 <server> \
-  'cd <project-directory> && python3 -m runrecord.web --host 127.0.0.1 --port 8765 --db data/run-records.sqlite3'
+ssh -t \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -L 8765:127.0.0.1:8765 <server> \
+  'cd <project-directory> && exec python3 -m runrecord.web --host 127.0.0.1 --port 8765 --db data/run-records.sqlite3'
 ```
+
+The PTY makes the foreground server follow the SSH session lifecycle, while
+the keepalive options detect a dead connection instead of leaving it unnoticed.
