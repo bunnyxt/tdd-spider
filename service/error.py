@@ -32,8 +32,7 @@ class RateLimitError(ServiceError):
         self.retry_at = retry_at
 
     def __str__(self):
-        return (f'<RateLimitError(target={self.target},reason={self.reason},'
-                f'first_seen={self.first_seen},retry_at={self.retry_at})>')
+        return f'<RateLimitError(target={self.target},reason={self.reason})>'
 
 
 class ValidationError(ServiceError):

@@ -247,8 +247,9 @@ class TestWholeBatchFailures(unittest.TestCase):
 
     def test_missing_endpoint_exits_as_configuration_error(self):
         for endpoints in ({}, {'get_video_view_trimmed_batch': {'workers': []}}):
+            service = make_service(endpoints=endpoints)
             with self.assertRaises(SystemExit):
-                make_service(endpoints=endpoints)
+                service.get_video_view_trimmed_batch([1, 2])
 
     def test_direct_mode_is_a_programming_error(self):
         service = Service(mode='direct', endpoints=BATCH_ENDPOINTS)

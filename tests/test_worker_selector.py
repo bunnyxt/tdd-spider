@@ -84,6 +84,12 @@ class WorkerSelectorConfigTest(TestCase):
             with self.subTest(item=item), self.assertRaises(ValueError):
                 WorkerSelector(endpoints_for('view', [item]))
 
+    def test_unknown_new_worker_field_is_rejected(self):
+        item = worker('w', 'https://worker.invalid/')
+        item['enable'] = False
+        with self.assertRaisesRegex(ValueError, 'Unknown worker field'):
+            WorkerSelector(endpoints_for('view', [item]))
+
     def test_worker_ids_only_need_to_be_unique_within_a_target(self):
         endpoints = {
             'view': {'workers': [worker('same', 'https://one.invalid/')]},
@@ -107,6 +113,15 @@ class WorkerSelectorConfigTest(TestCase):
     def test_service_exits_on_invalid_request_mode(self):
         with self.assertRaises(SystemExit):
             Service(mode='invalid', endpoints={})
+
+    def test_worker_configuration_is_validated_when_target_is_used(self):
+        service = Service(mode='worker', endpoints={
+            'unused': {'workers': []},
+            'view': {'workers': [worker('view-a', 'https://a.invalid/')]},
+        })
+        self.assertEqual(service._worker_selector.select('view').id, 'view-a')
+        with self.assertRaises(ValueError):
+            service._worker_selector.select('unused')
 
 
 class WorkerSelectorStateTest(TestCase):
@@ -159,6 +174,17 @@ class WorkerSelectorStateTest(TestCase):
         first_seen, retry_at = self.selector.rate_limit_window('view')
         self.assertEqual(first_seen, 1000.0)
         self.assertEqual(retry_at, 1040.0)
+
+    def test_expired_other_worker_does_not_cause_pool_exhaustion(self):
+        view_a, view_b = self.selector._workers['view']
+        self.selector.mark_rate_limited(
+            'view', view_a, reason='http_412', cooldown_s=30)
+        self.clock.now += 31
+
+        self.selector.mark_rate_limited(
+            'view', view_b, reason='http_412', cooldown_s=30)
+
+        self.assertEqual(self.selector.select('view').id, 'view-a')
 
     def test_selection_uses_state_lock(self):
         state_lock = mock.MagicMock()

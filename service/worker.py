@@ -10,7 +10,7 @@ from .error import RateLimitError
 
 logger = logging.getLogger('Service')
 
-__all__ = ['WorkerEndpoint', 'WorkerSelector']
+__all__ = ['WorkerConfigurationError', 'WorkerEndpoint', 'WorkerSelector']
 
 
 class WorkerConfigurationError(ValueError):
@@ -65,6 +65,11 @@ class WorkerSelector:
             raise WorkerConfigurationError(
                 f'Worker entry for {target!r} must be a URL or object.')
 
+        unknown = set(raw) - {'id', 'url', 'platform', 'weight', 'enabled'}
+        if unknown:
+            raise WorkerConfigurationError(
+                f'Unknown worker field(s) for {target!r}: {sorted(unknown)!r}.')
+
         worker_id = raw.get('id')
         url = raw.get('url')
         platform = raw.get('platform')
@@ -87,12 +92,6 @@ class WorkerSelector:
                 f'Worker enabled for {worker_id!r} must be a boolean.')
         return WorkerEndpoint(worker_id, url, platform, weight, enabled)
 
-    def validate_worker_mode(self) -> None:
-        if not self._workers:
-            raise WorkerConfigurationError('No worker endpoints are configured.')
-        for target in self._workers:
-            self._enabled_workers(target)
-
     def select(self, target: str) -> WorkerEndpoint:
         workers = self._enabled_workers(target)
         now = self._clock()
@@ -108,7 +107,7 @@ class WorkerSelector:
             available = tuple(
                 worker for worker in workers
                 if (target, worker.id) not in self._rate_limits)
-            window = self._rate_limit_window(target, workers)
+            window = self._rate_limit_window(target, workers, now)
 
         for worker in recovered:
             logger.info('worker_rate_limit_cleared target=%s worker_id=%s platform=%s',
@@ -133,9 +132,9 @@ class WorkerSelector:
                 retry_at=max(previous.retry_at if previous else retry_at,
                              retry_at))
             exhausted = all(
-                (target, candidate.id) in self._rate_limits
-                for candidate in workers)
-            window = self._rate_limit_window(target, workers)
+                (state := self._rate_limits.get((target, candidate.id))) is not None
+                and state.retry_at > now for candidate in workers)
+            window = self._rate_limit_window(target, workers, now)
 
         if transitioned:
             logger.warning(
@@ -147,7 +146,7 @@ class WorkerSelector:
     def rate_limit_window(self, target: str) -> tuple[float | None, float | None]:
         workers = self._enabled_workers(target)
         with self._lock:
-            return self._rate_limit_window(target, workers)
+            return self._rate_limit_window(target, workers, self._clock())
 
     def _enabled_workers(self, target: str) -> tuple[WorkerEndpoint, ...]:
         workers = self._workers.get(target, ())
@@ -157,11 +156,12 @@ class WorkerSelector:
         return workers
 
     def _rate_limit_window(
-            self, target: str, workers: Iterable[WorkerEndpoint]
+            self, target: str, workers: Iterable[WorkerEndpoint], now: float
     ) -> tuple[float | None, float | None]:
         states = [self._rate_limits[(target, worker.id)]
                   for worker in workers
-                  if (target, worker.id) in self._rate_limits]
+                  if (target, worker.id) in self._rate_limits
+                  and self._rate_limits[(target, worker.id)].retry_at > now]
         return (min((state.first_seen for state in states), default=None),
                 min((state.retry_at for state in states), default=None))
 
@@ -169,10 +169,12 @@ class WorkerSelector:
             self, target: str, reason: str,
             window: tuple[float | None, float | None]) -> None:
         first_seen, retry_at = window
+        now = self._clock()
         logger.error(
-            'worker_pool_rate_limited target=%s first_seen=%s earliest_retry_in_s=%s',
-            target, first_seen,
-            None if retry_at is None else max(0, int(retry_at - self._clock())))
+            'worker_pool_rate_limited target=%s limited_for_s=%s earliest_retry_in_s=%s',
+            target,
+            None if first_seen is None else max(0, int(now - first_seen)),
+            None if retry_at is None else max(0, int(retry_at - now)))
         raise RateLimitError(target, reason, first_seen, retry_at)
 
     @staticmethod

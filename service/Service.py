@@ -146,8 +146,6 @@ class Service:
 
         try:
             self._worker_selector = WorkerSelector(self.endpoints)
-            if self._mode == 'worker':
-                self._worker_selector.validate_worker_mode()
         except WorkerConfigurationError as e:
             logger.critical(f'Invalid worker configuration: {e}')
             raise SystemExit(1)
@@ -619,9 +617,9 @@ class Service:
           parses non-200 bodies, so a code==0 body on a 500 is NOT trusted)
           carries a ResponseError: retry this item only.
         - raises ResponseError: whole-batch transport failure -- HTTP != 200 /
-          unparsable top level (includes the worker's own 400/500 envelopes),
-          or no batch worker endpoint configured. The caller owns the retry
-          and counts one attempt for every aid in the batch.
+          unparsable top level (includes the worker's own 400/500 envelopes).
+          The caller owns the retry and counts one attempt for every aid in
+          the batch.
         - raises MisalignmentError: top level parsed but violates the batch
           contract (v != 1, requested/results length mismatch) or an item
           fails an identity/format check (aid echo, body.data.aid, bvid,
@@ -632,10 +630,9 @@ class Service:
         caller's per-aid attempt accounting; stacking Service-level retries
         under them would multiply Lambda invocations invisibly.
 
-        A missing/empty endpoints entry raises ResponseError instead of the
-        sibling methods' critical+exit: the batch path has a designed fallback
-        (kill-switch -> single path), so config drift here must degrade the
-        run, never kill it.
+        Missing worker configuration is treated as a startup/configuration
+        error consistently with the sibling methods and exits when this target
+        is first used.
         """
         # config mode
         mode = mode if mode is not None else self._mode
