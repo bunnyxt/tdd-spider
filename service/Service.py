@@ -1,12 +1,15 @@
 import requests
 from requests.adapters import HTTPAdapter
 from http.cookiejar import DefaultCookiePolicy
+from dataclasses import dataclass
 import json
 import time
 import random
 from pathlib import Path
 from typing import Optional, Callable, Literal
-from .error import ResponseError, FormatError, CodeError, MisalignmentError
+from .error import (ResponseError, RateLimitError,
+                    FormatError, CodeError, MisalignmentError)
+from .worker import WorkerConfigurationError, WorkerSelector
 from .response import \
     VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, VideoViewTrimmed, \
     VideoViewTrimmedBatchItem, \
@@ -22,6 +25,7 @@ logger = logging.getLogger('Service')
 RequestMode = Literal['direct', 'worker']
 
 __all__ = ['Service', 'RequestMode',
+           'RateLimit', 'default_rate_limit', 'member_card_rate_limit',
            'VIDEO_VIEW_TRIMMED_BATCH_PROTOCOL_VERSION',
            'VIDEO_VIEW_TRIMMED_BATCH_READ_TIMEOUT_S',
            'VIDEO_VIEW_TRIMMED_BATCH_DEADLINE_S']
@@ -42,6 +46,41 @@ VIDEO_VIEW_TRIMMED_BATCH_PROTOCOL_VERSION = 1
 VIDEO_VIEW_TRIMMED_BATCH_READ_TIMEOUT_S = 8.0
 VIDEO_VIEW_TRIMMED_BATCH_DEADLINE_S = 12.0
 
+WORKER_HTTP_412_COOLDOWN_S = 30 * 60
+MEMBER_CARD_352_COOLDOWN_S = 5 * 60
+
+
+@dataclass(frozen=True)
+class RateLimit:
+    reason: str
+    cooldown_s: int
+
+
+def default_rate_limit(response: requests.Response) -> Optional[RateLimit]:
+    if response.status_code == 412:
+        return RateLimit('http_412', WORKER_HTTP_412_COOLDOWN_S)
+    return None
+
+
+def member_card_rate_limit(response: requests.Response) -> Optional[RateLimit]:
+    limited = default_rate_limit(response)
+    if limited is not None:
+        return limited
+    if response.status_code != 200:
+        return None
+    try:
+        body = response.json()
+    except (json.JSONDecodeError, requests.exceptions.JSONDecodeError):
+        return None
+    if isinstance(body, dict) and body.get('code') == -352:
+        return RateLimit('code_-352', MEMBER_CARD_352_COOLDOWN_S)
+    return None
+
+
+RATE_LIMIT_CHECKERS: dict[str, Callable[[requests.Response], Optional[RateLimit]]] = {
+    'get_member_card': member_card_rate_limit,
+}
+
 
 class Service:
 
@@ -50,6 +89,10 @@ class Service:
             mode: RequestMode = 'direct', pool_maxsize: int = 256, deadline: float = 10.0,
             min_throughput_bps: float = 80_000.0, endpoints: Optional[dict] = None
     ):
+        if mode not in ('direct', 'worker'):
+            logger.critical(f'Invalid request mode: {mode}.')
+            raise SystemExit(1)
+
         # set default config
         self._headers = headers if headers is not None else {}
         self._retry = retry
@@ -100,6 +143,14 @@ class Service:
                 logger.critical(
                     f'An unexpected error occurred when load and parse endpoints.json file. {e}')
                 exit(1)
+
+        try:
+            self._worker_selector = WorkerSelector(self.endpoints)
+            if self._mode == 'worker':
+                self._worker_selector.validate_worker_mode()
+        except WorkerConfigurationError as e:
+            logger.critical(f'Invalid worker configuration: {e}')
+            raise SystemExit(1)
 
         # define User Agent list
         self._ua_list = [
@@ -167,7 +218,8 @@ class Service:
     # default config getters end
 
     def _get(
-            self, url: str, params: Optional[dict] = None, headers: Optional[dict] = None,
+            self, target: str, mode: RequestMode,
+            params: Optional[dict] = None, headers: Optional[dict] = None,
             retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
             deadline: Optional[float] = None,
             parser: Optional[Callable[[str], Optional[dict]]] = None
@@ -186,10 +238,33 @@ class Service:
         timeout = timeout if timeout is not None else self._timeout
         colddown_factor = colddown_factor if colddown_factor is not None else self._colddown_factor
         deadline = deadline if deadline is not None else self._deadline
+        rate_limit_checker = RATE_LIMIT_CHECKERS.get(target, default_rate_limit)
+
+        if mode == 'direct':
+            try:
+                direct_url = self.endpoints[target]['direct']
+            except KeyError:
+                logger.critical(f'Endpoint "{target}" not found.')
+                raise SystemExit(1)
+        elif mode == 'worker':
+            direct_url = None
+        else:
+            logger.critical(f'Invalid request mode: {mode}.')
+            raise SystemExit(1)
 
         # go request
         response = None
         for trial in range(1, retry + 1):
+            selected_worker = None
+            request_url = direct_url
+            if mode == 'worker':
+                try:
+                    selected_worker = self._worker_selector.select(target)
+                except WorkerConfigurationError as e:
+                    logger.critical(f'Invalid worker configuration: {e}')
+                    raise SystemExit(1)
+                request_url = selected_worker.url
+
             # colddown for retry
             if trial > 1:
                 # fluctuation range 0.75 ~ 1.25
@@ -199,12 +274,12 @@ class Service:
             # try to get response
             trial_start = time.perf_counter()
             try:
-                r = self._session.get(url, params=params, headers=headers,
+                r = self._session.get(request_url, params=params, headers=headers,
                                       timeout=timeout, stream=True)
             except requests.exceptions.RequestException as e:
                 logger.debug(
                     f'Fail to get response. '
-                    f'url: {url}, params: {params}, trial: {trial}, error: {e}'
+                    f'url: {request_url}, params: {params}, trial: {trial}, error: {e}'
                 )
                 continue
 
@@ -242,7 +317,7 @@ class Service:
                 r.close()
                 logger.debug(
                     f'Fail to read response body. '
-                    f'url: {url}, params: {params}, trial: {trial}, error: {e}'
+                    f'url: {request_url}, params: {params}, trial: {trial}, error: {e}'
                 )
                 continue
             if deadline_exceeded:
@@ -250,7 +325,7 @@ class Service:
                 trial_ms = int((time.perf_counter() - trial_start) * 1000)
                 logger.debug(
                     f'Deadline exceeded while downloading response body. '
-                    f'url: {url}, params: {params}, trial: {trial}, deadline: {trial_deadline:.1f}s, '
+                    f'url: {request_url}, params: {params}, trial: {trial}, deadline: {trial_deadline:.1f}s, '
                     f'content_length: {content_length}, duration: {trial_ms}ms'
                 )
                 continue
@@ -262,18 +337,29 @@ class Service:
 
             trial_ms = int((time.perf_counter() - trial_start) * 1000)
 
+            limited = rate_limit_checker(r)
+            if limited is not None:
+                if mode == 'direct':
+                    now = time.monotonic()
+                    raise RateLimitError(
+                        target, limited.reason, now, now + limited.cooldown_s)
+                self._worker_selector.mark_rate_limited(
+                    target, selected_worker, reason=limited.reason,
+                    cooldown_s=limited.cooldown_s)
+                continue
+
             # check status code
             if r.status_code != 200:
                 logger.debug(
                     f'Fail to get response with status code {r.status_code}. '
-                    f'url: {url}, params: {params}, trial: {trial}, duration: {trial_ms}ms'
+                    f'url: {request_url}, params: {params}, trial: {trial}, duration: {trial_ms}ms'
                 )
                 continue
 
             # greppable per-request line (REQUEST): trial > 1 means retries
             # happened; duration is the pure network round-trip of this trial
             logger.debug(
-                f'REQUEST url: {url}, params: {params}, trial: {trial}, duration: {trial_ms}ms')
+                f'REQUEST url: {request_url}, params: {params}, trial: {trial}, duration: {trial_ms}ms')
 
             # parse response
             if parser is None:
@@ -283,7 +369,7 @@ class Service:
                 except json.JSONDecodeError:
                     logger.debug(
                         f'Fail to decode response to json. '
-                        f'response: {r.text}, url: {url}, params: {params}, trial: {trial}'
+                        f'response: {r.text}, url: {request_url}, params: {params}, trial: {trial}'
                     )
                     continue
             else:
@@ -309,18 +395,8 @@ class Service:
             logger.critical(f'Invalid request mode: {mode}.')
             exit(1)
 
-        # get endpoint url
-        try:
-            url = self.endpoints['get_video_view']['direct']
-            if mode == 'worker':
-                url = random.choice(
-                    self.endpoints['get_video_view']['workers'])
-        except KeyError:
-            logger.critical('Endpoint "get_video_view" not found.')
-            exit(1)
-
         # get response
-        response = self._get(url, params=params, headers=headers,
+        response = self._get('get_video_view', mode, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor)
         if response is None:
             raise ResponseError('video_view', params)
@@ -459,19 +535,8 @@ class Service:
                             f'Use get_video_view for direct mode.')
             exit(1)
 
-        # get endpoint url (worker-only, no direct fallback)
-        try:
-            url = random.choice(
-                self.endpoints['get_video_view_trimmed']['workers'])
-        except KeyError:
-            logger.critical('Endpoint "get_video_view_trimmed" not found.')
-            exit(1)
-        except IndexError:
-            logger.critical('Endpoint "get_video_view_trimmed" has no worker configured.')
-            exit(1)
-
         # get response
-        response = self._get(url, params=params, headers=headers,
+        response = self._get('get_video_view_trimmed', 'worker', params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor)
         if response is None:
             raise ResponseError('video_view_trimmed', params)
@@ -583,19 +648,9 @@ class Service:
 
         params = {'aids': ','.join(str(aid) for aid in aids)}
 
-        # get endpoint url (worker-only). Unlike the siblings, missing config
-        # is a loud *recoverable* failure -- see docstring.
-        try:
-            url = random.choice(
-                self.endpoints['get_video_view_trimmed_batch']['workers'])
-        except (KeyError, IndexError):
-            logger.error('Endpoint "get_video_view_trimmed_batch" not found or has no '
-                         'worker configured; treating as whole-batch failure.')
-            raise ResponseError('video_view_trimmed_batch', params)
-
         # get response (batch-specific timeout/deadline; single whole-batch
         # trial, see docstring)
-        response = self._get(url, params=params, headers=headers,
+        response = self._get('get_video_view_trimmed_batch', 'worker', params=params, headers=headers,
                              retry=1, timeout=VIDEO_VIEW_TRIMMED_BATCH_READ_TIMEOUT_S,
                              deadline=VIDEO_VIEW_TRIMMED_BATCH_DEADLINE_S)
         if response is None:
@@ -750,16 +805,6 @@ class Service:
             logger.critical(f'Invalid request mode: {mode}.')
             exit(1)
 
-        # get endpoint url
-        try:
-            url = self.endpoints['get_video_tags']['direct']
-            if mode == 'worker':
-                url = random.choice(
-                    self.endpoints['get_video_tags']['workers'])
-        except KeyError:
-            logger.critical('Endpoint "get_video_tags" not found.')
-            exit(1)
-
         # define parser
         def parser(text: str) -> Optional[dict]:
             logger.debug(
@@ -778,7 +823,7 @@ class Service:
             return parsed_response
 
         # get response
-        response = self._get(url, params=params, headers=headers,
+        response = self._get('get_video_tags', mode, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor,
                              parser=parser)
         if response is None:
@@ -836,42 +881,9 @@ class Service:
             logger.critical(f'Invalid request mode: {mode}.')
             exit(1)
 
-        # get endpoint url
-        try:
-            url = self.endpoints['get_member_card']['direct']
-            if mode == 'worker':
-                url = random.choice(
-                    self.endpoints['get_member_card']['workers'])
-        except KeyError:
-            logger.critical('Endpoint "get_member_card" not found.')
-            exit(1)
-
-        # define parser
-        def parser(text: str) -> Optional[dict]:
-            logger.debug(
-                f'Try to parse member card response text. text: {text}.')
-            parsed_response = None
-            try:
-                parsed_response = json.loads(text)
-            except json.JSONDecodeError:
-                logger.debug(f'Fail to decode text to json. Return None.')
-            if parsed_response is not None:
-                code = parsed_response['code']
-                if code in [-352]:
-                    logger.debug(
-                        f'Status code {code} found. Anti-crawler detected, return None for retry.')
-                    # TMP sleep 60 seconds
-                    logger.warning(f'TMP sleep 60 seconds.')
-                    time.sleep(60)
-                    logger.warning(f'TMP sleep 60 seconds end.')
-                    # TMP end
-                    parsed_response = None
-            return parsed_response
-
         # get response
-        response = self._get(url, params=params, headers=headers,
-                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
-                             parser=parser)
+        response = self._get('get_member_card', mode, params=params, headers=headers,
+                             retry=retry, timeout=timeout, colddown_factor=colddown_factor)
         if response is None:
             raise ResponseError('member_card', params)
 
@@ -930,18 +942,8 @@ class Service:
             logger.critical(f'Invalid request mode: {mode}.')
             exit(1)
 
-        # get endpoint url
-        try:
-            url = self.endpoints['get_member_relation']['direct']
-            if mode == 'worker':
-                url = random.choice(
-                    self.endpoints['get_member_relation']['workers'])
-        except KeyError:
-            logger.critical('Endpoint "get_member_relation" not found.')
-            exit(1)
-
         # get response
-        response = self._get(url, params=params, headers=headers,
+        response = self._get('get_member_relation', mode, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor)
         if response is None:
             raise ResponseError('member_relation', params)
@@ -992,14 +994,6 @@ class Service:
             exit(1)
 
         # get endpoint url
-        try:
-            url = self.endpoints['get_newlist']['direct']
-            if mode == 'worker':
-                url = random.choice(self.endpoints['get_newlist']['workers'])
-        except KeyError:
-            logger.critical('Endpoint "get_newlist" not found.')
-            exit(1)
-
         # define parser
         def parser(text: str) -> Optional[dict]:
             logger.debug(f'Try to parse newlist response text. text: {text}.')
@@ -1017,7 +1011,7 @@ class Service:
             return parsed_response
 
         # get response
-        response = self._get(url, params=params, headers=headers,
+        response = self._get('get_newlist', mode, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor,
                              parser=parser)
         if response is None:

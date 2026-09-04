@@ -43,10 +43,9 @@ def update_member_info():
     for mid in mids:
         mid_queue.put(mid)
     # one sentinel per worker (UpdateMemberJob is sentinel-terminated)
-    # 50 workers (was 20): each member spends most of its ~25s parked in the
-    # member-card anti-crawler 60s sleep, so more workers just means more
-    # members sleeping in parallel -- worth trying to cut the multi-hour runtime.
-    # (The proper fix for the anti-crawler is a separate, thornier change.)
+    # Shared Service state keeps rate-limited member-card workers out of the
+    # candidate pool. If every worker is limited, each job records that condition
+    # and briefly slows down before moving to the next member.
     job_num = 50
     for _ in range(job_num):
         mid_queue.put(None)

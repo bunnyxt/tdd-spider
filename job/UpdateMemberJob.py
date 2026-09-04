@@ -1,13 +1,16 @@
 from .Job import Job
 from db import Session
-from service import Service
+from service import RateLimitError, Service
 from queue import Queue, Empty
 from task import update_member
 from timer import Timer
 from util import format_ts_ms
 from typing import Optional
+import time
 
 __all__ = ['UpdateMemberJob']
+
+RATE_LIMIT_SLEEP_S = 60
 
 
 class UpdateMemberJob(Job):
@@ -44,6 +47,13 @@ class UpdateMemberJob(Job):
 
             try:
                 tdd_member_logs = update_member(mid, self.service, self.session)
+            except RateLimitError as e:
+                self.logger.warning(
+                    f'Member API rate limited; sleep {RATE_LIMIT_SLEEP_S}s before next member. '
+                    f'mid: {mid}, target: {e.target}, reason: {e.reason}, '
+                    f'first_seen: {e.first_seen}, retry_at: {e.retry_at}')
+                self.stat.condition['rate_limited'] += 1
+                time.sleep(RATE_LIMIT_SLEEP_S)
             except Exception as e:
                 # roll back, else the failed transaction poisons this session
                 # and every subsequent mid on this worker fails too
