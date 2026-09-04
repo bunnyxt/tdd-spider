@@ -702,9 +702,14 @@ class TestConf(unittest.TestCase):
         self.assertEqual(get_video_view_trimmed_batch_conf(), (0, 0.0, 0))
 
     def test_size_is_capped_at_worker_max(self):
+        # the cap must equal the DEPLOYED worker's MAX_AIDS (env var, currently
+        # 20), not the .mjs code default -- see conf.py
+        self.assertEqual(conf_module.VIDEO_VIEW_TRIMMED_BATCH_SIZE_MAX, 20)
         self._with_config(
             '[video_view_trimmed_batch]\nbatch_size = 100\nbatch_fraction = 1\n')
-        self.assertEqual(get_video_view_trimmed_batch_conf()[0], 50)
+        self.assertEqual(
+            get_video_view_trimmed_batch_conf()[0],
+            conf_module.VIDEO_VIEW_TRIMMED_BATCH_SIZE_MAX)
 
     def test_fraction_is_clamped_to_one(self):
         self._with_config(

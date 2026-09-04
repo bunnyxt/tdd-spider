@@ -5,10 +5,14 @@ __all__ = ['CONFIG_PATH', 'CONFIG',
            'get_db_args', 'get_sckey',
            'get_video_view_trimmed_batch_conf']
 
-# hard client-side cap on batch size, mirroring the batch worker's default
-# MAX_AIDS (aws_lambda_batch.mjs): a larger configured value would make the
-# worker answer 400 on every batch and burn the whole run down to fallback
-VIDEO_VIEW_TRIMMED_BATCH_SIZE_MAX = 50
+# hard client-side cap on batch size. MUST NOT exceed the DEPLOYED batch
+# worker's MAX_AIDS (an env var on the function, currently 20 -- NOT the
+# aws_lambda_batch.mjs code default of 50): a larger configured batch_size
+# makes the worker answer HTTP 400 on every batch, which the client reads as a
+# whole-batch failure and trips the kill-switch on the first batch, silently
+# dropping the whole run to single-aid fallback. Keep this in lockstep with the
+# function's configured MAX_AIDS whenever that changes.
+VIDEO_VIEW_TRIMMED_BATCH_SIZE_MAX = 20
 
 # default pool-wide cap on simultaneous batch invocations when the conf
 # option is absent. An INITIAL SAFE ASSUMPTION for calibration, not a chosen
@@ -39,8 +43,8 @@ def get_video_view_trimmed_batch_conf() -> tuple[int, float, int]:
     option, or unparsable/out-of-range value all come back as the disabled
     (0, 0.0, 0) -- the batch path must never turn on by accident, and a
     nonsensical concurrency cap (<= 0 would deadlock the gate) disables it
-    rather than guessing. batch_size is capped at the batch worker's MAX_AIDS
-    default; batch_fraction is clamped into [0, 1].
+    rather than guessing. batch_size is capped at the deployed batch worker's
+    MAX_AIDS (VIDEO_VIEW_TRIMMED_BATCH_SIZE_MAX); batch_fraction clamps to [0, 1].
     """
     disabled = (0, 0.0, 0)
     try:

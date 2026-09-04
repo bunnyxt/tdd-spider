@@ -10,11 +10,19 @@ sckey = your sckey
 
 ; trimmed video_view batch path (51_ record fetch). DEFAULT OFF: batch_size = 0
 ; (or a missing section) keeps behavior byte-identical to the single-aid path.
-; batch_size: aids per batch request (worker default caps at 50)
+;
+; NOT IN PRODUCTION USE. The calibration spike found that concentrating the
+; upstream request rate onto one execution environment's IP (which is what
+; batching N concurrent fetches per invocation does) trips bilibili's
+; anti-crawler on the view endpoint under sustained load. Leaving this off is
+; the supported state; turning it on is not a validated configuration.
+;
+; batch_size: aids per batch request (client caps it at the deployed worker's
+;   MAX_AIDS -- an env var on the function, currently 20)
 ; batch_fraction: 0-1 share of aids routed through the batch path
 ; max_concurrent_batches: pool-wide cap on simultaneous batch invocations
 ;   (upstream in-flight from the batch path = batch_size x this; default 30,
-;   an initial assumption pending calibration)
+;   an initial assumption, never calibrated)
 [video_view_trimmed_batch]
 batch_size = 0
 batch_fraction = 0
