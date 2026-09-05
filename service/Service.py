@@ -332,23 +332,16 @@ class Service:
                     now = time.monotonic()
                     raise RateLimitError(
                         target, limited.reason, now, now + limited.cooldown_s)
-                if self._worker_selector.has_failover(target):
-                    self._worker_selector.mark_rate_limited(
-                        target, selected_worker, reason=limited.reason,
-                        cooldown_s=limited.cooldown_s)
-                    continue
-                # No worker can take over, so fall back to plain retries.
-                # A non-200 rate limit (HTTP 412) drops into the status-code
-                # branch below and retries there, but one signalled inside a
-                # 200 body (member-card code -352) has no such branch --
-                # retry it here so a rate-limited body is never handed back
-                # to the caller as a valid response.
-                if r.status_code == 200:
-                    logger.debug(
-                        f'Rate limited ({limited.reason}) with no failover worker. '
-                        f'url: {request_url}, params: {params}, trial: {trial}, duration: {trial_ms}ms'
-                    )
-                    continue
+                # Worker mode: retry within the caller's bounded retry budget.
+                # Cooling the worker down and reaching for another one was
+                # measured to help in no case -- see WorkerSelector -- and on
+                # single-worker targets it made the target unavailable
+                # outright. This must `continue` rather than fall through to
+                # the status-code branch below, because a rate limit signalled
+                # inside a 200 body (member-card code -352) would otherwise be
+                # handed back to the caller as a valid response. The API line
+                # above already recorded the status and trial.
+                continue
 
             # check status code
             if r.status_code != 200:
