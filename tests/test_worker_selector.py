@@ -287,6 +287,28 @@ class ServiceWorkerRoutingTest(TestCase):
         self.assertEqual(service._worker_selector.rate_limit_window('view'),
                          (None, None))
 
+    def test_json_352_on_single_worker_retries_instead_of_returning_body(self):
+        service = self.make_service('get_member_card', [
+            worker('only', 'https://only.invalid/'),
+        ], {
+            'https://only.invalid/': [
+                response(200, {'code': -352}),
+                response(200, {'code': -352}),
+                response(200, {'code': 0}),
+            ],
+        })
+
+        with mock.patch('service.Service.time.sleep'):
+            self.assertIsNone(service._get('get_member_card', 'worker', retry=2))
+            self.assertEqual(service._get('get_member_card', 'worker', retry=1),
+                             {'code': 0})
+
+        self.assertEqual(service._session.calls,
+                         ['https://only.invalid/'] * 3)
+        self.assertEqual(
+            service._worker_selector.rate_limit_window('get_member_card'),
+            (None, None))
+
     @mock.patch('service.worker.random.choice', side_effect=lambda items: items[0])
     def test_json_352_uses_member_card_checker_without_60_second_sleep(self, _choice):
         service = self.make_service('get_member_card', [

@@ -326,6 +326,18 @@ class Service:
                         target, selected_worker, reason=limited.reason,
                         cooldown_s=limited.cooldown_s)
                     continue
+                # No worker can take over, so fall back to plain retries.
+                # A non-200 rate limit (HTTP 412) drops into the status-code
+                # branch below and retries there, but one signalled inside a
+                # 200 body (member-card code -352) has no such branch --
+                # retry it here so a rate-limited body is never handed back
+                # to the caller as a valid response.
+                if r.status_code == 200:
+                    logger.debug(
+                        f'Rate limited ({limited.reason}) with no failover worker. '
+                        f'url: {request_url}, params: {params}, trial: {trial}, duration: {trial_ms}ms'
+                    )
+                    continue
 
             # check status code
             if r.status_code != 200:
