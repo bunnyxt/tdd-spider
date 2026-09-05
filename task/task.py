@@ -13,7 +13,6 @@ logger = logging.getLogger('task')
 
 __all__ = ['add_video_record_via_video_view',
            'fetch_video_record_via_video_view',
-           'build_video_record_via_video_view',
            'commit_video_records_batch',
            'commit_video_record_via_video_view',
            'commit_video_record_via_newlist_archive_stat',
@@ -24,10 +23,25 @@ __all__ = ['add_video_record_via_video_view',
            'get_video_tags_str']
 
 
-def build_video_record_via_video_view(aid: int, video_view) -> RecordNew:
-    # Pure mapping: an already-fetched (and validated) trimmed video view ->
-    # RecordNew. Shared by the single-aid fetch below and the batch fetch path
-    # so quirks like the '--' hidden view count live in exactly one place.
+def fetch_video_record_via_video_view(aid: int, service: Service,
+                                      out_stat: dict = None) -> RecordNew:
+    # Fetch-only: build a lightweight, session-independent record from the
+    # video view WITHOUT touching the DB. Pair with a writer that persists
+    # records (single-record add_video_record_via_video_view, or the batched
+    # commit_video_records_batch for bulk pipelines).
+    # out_stat (optional): filled with 'http_ms' (view fetch incl retries).
+
+    # get video view (trimmed: the record only needs bvid + stat, and the
+    # trimmed worker response skips the 200KB-2.8MB season/UGC bloat that the
+    # full view payload carries for season/multi-part videos)
+    stage_start = time.perf_counter()
+    try:
+        video_view = service.get_video_view_trimmed({'aid': aid})
+    except ServiceError as e:
+        raise e
+    if out_stat is not None:
+        out_stat['http_ms'] = int((time.perf_counter() - stage_start) * 1000)
+
     added = get_ts_s()
     view = -1 if video_view.stat.view == '--' else video_view.stat.view
 
@@ -51,28 +65,6 @@ def build_video_record_via_video_view(aid: int, video_view) -> RecordNew:
         vt=video_view.stat.vt,
         vv=video_view.stat.vv,
     )
-
-
-def fetch_video_record_via_video_view(aid: int, service: Service,
-                                      out_stat: dict = None) -> RecordNew:
-    # Fetch-only: build a lightweight, session-independent record from the
-    # video view WITHOUT touching the DB. Pair with a writer that persists
-    # records (single-record add_video_record_via_video_view, or the batched
-    # commit_video_records_batch for bulk pipelines).
-    # out_stat (optional): filled with 'http_ms' (view fetch incl retries).
-
-    # get video view (trimmed: the record only needs bvid + stat, and the
-    # trimmed worker response skips the 200KB-2.8MB season/UGC bloat that the
-    # full view payload carries for season/multi-part videos)
-    stage_start = time.perf_counter()
-    try:
-        video_view = service.get_video_view_trimmed({'aid': aid})
-    except ServiceError as e:
-        raise e
-    if out_stat is not None:
-        out_stat['http_ms'] = int((time.perf_counter() - stage_start) * 1000)
-
-    return build_video_record_via_video_view(aid, video_view)
 
 
 def add_video_record_via_video_view(aid: int, service: Service, session: Session,
