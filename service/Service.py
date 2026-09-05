@@ -315,7 +315,18 @@ class Service:
 
             trial_ms = int((time.perf_counter() - trial_start) * 1000)
 
+            # One line per HTTP attempt: which API, on which worker, and how
+            # it came back -- `result` is the rate-limit reason (http_412,
+            # code_-352) when there is one, else `ok`. Attempts that never got
+            # a response (network error, deadline) log their own line above.
             limited = rate_limit_checker(r)
+            logger.debug(
+                f'API target: {target}, '
+                f'worker: {selected_worker.id if selected_worker else "direct"}, '
+                f'status: {r.status_code}, '
+                f'result: {limited.reason if limited else "ok"}, '
+                f'trial: {trial}, duration: {trial_ms}ms'
+            )
             if limited is not None:
                 if mode == 'direct':
                     now = time.monotonic()

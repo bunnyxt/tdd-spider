@@ -46,7 +46,10 @@ def update_member_info():
     # Shared Service state keeps rate-limited member-card workers out of the
     # candidate pool. If every worker is limited, each job records that condition
     # and briefly slows down before moving to the next member.
-    job_num = 50
+    # 20, not 50: member-card is rate limited below what 50 concurrent jobs
+    # ask for, so the extra concurrency only buys a shorter burst before the
+    # whole pool cools down.
+    job_num = 20
     for _ in range(job_num):
         mid_queue.put(None)
     logger.info(f'{len(mids)} mids put into queue.')
@@ -79,5 +82,6 @@ def main():
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix=script_id)
+    # debug=True writes 16_DEBUG.log with the per-attempt API lines to grep
+    logging_init(file_prefix=script_id, debug=True)
     main()
