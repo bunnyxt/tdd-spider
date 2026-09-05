@@ -50,9 +50,13 @@ class FetchJobRateLimitTest(TestCase):
     def test_video_fetch_counts_rate_limit_and_skips_aid(self):
         job = object.__new__(FetchVideoRecordJob)
         job.aid_queue = Queue()
+        job.aid_queue.put(123)
+        job.record_queue = Queue()
         job.service = object()
         job.code_error_aid_queue = None
+        job.duration_limit_s = None
         job.duration_limit_due_ts_s = None
+        job.put_timeout_s = 0.01
         job.stat = JobStat()
         job.logger = logging.getLogger('test.FetchVideoRecordJob')
 
@@ -61,9 +65,10 @@ class FetchJobRateLimitTest(TestCase):
             first_seen=95.0, retry_at=105.0)
         with mock.patch('job.FetchVideoRecordJob.fetch_video_record_via_video_view',
                         side_effect=limited):
-            self.assertTrue(job._fetch_single(123))
+            job.process()
 
         self.assertTrue(job.aid_queue.empty())
+        self.assertTrue(job.record_queue.empty())
         self.assertEqual(job.stat.condition['rate_limited'], 1)
 
     def test_follower_fetch_counts_rate_limit_and_moves_to_next_mid(self):

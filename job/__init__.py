@@ -7,7 +7,6 @@ from .AddVideoRecordJob import *
 from .AddVideoFromArchiveJob import *
 from .BatchInsertVideoRecordJob import *
 from .FetchVideoRecordJob import *
-from .VideoViewTrimmedBatchController import *
 from .GetNewlistArchiveJob import *
 from .Job import *
 from .JobStat import *
