@@ -18,22 +18,16 @@
     "direct": "http://api.bilibili.com/x/web-interface/card",
     "workers": [
       {
-        "id": "card-aws",
-        "url": "https://<function-url>.lambda-url.<region>.on.aws/",
-        "platform": "aws",
+        "id": "<worker-id>",
+        "url": "<worker-url>",
+        "platform": "<platform>",
         "weight": 1
       },
       {
-        "id": "card-azure",
-        "url": "https://<app-name>.azurewebsites.net/api/<route>",
-        "platform": "azure",
-        "weight": 2
-      },
-      {
-        "id": "card-gcp",
-        "url": "https://<service>-<hash>.<region>.run.app/",
-        "platform": "gcp",
-        "weight": 3,
+        "id": "<another-worker-id>",
+        "url": "<worker-url>",
+        "platform": "<platform>",
+        "weight": 2,
         "enabled": true
       }
     ]

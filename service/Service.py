@@ -332,15 +332,9 @@ class Service:
                     now = time.monotonic()
                     raise RateLimitError(
                         target, limited.reason, now, now + limited.cooldown_s)
-                # Worker mode: retry within the caller's bounded retry budget.
-                # Cooling the worker down and reaching for another one was
-                # measured to help in no case -- see WorkerSelector -- and on
-                # single-worker targets it made the target unavailable
-                # outright. This must `continue` rather than fall through to
-                # the status-code branch below, because a rate limit signalled
-                # inside a 200 body (member-card code -352) would otherwise be
-                # handed back to the caller as a valid response. The API line
-                # above already recorded the status and trial.
+                # `continue` rather than falling through to the status-code
+                # branch: an in-body rate limit (member-card -352, status 200)
+                # would otherwise be returned to the caller as a valid response.
                 continue
 
             # check status code
