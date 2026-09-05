@@ -1,6 +1,6 @@
 from .Job import Job
 from .VideoViewTrimmedBatchController import VideoViewTrimmedBatchController
-from service import Service, CodeError, MisalignmentError
+from service import Service, CodeError, MisalignmentError, RateLimitError
 from timer import Timer
 from queue import Queue, Empty, Full
 from core import RecordNew
@@ -151,6 +151,11 @@ class FetchVideoRecordJob(Job):
         try:
             record = fetch_video_record_via_video_view(
                 aid, self.service, out_stat=stage_stat)
+        except RateLimitError as e:
+            self.logger.warning(
+                f'Video API rate limited; skipping current aid. '
+                f'aid: {aid}, target: {e.target}, reason: {e.reason}')
+            self.stat.condition['rate_limited'] += 1
         except CodeError as e:
             # hand off to the UpdateVideoJob pool: refreshing tdd_video.code
             # is what drops this aid out of future need_insert lists, but it

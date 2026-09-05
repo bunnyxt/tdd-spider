@@ -1,5 +1,5 @@
 from .Job import Job
-from service import Service, ServiceError
+from service import RateLimitError, Service, ServiceError
 from timer import Timer
 from queue import Queue, Empty, Full
 from core import MemberFollowerRecordNew
@@ -64,6 +64,11 @@ class FetchMemberFollowerRecordJob(Job):
             stage_stat = {}
             try:
                 record = fetch_member_follower_record(mid, self.service, out_stat=stage_stat)
+            except RateLimitError as e:
+                self.logger.warning(
+                    f'Member follower API rate limited; skipping current mid. '
+                    f'mid: {mid}, target: {e.target}, reason: {e.reason}')
+                self.stat.condition['rate_limited'] += 1
             except ServiceError as e:
                 self.logger.error(f'Fail to fetch member follower record. mid: {mid}, error: {e}')
                 self.stat.condition['exception'] += 1

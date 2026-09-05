@@ -48,8 +48,9 @@ def stub_get(service, response):
     """Replace service._get with a stub returning `response`, recording calls."""
     calls = []
 
-    def _get(url, params=None, headers=None, **kwargs):
-        calls.append({'url': url, 'params': params, 'headers': headers, **kwargs})
+    def _get(target, mode, params=None, headers=None, **kwargs):
+        calls.append({'target': target, 'mode': mode,
+                      'params': params, 'headers': headers, **kwargs})
         return response
 
     service._get = _get
@@ -109,6 +110,8 @@ class TestBatchHappyPath(unittest.TestCase):
         service.get_video_view_trimmed_batch(aids)
 
         call = calls[0]
+        self.assertEqual(call['target'], 'get_video_view_trimmed_batch')
+        self.assertEqual(call['mode'], 'worker')
         self.assertEqual(call['params'], {'aids': '1,2,3'})
         # single whole-batch trial: retries are the CALLER's per-aid attempts
         self.assertEqual(call['retry'], 1)
@@ -242,13 +245,11 @@ class TestWholeBatchFailures(unittest.TestCase):
         with self.assertRaises(ResponseError):
             service.get_video_view_trimmed_batch([1, 2])
 
-    def test_missing_endpoint_raises_response_error_not_exit(self):
-        # unlike the sibling methods (critical + exit), the batch path has a
-        # designed fallback -- config drift degrades the run, never kills it
+    def test_missing_endpoint_exits_as_configuration_error(self):
         for endpoints in ({}, {'get_video_view_trimmed_batch': {'workers': []}}):
             service = make_service(endpoints=endpoints)
-            with self.assertRaises(ResponseError):
-                service.get_video_view_trimmed_batch([1])
+            with self.assertRaises(SystemExit):
+                service.get_video_view_trimmed_batch([1, 2])
 
     def test_direct_mode_is_a_programming_error(self):
         service = Service(mode='direct', endpoints=BATCH_ENDPOINTS)
