@@ -10,7 +10,6 @@ from typing import Optional, Callable, Literal
 from .error import (ResponseError, RateLimitError,
                     FormatError, CodeError)
 from .worker import WorkerConfigurationError, WorkerSelector
-from .stats import RequestStats
 from .response import \
     VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, VideoViewTrimmed, \
     VideoTag, VideoTags, \
@@ -131,11 +130,6 @@ class Service:
             logger.critical(f'Invalid worker configuration: {e}')
             raise SystemExit(1)
 
-        # One Service is shared by every job thread, so these counters cover the
-        # whole run: which target was called how many times, and how the
-        # individual HTTP attempts behind those calls ended.
-        self.request_stats = RequestStats()
-
         # define User Agent list
         self._ua_list = [
             # PC Browser
@@ -201,32 +195,6 @@ class Service:
 
     # default config getters end
 
-    def _count_attempt(self, target: str, worker, outcome: str) -> None:
-        self.request_stats.record_attempt(
-            target, worker.id if worker is not None else None, outcome)
-
-    def _count_call(self, target: str, outcome: str) -> None:
-        self.request_stats.record_call(target, outcome)
-
-    def _log_rate_limit(self, target: str, worker, limited: 'RateLimit',
-                        status_code: int, trial: int, action: str) -> None:
-        # Greppable RATE_LIMIT line: when it happened, on which worker, what the
-        # upstream said, and what this request does next. Throttled per
-        # (target, worker, reason) so a storm cannot flood the log -- the
-        # suppressed count carries the volume instead.
-        should_log, suppressed = self.request_stats.record_rate_limit(
-            target, worker.id if worker is not None else None,
-            reason=limited.reason, action=action)
-        if not should_log:
-            return
-        logger.warning(
-            'RATE_LIMIT target=%s worker_id=%s platform=%s reason=%s '
-            'status=%s trial=%s action=%s suppressed_since_last=%s',
-            target,
-            worker.id if worker is not None else 'direct',
-            worker.platform if worker is not None else 'direct',
-            limited.reason, status_code, trial, action, suppressed)
-
     def _get(
             self, target: str, mode: RequestMode,
             params: Optional[dict] = None, headers: Optional[dict] = None,
@@ -273,10 +241,6 @@ class Service:
                 except WorkerConfigurationError as e:
                     logger.critical(f'Invalid worker configuration: {e}')
                     raise SystemExit(1)
-                except RateLimitError:
-                    # whole pool is cooling down; no HTTP attempt is made
-                    self._count_call(target, 'rate_limited')
-                    raise
                 request_url = selected_worker.url
 
             # colddown for retry
@@ -291,7 +255,6 @@ class Service:
                 r = self._session.get(request_url, params=params, headers=headers,
                                       timeout=timeout, stream=True)
             except requests.exceptions.RequestException as e:
-                self._count_attempt(target, selected_worker, 'request_exception')
                 logger.debug(
                     f'Fail to get response. '
                     f'url: {request_url}, params: {params}, trial: {trial}, error: {e}'
@@ -330,7 +293,6 @@ class Service:
                         break
             except requests.exceptions.RequestException as e:
                 r.close()
-                self._count_attempt(target, selected_worker, 'body_exception')
                 logger.debug(
                     f'Fail to read response body. '
                     f'url: {request_url}, params: {params}, trial: {trial}, error: {e}'
@@ -338,7 +300,6 @@ class Service:
                 continue
             if deadline_exceeded:
                 r.close()
-                self._count_attempt(target, selected_worker, 'deadline_exceeded')
                 trial_ms = int((time.perf_counter() - trial_start) * 1000)
                 logger.debug(
                     f'Deadline exceeded while downloading response body. '
@@ -354,47 +315,43 @@ class Service:
 
             trial_ms = int((time.perf_counter() - trial_start) * 1000)
 
+            # One line per HTTP attempt: which API, on which worker, and how
+            # it came back -- `result` is the rate-limit reason (http_412,
+            # code_-352) when there is one, else `ok`. Attempts that never got
+            # a response (network error, deadline) log their own line above.
             limited = rate_limit_checker(r)
+            logger.debug(
+                f'API target: {target}, '
+                f'worker: {selected_worker.id if selected_worker else "direct"}, '
+                f'status: {r.status_code}, '
+                f'result: {limited.reason if limited else "ok"}, '
+                f'trial: {trial}, duration: {trial_ms}ms'
+            )
             if limited is not None:
-                self._count_attempt(
-                    target, selected_worker, f'rate_limited:{limited.reason}')
                 if mode == 'direct':
-                    self._log_rate_limit(target, None, limited, r.status_code,
-                                         trial, 'raise_direct_mode')
                     now = time.monotonic()
-                    self._count_call(target, 'rate_limited')
                     raise RateLimitError(
                         target, limited.reason, now, now + limited.cooldown_s)
                 if self._worker_selector.has_failover(target):
-                    self._log_rate_limit(
-                        target, selected_worker, limited, r.status_code, trial,
-                        f'cooldown_{limited.cooldown_s}s_then_other_worker')
-                    try:
-                        self._worker_selector.mark_rate_limited(
-                            target, selected_worker, reason=limited.reason,
-                            cooldown_s=limited.cooldown_s)
-                    except RateLimitError:
-                        # this hit exhausted the pool
-                        self._count_call(target, 'rate_limited')
-                        raise
+                    self._worker_selector.mark_rate_limited(
+                        target, selected_worker, reason=limited.reason,
+                        cooldown_s=limited.cooldown_s)
                     continue
-                # No worker can take over, so a cooldown would only make the
-                # whole target unavailable. Fall back to the bounded
-                # per-request retry instead. This must `continue` rather than
-                # fall through to the status-code branch below: a rate limit
-                # signalled inside a 200 body (member-card code -352) would
-                # otherwise be handed back to the caller as a valid response.
-                # The RATE_LIMIT line above already carries status and trial,
-                # so nothing is lost by skipping that branch's debug line.
-                self._log_rate_limit(
-                    target, selected_worker, limited, r.status_code, trial,
-                    'retry_same_worker_no_failover')
-                continue
+                # No worker can take over, so fall back to plain retries.
+                # A non-200 rate limit (HTTP 412) drops into the status-code
+                # branch below and retries there, but one signalled inside a
+                # 200 body (member-card code -352) has no such branch --
+                # retry it here so a rate-limited body is never handed back
+                # to the caller as a valid response.
+                if r.status_code == 200:
+                    logger.debug(
+                        f'Rate limited ({limited.reason}) with no failover worker. '
+                        f'url: {request_url}, params: {params}, trial: {trial}, duration: {trial_ms}ms'
+                    )
+                    continue
 
             # check status code
             if r.status_code != 200:
-                self._count_attempt(
-                    target, selected_worker, f'http_{r.status_code}')
                 logger.debug(
                     f'Fail to get response with status code {r.status_code}. '
                     f'url: {request_url}, params: {params}, trial: {trial}, duration: {trial_ms}ms'
@@ -410,10 +367,8 @@ class Service:
             if parser is None:
                 try:
                     response = r.json()
-                    self._count_attempt(target, selected_worker, 'ok')
                     break
                 except json.JSONDecodeError:
-                    self._count_attempt(target, selected_worker, 'json_error')
                     logger.debug(
                         f'Fail to decode response to json. '
                         f'response: {r.text}, url: {request_url}, params: {params}, trial: {trial}'
@@ -422,10 +377,7 @@ class Service:
             else:
                 response = parser(r.text)
                 if response is not None:
-                    self._count_attempt(target, selected_worker, 'ok')
                     break
-                self._count_attempt(target, selected_worker, 'parse_error')
-        self._count_call(target, 'ok' if response is not None else 'exhausted')
         return response
 
     def get_video_view(

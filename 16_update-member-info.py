@@ -5,24 +5,12 @@ from service import Service
 from serverchan import sc_send_summary
 from timer import Timer
 from job import UpdateMemberJob, JobPool
-from threading import Event, Thread
 import logging
 
 script_id = '16'
 script_name = 'update-member-info'
 script_fullname = fullname(script_id, script_name)
 logger = logging.getLogger(script_id)
-
-# How often the shared Service request counters are dumped while the pool runs.
-# The counters are what answer "which API did we hit, how many times, and how
-# did those attempts end" without waiting for the run to finish -- this job has
-# historically had to be stopped by hand, so a final-only summary is not enough.
-REQSTAT_INTERVAL_S = 60.0
-
-
-def _report_request_stats(service: Service, stop_event: Event) -> None:
-    while not stop_event.wait(REQSTAT_INTERVAL_S):
-        service.request_stats.log_summary('in-flight')
 
 
 def update_member_info():
@@ -58,9 +46,9 @@ def update_member_info():
     # Shared Service state keeps rate-limited member-card workers out of the
     # candidate pool. If every worker is limited, each job records that condition
     # and briefly slows down before moving to the next member.
-    # 20, not 50: member-card is rate limited well below what 50 concurrent
-    # jobs ask for, so the extra concurrency only bought a shorter burst before
-    # the whole pool cooled down. See the 2026-09-05 fleet test.
+    # 20, not 50: member-card is rate limited below what 50 concurrent jobs
+    # ask for, so the extra concurrency only buys a shorter burst before the
+    # whole pool cools down.
     job_num = 20
     for _ in range(job_num):
         mid_queue.put(None)
@@ -76,14 +64,7 @@ def update_member_info():
         logger_name=script_id)
     pool.start()
     logger.info(f'{job_num} job(s) started.')
-
-    stats_stop = Event()
-    stats_thread = Thread(target=_report_request_stats,
-                          args=(service, stats_stop), daemon=True)
-    stats_thread.start()
-
     job_stat_merged = pool.join()
-    stats_stop.set()
 
     session.close()
 
@@ -93,7 +74,6 @@ def update_member_info():
     logger.info(f'Finish {script_fullname}!')
     logger.info(timer.get_summary())
     logger.info(job_stat_merged.get_summary('member-update'))
-    service.request_stats.log_summary('final')
     sc_send_summary(script_fullname, timer, job_stat_merged)
 
 
@@ -102,5 +82,6 @@ def main():
 
 
 if __name__ == '__main__':
-    logging_init(file_prefix=script_id)
+    # debug=True writes 16_DEBUG.log with the per-attempt API lines to grep
+    logging_init(file_prefix=script_id, debug=True)
     main()
