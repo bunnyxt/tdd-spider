@@ -321,10 +321,11 @@ class Service:
                     now = time.monotonic()
                     raise RateLimitError(
                         target, limited.reason, now, now + limited.cooldown_s)
-                self._worker_selector.mark_rate_limited(
-                    target, selected_worker, reason=limited.reason,
-                    cooldown_s=limited.cooldown_s)
-                continue
+                if self._worker_selector.has_failover(target):
+                    self._worker_selector.mark_rate_limited(
+                        target, selected_worker, reason=limited.reason,
+                        cooldown_s=limited.cooldown_s)
+                    continue
 
             # check status code
             if r.status_code != 200:
