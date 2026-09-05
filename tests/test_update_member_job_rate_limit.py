@@ -47,7 +47,7 @@ class UpdateMemberJobRateLimitTest(TestCase):
 
 
 class FetchJobRateLimitTest(TestCase):
-    def test_video_fetch_requeues_aid_and_waits_until_retry(self):
+    def test_video_fetch_counts_rate_limit_and_skips_aid(self):
         job = object.__new__(FetchVideoRecordJob)
         job.aid_queue = Queue()
         job.service = object()
@@ -60,19 +60,17 @@ class FetchJobRateLimitTest(TestCase):
             'get_video_view_trimmed', 'http_412',
             first_seen=95.0, retry_at=105.0)
         with mock.patch('job.FetchVideoRecordJob.fetch_video_record_via_video_view',
-                        side_effect=limited), \
-                mock.patch('job.FetchVideoRecordJob.time.monotonic', return_value=100.0), \
-                mock.patch('job.FetchVideoRecordJob.time.sleep') as sleep:
+                        side_effect=limited):
             self.assertTrue(job._fetch_single(123))
 
-        self.assertEqual(job.aid_queue.get_nowait(), 123)
-        sleep.assert_called_once_with(5.0)
+        self.assertTrue(job.aid_queue.empty())
         self.assertEqual(job.stat.condition['rate_limited'], 1)
 
-    def test_follower_fetch_requeues_mid_and_waits_until_retry(self):
+    def test_follower_fetch_counts_rate_limit_and_moves_to_next_mid(self):
         job = object.__new__(FetchMemberFollowerRecordJob)
         job.mid_queue = Queue()
         job.mid_queue.put(123)
+        job.mid_queue.put(456)
         job.record_queue = Queue()
         job.service = object()
         job.duration_limit_s = None
@@ -85,12 +83,8 @@ class FetchJobRateLimitTest(TestCase):
             'get_member_relation', 'http_412',
             first_seen=95.0, retry_at=105.0)
         with mock.patch('job.FetchMemberFollowerRecordJob.fetch_member_follower_record',
-                        side_effect=[limited, RuntimeError('stop')]) as fetch, \
-                mock.patch('job.FetchMemberFollowerRecordJob.time.monotonic',
-                           return_value=100.0), \
-                mock.patch('job.FetchMemberFollowerRecordJob.time.sleep') as sleep:
+                        side_effect=[limited, RuntimeError('stop')]) as fetch:
             job.process()
 
         self.assertEqual(fetch.call_count, 2)
-        sleep.assert_called_once_with(5.0)
         self.assertEqual(job.stat.condition['rate_limited'], 1)

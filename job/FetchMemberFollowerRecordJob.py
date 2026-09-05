@@ -6,7 +6,6 @@ from core import MemberFollowerRecordNew
 from util import get_ts_s, ts_s_to_str
 from task import fetch_member_follower_record
 from typing import Optional
-import time
 
 __all__ = ['FetchMemberFollowerRecordJob']
 
@@ -66,16 +65,10 @@ class FetchMemberFollowerRecordJob(Job):
             try:
                 record = fetch_member_follower_record(mid, self.service, out_stat=stage_stat)
             except RateLimitError as e:
-                wait_s = max(0, e.retry_at - time.monotonic())
-                if self.duration_limit_due_ts_s is not None:
-                    wait_s = min(wait_s, max(
-                        0, self.duration_limit_due_ts_s - get_ts_s()))
-                self.mid_queue.put(mid)
                 self.logger.warning(
-                    f'Member follower API rate limited; requeued mid and waiting {wait_s:.1f}s. '
+                    f'Member follower API rate limited; skipping current mid. '
                     f'mid: {mid}, target: {e.target}, reason: {e.reason}')
                 self.stat.condition['rate_limited'] += 1
-                time.sleep(wait_s)
             except ServiceError as e:
                 self.logger.error(f'Fail to fetch member follower record. mid: {mid}, error: {e}')
                 self.stat.condition['exception'] += 1
