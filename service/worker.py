@@ -116,6 +116,9 @@ class WorkerSelector:
             self._raise_rate_limited(target, 'all_workers_rate_limited', window)
         return random.choice(available)
 
+    def has_failover(self, target: str) -> bool:
+        return len({worker.id for worker in self._enabled_workers(target)}) > 1
+
     def mark_rate_limited(self, target: str, worker: WorkerEndpoint, *,
                           reason: str, cooldown_s: int) -> None:
         workers = self._enabled_workers(target)

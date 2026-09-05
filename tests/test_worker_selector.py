@@ -123,6 +123,19 @@ class WorkerSelectorConfigTest(TestCase):
         with self.assertRaises(ValueError):
             service._worker_selector.select('unused')
 
+    def test_failover_requires_two_distinct_enabled_workers(self):
+        selector = WorkerSelector(endpoints_for('view', [
+            worker('only', 'https://only.invalid/', weight=3),
+            worker('off', 'https://off.invalid/', enabled=False),
+        ]))
+        self.assertFalse(selector.has_failover('view'))
+
+        selector = WorkerSelector(endpoints_for('view', [
+            worker('a', 'https://a.invalid/'),
+            worker('b', 'https://b.invalid/'),
+        ]))
+        self.assertTrue(selector.has_failover('view'))
+
 
 class WorkerSelectorStateTest(TestCase):
     def setUp(self):
@@ -252,6 +265,50 @@ class ServiceWorkerRoutingTest(TestCase):
         self.assertEqual(service._session.calls,
                          ['https://a.invalid/', 'https://b.invalid/'])
 
+    def test_http_412_on_single_worker_uses_normal_retry_without_cooldown(self):
+        service = self.make_service('view', [
+            worker('only', 'https://only.invalid/'),
+        ], {
+            'https://only.invalid/': [
+                response(412, b'blocked'),
+                response(412, b'blocked'),
+                response(412, b'blocked'),
+                response(200, {'code': 0}),
+            ],
+        })
+
+        with mock.patch('service.Service.time.sleep'):
+            self.assertIsNone(service._get('view', 'worker', retry=3))
+            self.assertEqual(service._get('view', 'worker', retry=1),
+                             {'code': 0})
+
+        self.assertEqual(service._session.calls,
+                         ['https://only.invalid/'] * 4)
+        self.assertEqual(service._worker_selector.rate_limit_window('view'),
+                         (None, None))
+
+    def test_json_352_on_single_worker_retries_instead_of_returning_body(self):
+        service = self.make_service('get_member_card', [
+            worker('only', 'https://only.invalid/'),
+        ], {
+            'https://only.invalid/': [
+                response(200, {'code': -352}),
+                response(200, {'code': -352}),
+                response(200, {'code': 0}),
+            ],
+        })
+
+        with mock.patch('service.Service.time.sleep'):
+            self.assertIsNone(service._get('get_member_card', 'worker', retry=2))
+            self.assertEqual(service._get('get_member_card', 'worker', retry=1),
+                             {'code': 0})
+
+        self.assertEqual(service._session.calls,
+                         ['https://only.invalid/'] * 3)
+        self.assertEqual(
+            service._worker_selector.rate_limit_window('get_member_card'),
+            (None, None))
+
     @mock.patch('service.worker.random.choice', side_effect=lambda items: items[0])
     def test_json_352_uses_member_card_checker_without_60_second_sleep(self, _choice):
         service = self.make_service('get_member_card', [
@@ -307,18 +364,6 @@ class ServiceWorkerRoutingTest(TestCase):
 
         self.assertEqual((card.mid, card.name), ('123', 'name'))
         self.assertNotIn(mock.call(60), sleep.mock_calls)
-
-    def test_single_rate_limited_worker_raises_pool_exhausted_immediately(self):
-        service = self.make_service('view', [
-            worker('a', 'https://a.invalid/'),
-        ], {'https://a.invalid/': [response(412, b'blocked')]})
-
-        with mock.patch('service.Service.time.sleep') as sleep:
-            with self.assertRaises(RateLimitError):
-                service._get('view', 'worker', retry=20)
-
-        sleep.assert_not_called()
-        self.assertEqual(service._session.calls, ['https://a.invalid/'])
 
     def test_ordinary_failure_can_retry_the_same_worker(self):
         service = self.make_service('view', [
