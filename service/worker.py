@@ -1,11 +1,7 @@
 from dataclasses import dataclass
 import logging
 import random
-from threading import Lock
-import time
-from typing import Callable, Iterable, Mapping
-
-from .error import RateLimitError
+from typing import Iterable, Mapping
 
 
 logger = logging.getLogger('Service')
@@ -26,21 +22,21 @@ class WorkerEndpoint:
     enabled: bool = True
 
 
-@dataclass(frozen=True)
-class RateLimitState:
-    first_seen: float
-    retry_at: float
-
-
 class WorkerSelector:
-    """Process-local worker selection and rate-limit cooldown tracking."""
+    """
+    Process-local worker selection.
 
-    def __init__(self, endpoints: Mapping[str, dict], *,
-                 clock: Callable[[], float] = time.monotonic):
-        self._clock = clock
-        self._lock = Lock()
+    Deliberately stateless beyond the parsed config. It used to cool a worker
+    down on a rate limit so another could take over, which assumed the limit is
+    per-worker. Measurement says otherwise: the limit is on request *rate* --
+    roughly 24-30 req/s across the member-card fleet -- so every worker crosses
+    it at the same moment and there is never one with headroom to take over.
+    Five of the six targets run a single worker anyway. Staying under the rate
+    is the fix; taking workers out of the pool never was.
+    """
+
+    def __init__(self, endpoints: Mapping[str, dict]):
         self._workers: dict[str, tuple[WorkerEndpoint, ...]] = {}
-        self._rate_limits: dict[tuple[str, str], RateLimitState] = {}
 
         for target, endpoint_config in endpoints.items():
             raw_workers = endpoint_config.get('workers', [])
@@ -93,63 +89,9 @@ class WorkerSelector:
         return WorkerEndpoint(worker_id, url, platform, weight, enabled)
 
     def select(self, target: str) -> WorkerEndpoint:
-        workers = self._enabled_workers(target)
-        now = self._clock()
-        recovered: list[WorkerEndpoint] = []
-
-        with self._lock:
-            for worker in workers:
-                key = (target, worker.id)
-                state = self._rate_limits.get(key)
-                if state is not None and state.retry_at <= now:
-                    del self._rate_limits[key]
-                    recovered.append(worker)
-            available = tuple(
-                worker for worker in workers
-                if (target, worker.id) not in self._rate_limits)
-            window = self._rate_limit_window(target, workers, now)
-
-        for worker in recovered:
-            logger.info('worker_rate_limit_cleared target=%s worker_id=%s platform=%s',
-                        target, worker.id, worker.platform)
-        if not available:
-            self._raise_rate_limited(target, 'all_workers_rate_limited', window)
-        return random.choice(available)
-
-    def has_failover(self, target: str) -> bool:
-        return len({worker.id for worker in self._enabled_workers(target)}) > 1
-
-    def mark_rate_limited(self, target: str, worker: WorkerEndpoint, *,
-                          reason: str, cooldown_s: int) -> None:
-        workers = self._enabled_workers(target)
-        now = self._clock()
-        retry_at = now + cooldown_s
-        key = (target, worker.id)
-
-        with self._lock:
-            previous = self._rate_limits.get(key)
-            transitioned = previous is None or previous.retry_at <= now
-            first_seen = now if transitioned else previous.first_seen
-            self._rate_limits[key] = RateLimitState(
-                first_seen=first_seen,
-                retry_at=max(previous.retry_at if previous else retry_at,
-                             retry_at))
-            exhausted = all(
-                (state := self._rate_limits.get((target, candidate.id))) is not None
-                and state.retry_at > now for candidate in workers)
-            window = self._rate_limit_window(target, workers, now)
-
-        if transitioned:
-            logger.warning(
-                'worker_rate_limited target=%s worker_id=%s platform=%s reason=%s cooldown_s=%s',
-                target, worker.id, worker.platform, reason, cooldown_s)
-        if exhausted:
-            self._raise_rate_limited(target, reason, window)
-
-    def rate_limit_window(self, target: str) -> tuple[float | None, float | None]:
-        workers = self._enabled_workers(target)
-        with self._lock:
-            return self._rate_limit_window(target, workers, self._clock())
+        # `_weighted` repeats each worker `weight` times, so a uniform choice
+        # here gives the configured weight ratio.
+        return random.choice(self._enabled_workers(target))
 
     def _enabled_workers(self, target: str) -> tuple[WorkerEndpoint, ...]:
         workers = self._workers.get(target, ())
@@ -157,28 +99,6 @@ class WorkerSelector:
             raise WorkerConfigurationError(
                 f'Endpoint {target!r} has no enabled worker configured.')
         return workers
-
-    def _rate_limit_window(
-            self, target: str, workers: Iterable[WorkerEndpoint], now: float
-    ) -> tuple[float | None, float | None]:
-        states = [self._rate_limits[(target, worker.id)]
-                  for worker in workers
-                  if (target, worker.id) in self._rate_limits
-                  and self._rate_limits[(target, worker.id)].retry_at > now]
-        return (min((state.first_seen for state in states), default=None),
-                min((state.retry_at for state in states), default=None))
-
-    def _raise_rate_limited(
-            self, target: str, reason: str,
-            window: tuple[float | None, float | None]) -> None:
-        first_seen, retry_at = window
-        now = self._clock()
-        logger.error(
-            'worker_pool_rate_limited target=%s limited_for_s=%s earliest_retry_in_s=%s',
-            target,
-            None if first_seen is None else max(0, int(now - first_seen)),
-            None if retry_at is None else max(0, int(retry_at - now)))
-        raise RateLimitError(target, reason, first_seen, retry_at)
 
     @staticmethod
     def _weighted(workers: Iterable[WorkerEndpoint]) -> tuple[WorkerEndpoint, ...]:

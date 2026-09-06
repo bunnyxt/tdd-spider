@@ -13,23 +13,31 @@ class ServiceError(TddError):
 
 
 class ResponseError(ServiceError):
-    def __init__(self, target: str, params: dict):
+    # `reason` and `trials` say WHY the retry budget ran out -- a timeout, a
+    # 502, an unparseable body. Without them an exhausted request is
+    # indistinguishable from any other in a caller's stats, and answering
+    # "what actually failed" means re-running with debug logging on.
+    def __init__(self, target: str, params: dict,
+                 reason: str = 'unknown', trials: int = 0):
         super().__init__()
         self.target = target
         self.params = params
+        self.reason = reason
+        self.trials = trials
 
     def __str__(self):
-        return f'<ResponseError(target={self.target},params={self.params})>'
+        return (f'<ResponseError(target={self.target},params={self.params},'
+                f'reason={self.reason},trials={self.trials})>')
 
 
 class RateLimitError(ServiceError):
-    def __init__(self, target: str, reason: str,
-                 first_seen: float, retry_at: float):
+    # Raised as soon as an upstream rate limit is seen. It carries no timing:
+    # the per-worker cooldown that used to predict a retry time is gone, and
+    # how long to wait is the caller's decision, not the Service's.
+    def __init__(self, target: str, reason: str):
         super().__init__()
         self.target = target
         self.reason = reason
-        self.first_seen = first_seen
-        self.retry_at = retry_at
 
     def __str__(self):
         return f'<RateLimitError(target={self.target},reason={self.reason})>'

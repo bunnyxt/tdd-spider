@@ -17,6 +17,19 @@
   "get_member_card": {
     "direct": "http://api.bilibili.com/x/web-interface/card",
     "workers": [
+      {
+        "id": "<worker-id>",
+        "url": "<worker-url>",
+        "platform": "<platform>",
+        "weight": 1
+      },
+      {
+        "id": "<another-worker-id>",
+        "url": "<worker-url>",
+        "platform": "<platform>",
+        "weight": 2,
+        "enabled": true
+      }
     ]
   },
   "get_member_relation": {

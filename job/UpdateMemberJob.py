@@ -48,12 +48,9 @@ class UpdateMemberJob(Job):
             try:
                 tdd_member_logs = update_member(mid, self.service, self.session)
             except RateLimitError as e:
-                now = time.monotonic()
                 self.logger.warning(
                     f'Member API rate limited; sleep {RATE_LIMIT_SLEEP_S}s before next member. '
-                    f'mid: {mid}, target: {e.target}, reason: {e.reason}, '
-                    f'limited_for_s: {max(0, now - e.first_seen):.1f}, '
-                    f'retry_in_s: {max(0, e.retry_at - now):.1f}')
+                    f'mid: {mid}, target: {e.target}, reason: {e.reason}')
                 self.stat.condition['rate_limited'] += 1
                 time.sleep(RATE_LIMIT_SLEEP_S)
             except Exception as e:
