@@ -1,7 +1,7 @@
 import logging
 from unittest import TestCase, mock
 
-from service import Service
+from service import RateLimitError, Service
 
 from test_worker_selector import (ScriptedSession, endpoints_for, response,
                                   worker)
@@ -19,7 +19,7 @@ class ApiDebugLineTest(TestCase):
         service = self.make_service('view', [
             worker('only', 'https://only.invalid/'),
         ], {'https://only.invalid/': [
-            response(412, b'blocked'),
+            response(500, b'upstream failed'),
             response(200, {'code': 0}),
         ]})
 
@@ -29,10 +29,25 @@ class ApiDebugLineTest(TestCase):
 
         api_lines = [line for line in logs.output if 'API target: ' in line]
         self.assertEqual(len(api_lines), 2)
-        self.assertIn('target: view, worker: only, status: 412, result: http_412',
+        self.assertIn('target: view, worker: only, status: 500, result: ok',
                       api_lines[0])
         self.assertIn('target: view, worker: only, status: 200, result: ok',
                       api_lines[1])
+
+    def test_every_rate_limited_attempt_gets_its_own_line(self):
+        service = self.make_service('view', [
+            worker('only', 'https://only.invalid/'),
+        ], {'https://only.invalid/': [response(412, b'blocked')] * 3})
+
+        with mock.patch('service.Service.time.sleep'), \
+                self.assertLogs('Service', level=logging.DEBUG) as logs:
+            with self.assertRaises(RateLimitError):
+                service._get('view', 'worker', retry=3)
+
+        api_lines = [line for line in logs.output if 'API target: ' in line]
+        self.assertEqual(len(api_lines), 3)
+        self.assertTrue(all('status: 412, result: http_412' in line
+                            for line in api_lines))
 
     def test_in_body_rate_limit_is_reported_as_the_result(self):
         service = self.make_service('get_member_card', [
@@ -41,7 +56,8 @@ class ApiDebugLineTest(TestCase):
 
         with mock.patch('service.Service.time.sleep'), \
                 self.assertLogs('Service', level=logging.DEBUG) as logs:
-            service._get('get_member_card', 'worker', retry=1)
+            with self.assertRaises(RateLimitError):
+                service._get('get_member_card', 'worker', retry=1)
 
         api_lines = [line for line in logs.output if 'API target: ' in line]
         self.assertEqual(len(api_lines), 1)

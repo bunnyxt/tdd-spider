@@ -27,8 +27,7 @@ class UpdateMemberJobRateLimitTest(TestCase):
         job.stat = JobStat()
         job.logger = logging.getLogger('test.UpdateMemberJob')
 
-        limited = RateLimitError(
-            'get_member_card', 'code_-352', first_seen=95.0, retry_at=105.0)
+        limited = RateLimitError('get_member_card', 'code_-352')
         with mock.patch('job.UpdateMemberJob.update_member',
                         side_effect=[limited, []]) as update, \
                 mock.patch('job.UpdateMemberJob.time.sleep') as sleep, \
@@ -60,9 +59,7 @@ class FetchJobRateLimitTest(TestCase):
         job.stat = JobStat()
         job.logger = logging.getLogger('test.FetchVideoRecordJob')
 
-        limited = RateLimitError(
-            'get_video_view_trimmed', 'http_412',
-            first_seen=95.0, retry_at=105.0)
+        limited = RateLimitError('get_video_view_trimmed', 'http_412')
         with mock.patch('job.FetchVideoRecordJob.fetch_video_record_via_video_view',
                         side_effect=limited):
             job.process()
@@ -84,9 +81,7 @@ class FetchJobRateLimitTest(TestCase):
         job.stat = JobStat()
         job.logger = logging.getLogger('test.FetchMemberFollowerRecordJob')
 
-        limited = RateLimitError(
-            'get_member_relation', 'http_412',
-            first_seen=95.0, retry_at=105.0)
+        limited = RateLimitError('get_member_relation', 'http_412')
         with mock.patch('job.FetchMemberFollowerRecordJob.fetch_member_follower_record',
                         side_effect=[limited, RuntimeError('stop')]) as fetch:
             job.process()

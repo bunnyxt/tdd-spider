@@ -26,19 +26,14 @@ RequestMode = Literal['direct', 'worker']
 __all__ = ['Service', 'RequestMode',
            'RateLimit', 'default_rate_limit', 'member_card_rate_limit']
 
-WORKER_HTTP_412_COOLDOWN_S = 30 * 60
-MEMBER_CARD_352_COOLDOWN_S = 5 * 60
-
-
 @dataclass(frozen=True)
 class RateLimit:
     reason: str
-    cooldown_s: int
 
 
 def default_rate_limit(response: requests.Response) -> Optional[RateLimit]:
     if response.status_code == 412:
-        return RateLimit('http_412', WORKER_HTTP_412_COOLDOWN_S)
+        return RateLimit('http_412')
     return None
 
 
@@ -53,7 +48,7 @@ def member_card_rate_limit(response: requests.Response) -> Optional[RateLimit]:
     except (json.JSONDecodeError, requests.exceptions.JSONDecodeError):
         return None
     if isinstance(body, dict) and body.get('code') == -352:
-        return RateLimit('code_-352', MEMBER_CARD_352_COOLDOWN_S)
+        return RateLimit('code_-352')
     return None
 
 
@@ -201,7 +196,7 @@ class Service:
             retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
             deadline: Optional[float] = None,
             parser: Optional[Callable[[str], Optional[dict]]] = None
-    ) -> Optional[dict]:
+    ) -> dict:
         # assemble headers
         if headers is None:
             headers = self._headers
@@ -232,6 +227,8 @@ class Service:
 
         # go request
         response = None
+        last_failure = None
+        rate_limited_trials = 0
         for trial in range(1, retry + 1):
             selected_worker = None
             request_url = direct_url
@@ -255,6 +252,7 @@ class Service:
                 r = self._session.get(request_url, params=params, headers=headers,
                                       timeout=timeout, stream=True)
             except requests.exceptions.RequestException as e:
+                last_failure = 'request_exception'
                 logger.debug(
                     f'Fail to get response. '
                     f'url: {request_url}, params: {params}, trial: {trial}, error: {e}'
@@ -293,6 +291,7 @@ class Service:
                         break
             except requests.exceptions.RequestException as e:
                 r.close()
+                last_failure = 'body_exception'
                 logger.debug(
                     f'Fail to read response body. '
                     f'url: {request_url}, params: {params}, trial: {trial}, error: {e}'
@@ -300,6 +299,7 @@ class Service:
                 continue
             if deadline_exceeded:
                 r.close()
+                last_failure = 'deadline_exceeded'
                 trial_ms = int((time.perf_counter() - trial_start) * 1000)
                 logger.debug(
                     f'Deadline exceeded while downloading response body. '
@@ -328,30 +328,15 @@ class Service:
                 f'trial: {trial}, duration: {trial_ms}ms'
             )
             if limited is not None:
-                if mode == 'direct':
-                    now = time.monotonic()
-                    raise RateLimitError(
-                        target, limited.reason, now, now + limited.cooldown_s)
-                if self._worker_selector.has_failover(target):
-                    self._worker_selector.mark_rate_limited(
-                        target, selected_worker, reason=limited.reason,
-                        cooldown_s=limited.cooldown_s)
-                    continue
-                # No worker can take over, so fall back to plain retries.
-                # A non-200 rate limit (HTTP 412) drops into the status-code
-                # branch below and retries there, but one signalled inside a
-                # 200 body (member-card code -352) has no such branch --
-                # retry it here so a rate-limited body is never handed back
-                # to the caller as a valid response.
-                if r.status_code == 200:
-                    logger.debug(
-                        f'Rate limited ({limited.reason}) with no failover worker. '
-                        f'url: {request_url}, params: {params}, trial: {trial}, duration: {trial_ms}ms'
-                    )
-                    continue
+                # `continue`, not fall through: a -352 comes back as status 200
+                # with a valid body, which would otherwise be returned as data
+                last_failure = limited.reason
+                rate_limited_trials += 1
+                continue
 
             # check status code
             if r.status_code != 200:
+                last_failure = f'http_{r.status_code}'
                 logger.debug(
                     f'Fail to get response with status code {r.status_code}. '
                     f'url: {request_url}, params: {params}, trial: {trial}, duration: {trial_ms}ms'
@@ -369,6 +354,7 @@ class Service:
                     response = r.json()
                     break
                 except json.JSONDecodeError:
+                    last_failure = 'json_error'
                     logger.debug(
                         f'Fail to decode response to json. '
                         f'response: {r.text}, url: {request_url}, params: {params}, trial: {trial}'
@@ -378,6 +364,11 @@ class Service:
                 response = parser(r.text)
                 if response is not None:
                     break
+                last_failure = 'parse_error'
+        if response is None:
+            if retry > 0 and rate_limited_trials == retry:
+                raise RateLimitError(target, last_failure)
+            raise ResponseError(target, params or {}, last_failure, retry)
         return response
 
     def get_video_view(
@@ -400,8 +391,6 @@ class Service:
         # get response
         response = self._get('get_video_view', mode, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor)
-        if response is None:
-            raise ResponseError('video_view', params)
 
         # validate format
 
@@ -540,8 +529,6 @@ class Service:
         # get response
         response = self._get('get_video_view_trimmed', 'worker', params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor)
-        if response is None:
-            raise ResponseError('video_view_trimmed', params)
 
         # validate format
 
@@ -633,8 +620,6 @@ class Service:
         response = self._get('get_video_tags', mode, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor,
                              parser=parser)
-        if response is None:
-            raise ResponseError('video_tags', params)
 
         # validate format
 
@@ -691,8 +676,6 @@ class Service:
         # get response
         response = self._get('get_member_card', mode, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor)
-        if response is None:
-            raise ResponseError('member_card', params)
 
         # validate format
 
@@ -752,8 +735,6 @@ class Service:
         # get response
         response = self._get('get_member_relation', mode, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor)
-        if response is None:
-            raise ResponseError('member_relation', params)
 
         # validate format
 
@@ -821,8 +802,6 @@ class Service:
         response = self._get('get_newlist', mode, params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor,
                              parser=parser)
-        if response is None:
-            raise ResponseError('newlist', params)
 
         # validate format
 

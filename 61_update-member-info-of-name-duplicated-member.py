@@ -18,7 +18,7 @@ def update_member_info_of_name_duplicated_member():
     start_ts = get_ts_s()  # get start ts
 
     session = Session()
-    service = Service(mode="worker", retry=20)
+    service = Service(mode="worker")
     statistics = defaultdict(int)
 
     logger.info('Now get duplicated names...')

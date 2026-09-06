@@ -50,7 +50,7 @@ def add_evocalrank_video(ranknum: int):
     timer.start()
 
     with track(script_fullname) as recorder:
-        service = Service(mode="worker", retry=20)
+        service = Service(mode="worker")
 
         logger.info(f'Will add evocalrank video with ranknum: {ranknum}')
 

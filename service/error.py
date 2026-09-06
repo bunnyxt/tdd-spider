@@ -1,3 +1,5 @@
+from typing import Optional
+
 from core import TddError
 
 __all__ = ['ServiceError', 'ResponseError', 'RateLimitError',
@@ -13,23 +15,24 @@ class ServiceError(TddError):
 
 
 class ResponseError(ServiceError):
-    def __init__(self, target: str, params: dict):
+    def __init__(self, target: str, params: dict,
+                 reason: Optional[str] = None, trials: int = 0):
         super().__init__()
         self.target = target
         self.params = params
+        self.reason = reason
+        self.trials = trials
 
     def __str__(self):
-        return f'<ResponseError(target={self.target},params={self.params})>'
+        return (f'<ResponseError(target={self.target},params={self.params},'
+                f'reason={self.reason},trials={self.trials})>')
 
 
 class RateLimitError(ServiceError):
-    def __init__(self, target: str, reason: str,
-                 first_seen: float, retry_at: float):
+    def __init__(self, target: str, reason: str):
         super().__init__()
         self.target = target
         self.reason = reason
-        self.first_seen = first_seen
-        self.retry_at = retry_at
 
     def __str__(self):
         return f'<RateLimitError(target={self.target},reason={self.reason})>'
