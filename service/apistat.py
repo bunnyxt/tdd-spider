@@ -53,6 +53,22 @@ def _derive(trials: Dict[int, Counter]) -> dict:
     }
 
 
+def _exhausted(trials: Dict[int, Counter]) -> int:
+    """
+    How many calls ran out of retries, from the counts alone. Every call that
+    fails trial N either makes a trial N+1 attempt or gives up, so
+    `failures(N) - attempts(N+1)` is the number that gave up at N. That holds
+    whatever `retry` each call was given, unlike reading the last trial's
+    failures. Only valid per target: a retry may pick a different worker, so
+    the chain does not hold within one worker's counts.
+    """
+    total = 0
+    for trial, outcomes in trials.items():
+        failures = sum(v for k, v in outcomes.items() if k != OK)
+        total += failures - sum(trials.get(trial + 1, Counter()).values())
+    return total
+
+
 class NullApiStat:
     """Stand-in so callers never have to test `stats is not None`."""
 
@@ -171,6 +187,19 @@ class ApiStatTracker:
             p = f'{d["p"] * 100:.2f}%' if d['p'] is not None else 'n/a'
             lines.append(f'  - derived: p={p} (n={d["n1"]}), '
                          f'retry_recovered={d["retry_recovered"]}')
+
+        by_target: Dict[str, Dict[int, Counter]] = {}
+        for (target, _worker), trials in grouped.items():
+            per_trial = by_target.setdefault(target, {})
+            for trial, outcomes in trials.items():
+                per_trial.setdefault(trial, Counter()).update(outcomes)
+        for target in sorted(by_target):
+            trials = by_target[target]
+            d = _derive(trials)
+            p = f'{d["p"] * 100:.2f}%' if d['p'] is not None else 'n/a'
+            lines.append(f'- {target} (all workers): p={p} (n={d["n1"]}), '
+                         f'retry_recovered={d["retry_recovered"]}, '
+                         f'exhausted={_exhausted(trials)}')
 
         spark = self._sparklines(series)
         if spark:

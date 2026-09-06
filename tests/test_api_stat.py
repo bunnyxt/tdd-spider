@@ -87,6 +87,43 @@ class DerivedTest(unittest.TestCase):
         self.assertIn('p=0.00% (n=50)', text)
         self.assertIn('retry_recovered=0', text)
 
+    def test_exhausted_counts_calls_that_ran_out_of_retries(self):
+        clock = FakeClock()
+        t = ApiStatTracker(clock=clock)
+        # 100 calls, retry=3: 10 fail trial 1, 8 recover at trial 2,
+        # 2 fail again and 1 recovers at trial 3 -> 1 exhausted
+        for _ in range(90):
+            t.record('view', 'w', 1, 'ok')
+        for _ in range(10):
+            t.record('view', 'w', 1, 'http_412')
+        for _ in range(8):
+            t.record('view', 'w', 2, 'ok')
+        for _ in range(2):
+            t.record('view', 'w', 2, 'http_412')
+        t.record('view', 'w', 3, 'ok')
+        t.record('view', 'w', 3, 'http_412')
+        self.assertIn('exhausted=1', '\n'.join(report(t)))
+
+    def test_exhaustion_is_correct_when_calls_used_different_retry_budgets(self):
+        # reading "failures at the last trial" would miss the retry=1 call
+        # that gave up at trial 1; the chain identity does not
+        t = ApiStatTracker(clock=FakeClock())
+        t.record('view', 'w', 1, 'http_412')          # retry=1 -> gave up here
+        t.record('view', 'w', 1, 'http_412')          # retry=3 -> goes on
+        t.record('view', 'w', 2, 'http_412')
+        t.record('view', 'w', 3, 'http_412')          # -> gave up here
+        self.assertIn('exhausted=2', '\n'.join(report(t)))
+
+    def test_exhaustion_chains_across_workers(self):
+        # a retry may land on another worker, so the count is per target
+        t = ApiStatTracker(clock=FakeClock())
+        t.record('view', 'w-a', 1, 'http_412')
+        t.record('view', 'w-b', 2, 'http_412')
+        t.record('view', 'w-a', 3, 'http_412')
+        text = '\n'.join(report(t))
+        self.assertIn('view (all workers)', text)
+        self.assertIn('exhausted=1', text)
+
     def test_no_traffic_reports_without_crashing(self):
         text = '\n'.join(report(ApiStatTracker(clock=FakeClock())))
         self.assertIn('no requests recorded', text)
