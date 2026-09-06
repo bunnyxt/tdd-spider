@@ -34,21 +34,20 @@ class ApiDebugLineTest(TestCase):
         self.assertIn('target: view, worker: only, status: 200, result: ok',
                       api_lines[1])
 
-    def test_the_line_is_written_before_a_rate_limit_aborts_the_call(self):
-        # the raise happens right after this line, so the reason a call ended
-        # is still on record
+    def test_every_rate_limited_attempt_gets_its_own_line(self):
         service = self.make_service('view', [
             worker('only', 'https://only.invalid/'),
-        ], {'https://only.invalid/': [response(412, b'blocked')]})
+        ], {'https://only.invalid/': [response(412, b'blocked')] * 3})
 
         with mock.patch('service.Service.time.sleep'), \
                 self.assertLogs('Service', level=logging.DEBUG) as logs:
             with self.assertRaises(RateLimitError):
-                service._get('view', 'worker')
+                service._get('view', 'worker', retry=3)
 
         api_lines = [line for line in logs.output if 'API target: ' in line]
-        self.assertEqual(len(api_lines), 1)
-        self.assertIn('status: 412, result: http_412', api_lines[0])
+        self.assertEqual(len(api_lines), 3)
+        self.assertTrue(all('status: 412, result: http_412' in line
+                            for line in api_lines))
 
     def test_in_body_rate_limit_is_reported_as_the_result(self):
         service = self.make_service('get_member_card', [

@@ -558,7 +558,7 @@ def add_member(mid: int, service: Service, session: Session, test_exist=True):
     try:
         # special config for get_member_card
         member_card = service.get_member_card(
-            {'mid': mid}, retry=20, timeout=1.5, colddown_factor=0.1)
+            {'mid': mid}, timeout=1.5, colddown_factor=0.1)
     except ServiceError as e:
         raise e
 
@@ -593,7 +593,7 @@ def update_member(mid: int, service: Service, session: Session):
     try:
         # special config for get_member_card
         member_card = service.get_member_card(
-            {'mid': mid}, retry=20, timeout=1.5, colddown_factor=0.1)
+            {'mid': mid}, timeout=1.5, colddown_factor=0.1)
     except CodeError as e:
         # code maybe -404, otherwise anti-crawler triggered, raise error
         if e.code != -404:

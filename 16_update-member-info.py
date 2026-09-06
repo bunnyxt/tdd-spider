@@ -19,7 +19,7 @@ def update_member_info():
     timer.start()
 
     session = Session()
-    service = Service(mode='worker', retry=20)
+    service = Service(mode='worker')
 
     # get all mids
     all_mids: list[int] = DBOperation.query_all_member_mids(session)
@@ -46,10 +46,13 @@ def update_member_info():
     # Shared Service state keeps rate-limited member-card workers out of the
     # candidate pool. If every worker is limited, each job records that condition
     # and briefly slows down before moving to the next member.
-    # 20, not 50: member-card is rate limited below what 50 concurrent jobs
-    # ask for, so the extra concurrency only buys a shorter burst before the
-    # whole pool cools down.
-    job_num = 20
+    # 2, not 50. Each job thread sustains ~1.8 req/s, and the member-card
+    # limit is on request rate: measured at roughly 24-30 req/s, against the
+    # 33-37 req/s that 20 threads were producing. Two threads is ~3.6 req/s,
+    # about a seventh of the threshold, and finishes the day's ~25k members in
+    # two hours -- there is no reason for this job to be fast, and the headroom
+    # belongs to the jobs that add videos.
+    job_num = 2
     for _ in range(job_num):
         mid_queue.put(None)
     logger.info(f'{len(mids)} mids put into queue.')
