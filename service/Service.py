@@ -6,10 +6,11 @@ import json
 import time
 import random
 from pathlib import Path
-from typing import Optional, Callable, Literal
+from typing import Optional, Callable, Literal, Union
 from .error import (ResponseError, RateLimitError,
                     FormatError, CodeError)
 from .worker import WorkerConfigurationError, WorkerSelector
+from .apistat import ApiStatTracker
 from .response import \
     VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, VideoViewTrimmed, \
     VideoTag, VideoTags, \
@@ -62,11 +63,25 @@ class Service:
     def __init__(
             self, headers: Optional[dict] = None, retry: int = 3, timeout: float = 5.0, colddown_factor: float = 1.0,
             mode: RequestMode = 'direct', pool_maxsize: int = 256, deadline: float = 10.0,
-            min_throughput_bps: float = 80_000.0, endpoints: Optional[dict] = None
+            min_throughput_bps: float = 80_000.0, endpoints: Optional[dict] = None,
+            stats: Optional[Union[ApiStatTracker, bool]] = None
     ):
         if mode not in ('direct', 'worker'):
             logger.critical(f'Invalid request mode: {mode}.')
             raise SystemExit(1)
+
+        # always-on request/retry/rate-limit observability, keyed on every
+        # attempt this Service makes. Default: one tracker per Service
+        # instance, matching the "one Service shared by all worker threads"
+        # lifetime. Pass an existing ApiStatTracker to share counters across
+        # several Service instances, or `stats=False` to disable (e.g. a
+        # throwaway Service in a test or a one-off script).
+        if stats is False:
+            self.stats: Optional[ApiStatTracker] = None
+        elif stats is None:
+            self.stats = ApiStatTracker()
+        else:
+            self.stats = stats
 
         # set default config
         self._headers = headers if headers is not None else {}
@@ -240,6 +255,7 @@ class Service:
                     logger.critical(f'Invalid worker configuration: {e}')
                     raise SystemExit(1)
                 request_url = selected_worker.url
+            worker_id = selected_worker.id if selected_worker else 'direct'
 
             # colddown for retry
             if trial > 1:
@@ -254,6 +270,8 @@ class Service:
                                       timeout=timeout, stream=True)
             except requests.exceptions.RequestException as e:
                 last_failure = 'request_exception'
+                if self.stats is not None:
+                    self.stats.record(target, worker_id, trial, last_failure)
                 logger.debug(
                     f'Fail to get response. '
                     f'url: {request_url}, params: {params}, trial: {trial}, error: {e}'
@@ -293,6 +311,8 @@ class Service:
             except requests.exceptions.RequestException as e:
                 r.close()
                 last_failure = 'body_exception'
+                if self.stats is not None:
+                    self.stats.record(target, worker_id, trial, last_failure)
                 logger.debug(
                     f'Fail to read response body. '
                     f'url: {request_url}, params: {params}, trial: {trial}, error: {e}'
@@ -301,6 +321,8 @@ class Service:
             if deadline_exceeded:
                 r.close()
                 last_failure = 'deadline_exceeded'
+                if self.stats is not None:
+                    self.stats.record(target, worker_id, trial, last_failure)
                 trial_ms = int((time.perf_counter() - trial_start) * 1000)
                 logger.debug(
                     f'Deadline exceeded while downloading response body. '
@@ -333,11 +355,15 @@ class Service:
                 # with a valid body, which would otherwise be returned as data
                 last_failure = limited.reason
                 rate_limited_trials += 1
+                if self.stats is not None:
+                    self.stats.record(target, worker_id, trial, last_failure)
                 continue
 
             # check status code
             if r.status_code != 200:
                 last_failure = f'http_{r.status_code}'
+                if self.stats is not None:
+                    self.stats.record(target, worker_id, trial, last_failure)
                 logger.debug(
                     f'Fail to get response with status code {r.status_code}. '
                     f'url: {request_url}, params: {params}, trial: {trial}, duration: {trial_ms}ms'
@@ -353,9 +379,13 @@ class Service:
             if parser is None:
                 try:
                     response = r.json()
+                    if self.stats is not None:
+                        self.stats.record(target, worker_id, trial, 'ok')
                     break
                 except json.JSONDecodeError:
                     last_failure = 'json_error'
+                    if self.stats is not None:
+                        self.stats.record(target, worker_id, trial, last_failure)
                     logger.debug(
                         f'Fail to decode response to json. '
                         f'response: {r.text}, url: {request_url}, params: {params}, trial: {trial}'
@@ -364,8 +394,12 @@ class Service:
             else:
                 response = parser(r.text)
                 if response is not None:
+                    if self.stats is not None:
+                        self.stats.record(target, worker_id, trial, 'ok')
                     break
                 last_failure = 'parse_error'
+                if self.stats is not None:
+                    self.stats.record(target, worker_id, trial, last_failure)
         if response is None:
             if retry > 0 and rate_limited_trials == retry:
                 raise RateLimitError(target, last_failure)
