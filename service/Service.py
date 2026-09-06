@@ -196,7 +196,7 @@ class Service:
             retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
             deadline: Optional[float] = None,
             parser: Optional[Callable[[str], Optional[dict]]] = None
-    ) -> Optional[dict]:
+    ) -> dict:
         # assemble headers
         if headers is None:
             headers = self._headers
@@ -227,7 +227,7 @@ class Service:
 
         # go request
         response = None
-        last_failure = 'no_attempt'
+        last_failure = None
         rate_limited_trials = 0
         for trial in range(1, retry + 1):
             selected_worker = None
@@ -328,17 +328,8 @@ class Service:
                 f'trial: {trial}, duration: {trial_ms}ms'
             )
             if limited is not None:
-                # Retry it like any other failure. Measured on the video-view
-                # target: 7.75% of requests come back 412, and 99.05% of those
-                # succeed on the next attempt or the one after -- treating a
-                # rate limit as fatal on sight would throw away ~13k records an
-                # hour. Whether retrying was hopeless is a question that can
-                # only be answered once the budget is spent, so it is answered
-                # after the loop.
-                #
-                # `continue` rather than falling through to the status-code
-                # branch: an in-body rate limit (member-card -352, status 200)
-                # would otherwise be returned to the caller as a valid response.
+                # `continue`, not fall through: a -352 comes back as status 200
+                # with a valid body, which would otherwise be returned as data
                 last_failure = limited.reason
                 rate_limited_trials += 1
                 continue
@@ -375,10 +366,6 @@ class Service:
                     break
                 last_failure = 'parse_error'
         if response is None:
-            # Every trial failed. If every one of them was a rate limit, this
-            # is a wall rather than bad luck, and callers that know how to wait
-            # (back off, requeue, slow down) need to be able to tell. Anything
-            # else -- including a mix -- is an ordinary exhausted request.
             if retry > 0 and rate_limited_trials == retry:
                 raise RateLimitError(target, last_failure)
             raise ResponseError(target, params or {}, last_failure, retry)

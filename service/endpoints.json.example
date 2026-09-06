@@ -21,7 +21,8 @@
         "id": "<worker-id>",
         "url": "<worker-url>",
         "platform": "<platform>",
-        "weight": 1
+        "weight": 1,
+        "enabled": true
       },
       {
         "id": "<another-worker-id>",

@@ -1,3 +1,5 @@
+from typing import Optional
+
 from core import TddError
 
 __all__ = ['ServiceError', 'ResponseError', 'RateLimitError',
@@ -13,12 +15,8 @@ class ServiceError(TddError):
 
 
 class ResponseError(ServiceError):
-    # `reason` and `trials` say WHY the retry budget ran out -- a timeout, a
-    # 502, an unparseable body. Without them an exhausted request is
-    # indistinguishable from any other in a caller's stats, and answering
-    # "what actually failed" means re-running with debug logging on.
     def __init__(self, target: str, params: dict,
-                 reason: str = 'unknown', trials: int = 0):
+                 reason: Optional[str] = None, trials: int = 0):
         super().__init__()
         self.target = target
         self.params = params
@@ -31,9 +29,6 @@ class ResponseError(ServiceError):
 
 
 class RateLimitError(ServiceError):
-    # Raised as soon as an upstream rate limit is seen. It carries no timing:
-    # the per-worker cooldown that used to predict a retry time is gone, and
-    # how long to wait is the caller's decision, not the Service's.
     def __init__(self, target: str, reason: str):
         super().__init__()
         self.target = target
