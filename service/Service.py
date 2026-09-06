@@ -10,7 +10,7 @@ from typing import Optional, Callable, Literal, Union
 from .error import (ResponseError, RateLimitError,
                     FormatError, CodeError)
 from .worker import WorkerConfigurationError, WorkerSelector
-from .apistat import ApiStatTracker
+from .apistat import ApiStatTracker, NullApiStat
 from .response import \
     VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, VideoViewTrimmed, \
     VideoTag, VideoTags, \
@@ -70,14 +70,11 @@ class Service:
             logger.critical(f'Invalid request mode: {mode}.')
             raise SystemExit(1)
 
-        # always-on request/retry/rate-limit observability, keyed on every
-        # attempt this Service makes. Default: one tracker per Service
-        # instance, matching the "one Service shared by all worker threads"
-        # lifetime. Pass an existing ApiStatTracker to share counters across
-        # several Service instances, or `stats=False` to disable (e.g. a
-        # throwaway Service in a test or a one-off script).
+        # one tracker per Service by default, matching the "one Service shared
+        # by all worker threads" lifetime. Pass an existing tracker to share
+        # counters across Services, or stats=False to disable.
         if stats is False:
-            self.stats: Optional[ApiStatTracker] = None
+            self.stats = NullApiStat()
         elif stats is None:
             self.stats = ApiStatTracker()
         else:
@@ -245,6 +242,15 @@ class Service:
         response = None
         last_failure = None
         rate_limited_trials = 0
+
+        def note(outcome: str) -> None:
+            """Classify this attempt once: remember why it failed, and count
+            it. One call site per outcome so the two can never drift apart."""
+            nonlocal last_failure
+            if outcome != 'ok':
+                last_failure = outcome
+            self.stats.record(target, worker_id, trial, outcome)
+
         for trial in range(1, retry + 1):
             selected_worker = None
             request_url = direct_url
@@ -269,9 +275,7 @@ class Service:
                 r = self._session.get(request_url, params=params, headers=headers,
                                       timeout=timeout, stream=True)
             except requests.exceptions.RequestException as e:
-                last_failure = 'request_exception'
-                if self.stats is not None:
-                    self.stats.record(target, worker_id, trial, last_failure)
+                note('request_exception')
                 logger.debug(
                     f'Fail to get response. '
                     f'url: {request_url}, params: {params}, trial: {trial}, error: {e}'
@@ -310,9 +314,7 @@ class Service:
                         break
             except requests.exceptions.RequestException as e:
                 r.close()
-                last_failure = 'body_exception'
-                if self.stats is not None:
-                    self.stats.record(target, worker_id, trial, last_failure)
+                note('body_exception')
                 logger.debug(
                     f'Fail to read response body. '
                     f'url: {request_url}, params: {params}, trial: {trial}, error: {e}'
@@ -320,9 +322,7 @@ class Service:
                 continue
             if deadline_exceeded:
                 r.close()
-                last_failure = 'deadline_exceeded'
-                if self.stats is not None:
-                    self.stats.record(target, worker_id, trial, last_failure)
+                note('deadline_exceeded')
                 trial_ms = int((time.perf_counter() - trial_start) * 1000)
                 logger.debug(
                     f'Deadline exceeded while downloading response body. '
@@ -353,17 +353,13 @@ class Service:
             if limited is not None:
                 # `continue`, not fall through: a -352 comes back as status 200
                 # with a valid body, which would otherwise be returned as data
-                last_failure = limited.reason
+                note(limited.reason)
                 rate_limited_trials += 1
-                if self.stats is not None:
-                    self.stats.record(target, worker_id, trial, last_failure)
                 continue
 
             # check status code
             if r.status_code != 200:
-                last_failure = f'http_{r.status_code}'
-                if self.stats is not None:
-                    self.stats.record(target, worker_id, trial, last_failure)
+                note(f'http_{r.status_code}')
                 logger.debug(
                     f'Fail to get response with status code {r.status_code}. '
                     f'url: {request_url}, params: {params}, trial: {trial}, duration: {trial_ms}ms'
@@ -379,13 +375,10 @@ class Service:
             if parser is None:
                 try:
                     response = r.json()
-                    if self.stats is not None:
-                        self.stats.record(target, worker_id, trial, 'ok')
+                    note('ok')
                     break
                 except json.JSONDecodeError:
-                    last_failure = 'json_error'
-                    if self.stats is not None:
-                        self.stats.record(target, worker_id, trial, last_failure)
+                    note('json_error')
                     logger.debug(
                         f'Fail to decode response to json. '
                         f'response: {r.text}, url: {request_url}, params: {params}, trial: {trial}'
@@ -394,12 +387,9 @@ class Service:
             else:
                 response = parser(r.text)
                 if response is not None:
-                    if self.stats is not None:
-                        self.stats.record(target, worker_id, trial, 'ok')
+                    note('ok')
                     break
-                last_failure = 'parse_error'
-                if self.stats is not None:
-                    self.stats.record(target, worker_id, trial, last_failure)
+                note('parse_error')
         if response is None:
             if retry > 0 and rate_limited_trials == retry:
                 raise RateLimitError(target, last_failure)

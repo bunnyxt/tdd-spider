@@ -175,12 +175,9 @@ def fetch_and_batch_insert_records(
     log.info(update_stat.get_summary(update_label))
     log.info(f'{writer_stat.total_count} record(s) fetched, batch inserted and returned.')
     log.info(f'{update_stat.total_count} code-error video(s) updated.')
-    # standing request/retry/rate-limit observability: the fetch and
-    # update pools share this one Service, so its tracker covers every HTTP
-    # attempt either pool made. Logged here (not --debug-gated) so p / retry
-    # recovery / retry exhaustion are readable from every run.
-    if service.stats is not None:
-        service.stats.log_summary(log)
+    # the fetch and update pools share this Service, so its tracker covers
+    # every HTTP attempt either made
+    service.stats.log_summary(log)
     return fetch_stat, writer_stat, update_stat, service.stats
 
 
@@ -219,8 +216,7 @@ class VideoRecordAcquisitionJob(Job):
         self.fetch_stat = None
         self.writer_stat = None
         self.update_stat = None
-        # request/retry/rate-limit tracker of the Service shared by the fetch
-        # and update pools; stays None if process() raised
+        # set by process(); stays None if it raised
         self.api_stats = None
 
     def process(self):
@@ -750,8 +746,6 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     if recorder is not None:
         for scope, stat in acquisition_runner.stats().items():
             recorder.add_job_stat_metrics(scope, stat)
-        # request/retry/rate-limit totals: makes p / retry recovery / retry
-        # exhaustion a `runrecord trend` query, not a --debug re-run
         recorder.add_api_stat_metrics(acquisition_runner.api_stats)
 
     records = []

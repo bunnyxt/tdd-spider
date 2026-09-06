@@ -18,7 +18,7 @@ import requests
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from service import RateLimitError, ResponseError, Service  # noqa: E402
-from service.apistat import ApiStatTracker  # noqa: E402
+from service.apistat import ApiStatTracker, NullApiStat  # noqa: E402
 from test_worker_selector import ScriptedSession, endpoints_for, response, worker  # noqa: E402
 
 
@@ -151,12 +151,15 @@ class ServiceApiStatWiringTest(unittest.TestCase):
         self.assertEqual(totals_dict(service.stats),
                          {('api:view:direct', 't1:ok'): 1.0})
 
-    def test_stats_false_disables_tracking_without_error(self):
+    def test_stats_false_records_nothing_and_needs_no_none_check(self):
+        # callers never test `stats is not None`; disabling swaps in a no-op
         service = self.make_service('view', [worker('w1', 'https://w1.invalid/')],
                                     {'https://w1.invalid/': [response(200, {'code': 0})]},
                                     stats=False)
-        self.assertIsNone(service.stats)
-        service._get('view', 'worker')  # must not raise
+        self.assertIsInstance(service.stats, NullApiStat)
+        service._get('view', 'worker')
+        self.assertEqual(service.stats.totals(), [])
+        service.stats.log_summary()
 
     def test_a_shared_tracker_can_be_injected(self):
         shared = ApiStatTracker()

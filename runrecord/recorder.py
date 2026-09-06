@@ -178,12 +178,9 @@ class RunRecorder:
 
     def add_api_stat_metrics(self, tracker) -> None:
         """
-        Persist the whole-run totals of an ``ApiStatTracker``: one row per
-        ``(target, worker, trial, outcome)`` combination it saw,
-        scoped as ``api:<target>:<worker>`` / ``t<trial>:<outcome>``. Duck-typed
-        on ``tracker.totals()`` returning ``[{'scope', 'name', 'value'}, ...]``
-        (``service.apistat.ApiStatTracker``'s contract) so this module never
-        has to import ``service``.
+        Persist an ApiStatTracker's run totals, one row per
+        (target, worker, trial, outcome). Duck-typed on `totals()` so this
+        module never has to import `service`.
         """
         if not self.enabled or tracker is None:
             return
