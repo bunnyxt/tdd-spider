@@ -162,8 +162,6 @@ class Service:
             r'Opera/9.80 (Android 2.3.4; Linux; Opera Mobi/build-1107180945; U; en-GB) Presto/2.8.149 Version/11.10',
             # BlackBerry
             r'Mozilla/5.0 (BlackBerry; U; BlackBerry 9800; en) AppleWebKit/534.1+ (KHTML, like Gecko) Version/6.0.0.337 Mobile Safari/534.1+',
-            # Nokia N97
-            r'Mozilla/5.0 (SymbianOS/9.4; Series60/5.0 NokiaN97-1/20.0.019; Profile/MIDP-2.1 Configuration/CLDC-1.1) AppleWebKit/525 (KHTML, like Gecko) BrowserNG/7.1.18124',
             # Android N1
             r'Mozilla/5.0 (Linux; U; Android 2.3.7; en-us; Nexus One Build/FRF91) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1'
         ]
@@ -198,8 +196,11 @@ class Service:
             parser: Optional[Callable[[str], Optional[dict]]] = None
     ) -> dict:
         # assemble headers
+        # copy, don't alias: the User-Agent set below would otherwise be
+        # written into self._headers and every later request would reuse it,
+        # so a process picked one agent at startup and kept it for its whole run
         if headers is None:
-            headers = self._headers
+            headers = dict(self._headers)
         else:
             headers = {**self._headers, **headers}
         # add User-Agent if not exists
