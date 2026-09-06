@@ -77,6 +77,7 @@ def update_member_info():
     logger.info(f'Finish {script_fullname}!')
     logger.info(timer.get_summary())
     logger.info(job_stat_merged.get_summary('member-update'))
+    service.stats.log_summary(logger)
     sc_send_summary(script_fullname, timer, job_stat_merged)
 
 

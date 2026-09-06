@@ -92,7 +92,8 @@ def fetch_and_batch_insert_records(
     doing it inline on a fetch worker let all 250 fetchers hit the DB at once,
     which deadlocked the 2026-07-15 04:00 full scan.
 
-    Returns (fetch_stat, writer_stat, update_stat) merged JobStats.
+    Returns (fetch_stat, writer_stat, update_stat) merged JobStats, plus the
+    ApiStatTracker of the Service shared by the fetch and update pools.
     """
     log = logging.getLogger(logger_name)
     # pool_maxsize MUST cover job_num: every worker hits the same worker host,
@@ -174,7 +175,10 @@ def fetch_and_batch_insert_records(
     log.info(update_stat.get_summary(update_label))
     log.info(f'{writer_stat.total_count} record(s) fetched, batch inserted and returned.')
     log.info(f'{update_stat.total_count} code-error video(s) updated.')
-    return fetch_stat, writer_stat, update_stat
+    # the fetch and update pools share this Service, so its tracker covers
+    # every HTTP attempt either made
+    service.stats.log_summary(log)
+    return fetch_stat, writer_stat, update_stat, service.stats
 
 
 class VideoRecordAcquisitionJob(Job):
@@ -212,6 +216,8 @@ class VideoRecordAcquisitionJob(Job):
         self.fetch_stat = None
         self.writer_stat = None
         self.update_stat = None
+        # set by process(); stays None if it raised
+        self.api_stats = None
 
     def process(self):
         session = Session()
@@ -220,7 +226,8 @@ class VideoRecordAcquisitionJob(Job):
         self.logger.info(
             f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
-        self.fetch_stat, self.writer_stat, self.update_stat = fetch_and_batch_insert_records(
+        (self.fetch_stat, self.writer_stat, self.update_stat,
+         self.api_stats) = fetch_and_batch_insert_records(
             need_insert_aid_list, self.record_queue,
             job_num=300,
             fetch_label=self.FETCH_LABEL,
@@ -739,6 +746,7 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     if recorder is not None:
         for scope, stat in acquisition_runner.stats().items():
             recorder.add_job_stat_metrics(scope, stat)
+        recorder.add_api_stat_metrics(acquisition_runner.api_stats)
 
     records = []
     while not records_queue.empty():

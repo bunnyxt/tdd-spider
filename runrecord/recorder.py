@@ -176,6 +176,27 @@ class RunRecorder:
         except Exception as e:
             logger.warning(f'run record: failed to add metrics for scope {scope!r} ({e!r})')
 
+    def add_api_stat_metrics(self, tracker) -> None:
+        """
+        Persist an ApiStatTracker's run totals, one row per
+        (target, worker, trial, outcome). Duck-typed on `totals()` so this
+        module never has to import `service`.
+        """
+        if not self.enabled or tracker is None:
+            return
+        try:
+            rows = tracker.totals()
+            if not rows:
+                return
+            self._conn.executemany(
+                'INSERT OR REPLACE INTO run_metric (run_id, scope, name, value, unit) '
+                'VALUES (?, ?, ?, ?, ?)',
+                [(self.run_id, row['scope'], row['name'], float(row['value']), 'count')
+                 for row in rows])
+            self._conn.commit()
+        except Exception as e:
+            logger.warning(f'run record: failed to add api stat metrics ({e!r})')
+
     def finish(self, status: str) -> None:
         if not self.enabled:
             return
