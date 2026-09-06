@@ -18,7 +18,7 @@ import requests
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from service import RateLimitError, ResponseError, Service  # noqa: E402
-from service.apistat import ApiStatTracker, NullApiStat  # noqa: E402
+from service.apistat import ApiStatTracker, NullApiStatTracker  # noqa: E402
 from test_worker_selector import ScriptedSession, endpoints_for, response, worker  # noqa: E402
 
 
@@ -156,7 +156,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
         service = self.make_service('view', [worker('w1', 'https://w1.invalid/')],
                                     {'https://w1.invalid/': [response(200, {'code': 0})]},
                                     stats=False)
-        self.assertIsInstance(service.stats, NullApiStat)
+        self.assertIsInstance(service.stats, NullApiStatTracker)
         service._get('view', 'worker')
         self.assertEqual(service.stats.totals(), [])
         service.stats.log_summary()

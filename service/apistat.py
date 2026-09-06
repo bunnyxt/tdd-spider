@@ -17,7 +17,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from util import format_ts_s
 
-__all__ = ['ApiStatTracker', 'NullApiStat']
+__all__ = ['ApiStatTracker', 'NullApiStatTracker']
 
 logger = logging.getLogger('apistat')
 
@@ -69,7 +69,7 @@ def _exhausted(trials: Dict[int, Counter]) -> int:
     return total
 
 
-class NullApiStat:
+class NullApiStatTracker:
     """Stand-in so callers never have to test `stats is not None`."""
 
     def record(self, target, worker, trial, outcome, now=None):

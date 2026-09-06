@@ -10,7 +10,7 @@ from typing import Optional, Callable, Literal, Union
 from .error import (ResponseError, RateLimitError,
                     FormatError, CodeError)
 from .worker import WorkerConfigurationError, WorkerSelector
-from .apistat import ApiStatTracker, NullApiStat
+from .apistat import ApiStatTracker, NullApiStatTracker
 from .response import \
     VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, VideoViewTrimmed, \
     VideoTag, VideoTags, \
@@ -74,7 +74,7 @@ class Service:
         # by all worker threads" lifetime. Pass an existing tracker to share
         # counters across Services, or stats=False to disable.
         if stats is False:
-            self.stats = NullApiStat()
+            self.stats = NullApiStatTracker()
         elif stats is None:
             self.stats = ApiStatTracker()
         else:
