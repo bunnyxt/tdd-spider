@@ -29,7 +29,7 @@
         "url": "<worker-url>",
         "platform": "<platform>",
         "weight": 2,
-        "enabled": true
+        "enabled": false
       }
     ]
   },

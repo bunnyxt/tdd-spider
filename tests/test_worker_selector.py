@@ -86,6 +86,25 @@ class WorkerSelectorConfigTest(TestCase):
             with self.subTest(item=item), self.assertRaises(ValueError):
                 WorkerSelector(endpoints_for('view', [item]))
 
+    def test_every_worker_field_is_required(self):
+        # no defaults: a config that does not say is a config that is wrong
+        complete = worker('a', 'https://a.invalid/')
+        for field in ('id', 'url', 'platform', 'weight', 'enabled'):
+            partial = {k: v for k, v in complete.items() if k != field}
+            with self.assertRaises(WorkerConfigurationError) as raised:
+                WorkerSelector(endpoints_for('view', [partial]))
+            self.assertIn(field, str(raised.exception))
+
+    def test_enabled_false_is_honoured_and_not_mistaken_for_missing(self):
+        selector = WorkerSelector(endpoints_for('view', [
+            worker('on', 'https://on.invalid/'),
+            worker('off', 'https://off.invalid/', enabled=False),
+        ]))
+        with mock.patch('service.worker.random.choice',
+                        side_effect=lambda items: items[0]) as choose:
+            selector.select('view')
+        self.assertEqual({item.id for item in choose.call_args.args[0]}, {'on'})
+
     def test_unknown_new_worker_field_is_rejected(self):
         item = worker('w', 'https://worker.invalid/')
         item['enable'] = False

@@ -61,16 +61,21 @@ class WorkerSelector:
             raise WorkerConfigurationError(
                 f'Worker entry for {target!r} must be a URL or object.')
 
-        unknown = set(raw) - {'id', 'url', 'platform', 'weight', 'enabled'}
+        fields = {'id', 'url', 'platform', 'weight', 'enabled'}
+        missing = fields - set(raw)
+        if missing:
+            raise WorkerConfigurationError(
+                f'Missing worker field(s) for {target!r}: {sorted(missing)!r}.')
+        unknown = set(raw) - fields
         if unknown:
             raise WorkerConfigurationError(
                 f'Unknown worker field(s) for {target!r}: {sorted(unknown)!r}.')
 
-        worker_id = raw.get('id')
-        url = raw.get('url')
-        platform = raw.get('platform')
-        weight = raw.get('weight', 1)
-        enabled = raw.get('enabled', True)
+        worker_id = raw['id']
+        url = raw['url']
+        platform = raw['platform']
+        weight = raw['weight']
+        enabled = raw['enabled']
         if not isinstance(worker_id, str) or not worker_id:
             raise WorkerConfigurationError(
                 f'Worker id for {target!r} must be a non-empty string.')
