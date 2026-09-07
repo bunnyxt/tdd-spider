@@ -36,3 +36,4 @@ data/
 # config
 conf/conf.ini
 service/endpoints.json
+*.zip
