@@ -51,9 +51,11 @@ class ScriptedSession:
             url: list(responses) for url, responses in responses_by_url.items()
         }
         self.calls = []
+        self.agents = []
 
     def get(self, url, **kwargs):
         self.calls.append(url)
+        self.agents.append(kwargs.get('headers', {}).get('User-Agent'))
         return self.responses_by_url[url].pop(0)
 
 

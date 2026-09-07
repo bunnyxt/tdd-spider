@@ -4,8 +4,9 @@ from unittest import TestCase, mock
 import requests
 
 from service import Service
+from service.ua import UA_LIST
 
-from test_worker_selector import endpoints_for, response, worker
+from test_worker_selector import ScriptedSession, endpoints_for, response, worker
 
 
 class RecordingSession:
@@ -62,8 +63,76 @@ class UserAgentTest(TestCase):
         self.assertEqual(set(service._session.sent_agents), {'mine/1.0'})
 
     def test_the_symbian_agent_is_not_offered(self):
-        # measured 20 rejections in 50 requests (40%); every other agent in the
-        # list returned 50/50 clean in the same interleaved run
-        service = self.make_service()
-        self.assertFalse(any('Symbian' in agent for agent in service._ua_list))
-        self.assertFalse(any('NokiaN97' in agent for agent in service._ua_list))
+        # removed from the list that used to live in Service; UA_LIST still
+        # ships, so the exclusion still applies
+        self.assertFalse(any('Symbian' in agent for agent in UA_LIST))
+        self.assertFalse(any('NokiaN97' in agent for agent in UA_LIST))
+
+
+class UserAgentPoolTest(TestCase):
+    """The pool comes from endpoints.json; UA_LIST is what a target that
+    configures none uses."""
+
+    def endpoints_with_agents(self, agents):
+        endpoints = endpoints_for('view', [worker('a', 'https://a.invalid/')])
+        endpoints['view']['user_agents'] = agents
+        return endpoints
+
+    def make_service(self, endpoints):
+        service = Service(mode='worker', colddown_factor=0, endpoints=endpoints)
+        service._session = RecordingSession({'code': 0})
+        return service
+
+    def test_a_configured_pool_replaces_ua_list(self):
+        service = self.make_service(self.endpoints_with_agents(['x-1', 'x-2']))
+        for _ in range(40):
+            service._get('view')
+        self.assertEqual(set(service._session.sent_agents), {'x-1', 'x-2'})
+
+    def test_a_target_without_a_pool_uses_ua_list(self):
+        service = self.make_service(
+            endpoints_for('view', [worker('a', 'https://a.invalid/')]))
+        for _ in range(40):
+            service._get('view')
+        self.assertTrue(set(service._session.sent_agents) <= set(UA_LIST))
+        self.assertGreater(len(set(service._session.sent_agents)), 1)
+
+    def test_every_attempt_draws_again(self):
+        endpoints = self.endpoints_with_agents(['x-1', 'x-2', 'x-3'])
+        service = Service(mode='worker', retry=3, colddown_factor=0,
+                          endpoints=endpoints)
+        service._session = ScriptedSession(
+            {'https://a.invalid/': [response(412, b'no'), response(412, b'no'),
+                                    response(200, {'code': 0})]})
+        with mock.patch('service.Service.time.sleep'):
+            service._get('view')
+        sent = service._session.agents
+        self.assertEqual(len(sent), 3)
+        self.assertTrue(set(sent) <= {'x-1', 'x-2', 'x-3'})
+
+    def test_a_single_entry_pool_repeats(self):
+        endpoints = self.endpoints_with_agents(['only-one'])
+        service = Service(mode='worker', retry=2, colddown_factor=0,
+                          endpoints=endpoints)
+        service._session = ScriptedSession(
+            {'https://a.invalid/': [response(412, b'no'), response(200, {'code': 0})]})
+        with mock.patch('service.Service.time.sleep'):
+            service._get('view')
+        self.assertEqual(service._session.agents, ['only-one', 'only-one'])
+
+    def test_a_caller_supplied_agent_survives_every_retry(self):
+        endpoints = self.endpoints_with_agents(['x-1', 'x-2'])
+        service = Service(mode='worker', retry=3, colddown_factor=0,
+                          endpoints=endpoints)
+        service._session = ScriptedSession(
+            {'https://a.invalid/': [response(412, b'no'), response(412, b'no'),
+                                    response(200, {'code': 0})]})
+        with mock.patch('service.Service.time.sleep'):
+            service._get('view', headers={'User-Agent': 'mine'})
+        self.assertEqual(service._session.agents, ['mine', 'mine', 'mine'])
+
+    def test_an_empty_pool_uses_ua_list(self):
+        service = self.make_service(self.endpoints_with_agents([]))
+        for _ in range(20):
+            service._get('view')
+        self.assertTrue(set(service._session.sent_agents) <= set(UA_LIST))

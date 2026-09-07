@@ -31,6 +31,10 @@
         "weight": 2,
         "enabled": false
       }
+    ],
+    "user_agents": [
+      "<agent>",
+      "<another one>"
     ]
   },
   "get_member_relation": {
