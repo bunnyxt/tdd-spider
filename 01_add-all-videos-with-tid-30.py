@@ -32,7 +32,7 @@ def add_all_video_with_tid_30():
     except Exception as e:
         logger.critical(
             f'Fail to get newlist. rid: 30, pn: 1, ps: 50, error: {e}')
-        exit(1)
+        raise SystemExit(1)
     page_total = math.ceil(newlist.page.count / 50)
     logging.info(f'Found {page_total} page(s) in total.')
 

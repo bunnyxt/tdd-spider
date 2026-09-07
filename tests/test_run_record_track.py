@@ -68,11 +68,11 @@ class TrackLifecycleTest(unittest.TestCase):
         self.assertTrue(finished_at)
 
     def test_exit_nonzero_records_failed_and_propagates(self):
-        # 62_ calls exit(1) when the evocalrank fetch fails -- SystemExit(1),
+        # 62_ raises SystemExit(1) when the evocalrank fetch fails,
         # which must still close the run as 'failed', not leave it 'running'.
         with self.assertRaises(SystemExit) as ctx:
             with track('62_add-evocalrank-video', db_path=self.path):
-                exit(1)
+                raise SystemExit(1)
         self.assertEqual(ctx.exception.code, 1)
         self.assertEqual(self._status()[0], 'failed')
 

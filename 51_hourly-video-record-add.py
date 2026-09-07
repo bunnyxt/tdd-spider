@@ -818,7 +818,7 @@ def hourly_video_record_add():
         recorder.finish('failed')
         sc_send_critical(script_fullname, message,
                          __file__, get_current_line_no())
-        exit(1)
+        raise SystemExit(1)
 
     recorder.finish('succeeded')
 
