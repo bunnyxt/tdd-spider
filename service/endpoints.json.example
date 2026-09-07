@@ -2,16 +2,43 @@
   "get_video_view": {
     "direct": "http://api.bilibili.com/x/web-interface/view",
     "workers": [
+      {
+        "id": "<worker-id>",
+        "url": "<worker-url>",
+        "platform": "<platform>",
+        "weight": 1,
+        "enabled": true
+      }
+    ],
+    "user_agents": [
+      "<user-agent>"
     ]
   },
   "get_video_view_trimmed": {
     "direct": "invalid://api.bilibili.com/x/web-interface/view",
     "workers": [
+      {
+        "id": "<worker-id>",
+        "url": "<worker-url>",
+        "platform": "<platform>",
+        "weight": 1,
+        "enabled": true
+      }
+    ],
+    "user_agents": [
+      "<user-agent>"
     ]
   },
   "get_video_tags": {
     "direct": "http://api.bilibili.com/x/tag/archive/tags",
     "workers": [
+      {
+        "id": "<worker-id>",
+        "url": "<worker-url>",
+        "platform": "<platform>",
+        "weight": 1,
+        "enabled": true
+      }
     ]
   },
   "get_member_card": {
@@ -23,28 +50,34 @@
         "platform": "<platform>",
         "weight": 1,
         "enabled": true
-      },
-      {
-        "id": "<another-worker-id>",
-        "url": "<worker-url>",
-        "platform": "<platform>",
-        "weight": 2,
-        "enabled": false
       }
     ],
     "user_agents": [
-      "<agent>",
-      "<another one>"
+      "<user-agent>"
     ]
   },
   "get_member_relation": {
     "direct": "http://api.bilibili.com/x/relation/stat",
     "workers": [
+      {
+        "id": "<worker-id>",
+        "url": "<worker-url>",
+        "platform": "<platform>",
+        "weight": 1,
+        "enabled": true
+      }
     ]
   },
   "get_newlist": {
     "direct": "http://api.bilibili.com/x/web-interface/newlist",
     "workers": [
+      {
+        "id": "<worker-id>",
+        "url": "<worker-url>",
+        "platform": "<platform>",
+        "weight": 1,
+        "enabled": true
+      }
     ]
   }
 }
