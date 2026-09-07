@@ -75,12 +75,14 @@ def add_member_follower_record():
         # summary log uses (best-effort; a disabled recorder is a no-op)
         recorder.add_job_stat_metrics('follower-fetch', fetch_stat)
         recorder.add_job_stat_metrics('follower-db-writer', writer_stat)
+        recorder.add_api_stat_metrics(service.stats)
 
         # summary
         logger.info(f'Finish {script_fullname}!')
         logger.info(timer.get_summary())
         logger.info(fetch_stat.get_summary('follower-fetch'))
         logger.info(writer_stat.get_summary('follower-db-writer'))
+        service.stats.log_summary(logger)
         logger.info(f'{writer_stat.total_count} follower record(s) fetched and inserted.')
         sc_send_summary(script_fullname, timer, fetch_stat)
 

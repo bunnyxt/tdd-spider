@@ -90,9 +90,12 @@ def _stat(total_count=0, **conditions):
     return s
 
 
+from service.apistat import NullApiStatTracker  # noqa: E402
+
+
 class _FakeService:
     def __init__(self, *a, **kw):
-        pass
+        self.stats = NullApiStatTracker()
 
 
 class _FakeSession:
