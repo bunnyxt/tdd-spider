@@ -20,14 +20,18 @@ const STAT_KEYS = [
 
 export const handler = async (event) => {
   const queryParams = event.queryStringParameters || {};
+  const headers = event.headers || {};
 
   const url = new URL(baseUrl.href);
   Object.keys(queryParams).forEach((key) => {
     url.searchParams.append(key, queryParams[key]);
   });
 
+  const userAgent = headers["user-agent"] || headers["User-Agent"];
+  const init = userAgent ? { headers: { "User-Agent": userAgent } } : undefined;
+
   try {
-    const response = await fetch(url.href);
+    const response = await fetch(url.href, init);
     const body = await response.text();
 
     let parsed;
