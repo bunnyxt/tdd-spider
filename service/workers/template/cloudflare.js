@@ -8,9 +8,7 @@ export default {
     const searchString = requestUrl.search;
 
     // make sub request and get res
-    const userAgent = request.headers.get("user-agent");
-    const init = userAgent ? { headers: { "User-Agent": userAgent } } : undefined;
-    let res = await fetch(baseUrl.href + searchString, init);
+    let res = await fetch(baseUrl.href + searchString);
 
     // optionally modify res
     //
