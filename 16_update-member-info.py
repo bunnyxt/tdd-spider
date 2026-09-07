@@ -52,7 +52,7 @@ def update_member_info():
     # sustains. Raise it only together with a run whose api stat summary shows
     # the rejection rate staying flat; a rate that survives a short burst is
     # not necessarily one that survives the whole job.
-    job_num = 20
+    job_num = 10
     for _ in range(job_num):
         mid_queue.put(None)
     logger.info(f'{len(mids)} mids put into queue.')
