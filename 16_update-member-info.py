@@ -86,6 +86,5 @@ def main():
 
 
 if __name__ == '__main__':
-    # debug=True writes 16_DEBUG.log with the per-attempt API lines to grep
-    logging_init(file_prefix=script_id, debug=True)
+    logging_init(file_prefix=script_id)
     main()
