@@ -2,6 +2,7 @@ const baseUrl = new URL("http://api.bilibili.com/x/web-interface/newlist");
 
 export const handler = async (event) => {
   const queryParams = event.queryStringParameters || {};
+  const headers = event.headers || {};
 
   // Append query parameters to the base URL
   const url = new URL(baseUrl.href); // Clone baseUrl to avoid modifying the original
@@ -9,9 +10,12 @@ export const handler = async (event) => {
     url.searchParams.append(key, queryParams[key]);
   });
 
+  const userAgent = headers["user-agent"] || headers["User-Agent"];
+  const init = userAgent ? { headers: { "User-Agent": userAgent } } : undefined;
+
   try {
     // Fetch data from the API
-    const response = await fetch(url.href);
+    const response = await fetch(url.href, init);
 
     // Get the response body as text (JSON or other formats)
     const body = await response.text();

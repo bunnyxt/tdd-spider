@@ -11,9 +11,13 @@ functions.http("proxyRequest", async (req, res) => {
     url.searchParams.append(key, queryParams[key]);
   });
 
+  const headers = req.headers || {};
+  const userAgent = headers["user-agent"] || headers["User-Agent"];
+  const init = userAgent ? { headers: { "User-Agent": userAgent } } : undefined;
+
   try {
     // Fetch data from the API
-    const response = await fetch(url.href);
+    const response = await fetch(url.href, init);
 
     // Get the response body as text (JSON or other formats)
     const body = await response.text();

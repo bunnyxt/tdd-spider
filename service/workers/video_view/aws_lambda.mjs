@@ -27,11 +27,6 @@ export const handler = async (event) => {
     url.searchParams.append(key, queryParams[key]);
   });
 
-  // Forward the caller's User-Agent. Without this the request reaches
-  // bilibili as whatever Node's fetch defaults to, and the browser agent the
-  // spider picks per request never leaves this function. Sent only when the
-  // caller supplied one -- an absent header must stay absent rather than
-  // become the string "undefined".
   const userAgent = headers["user-agent"] || headers["User-Agent"];
   const init = userAgent ? { headers: { "User-Agent": userAgent } } : undefined;
 
