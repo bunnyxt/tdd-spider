@@ -64,9 +64,9 @@ def add_evocalrank_video(ranknum: int):
         except Exception as e:
             logger.critical(
                 f'Failed to get evocalrank data from {url}, error: {e}')
-            # exit() raises SystemExit(1): `track` closes the run as 'failed'
+            # raise SystemExit(1): `track` closes the run as 'failed'
             # before it propagates, so this stays distinct from a killed run.
-            exit(1)
+            raise SystemExit(1)
         logger.info(f'Evocalrank data loaded successfully!')
 
         # load avid from evocalrank_data

@@ -11,7 +11,7 @@ for a failing run. The assertions are:
 
 * a ``run`` row is written, keyed by the canonical ``script_id_script_name``;
 * it ends ``succeeded`` on a normal run and ``failed`` when the body raises and
-  the script's own ``except`` calls ``exit(1)``;
+  the script's own ``except`` raises ``SystemExit(1)``;
 * only the plain counts each script already computes land in ``run_metric``
   (no fabricated JobStat, no message text);
 * ``sc_send`` / ``sc_send_critical`` are still called exactly as before.

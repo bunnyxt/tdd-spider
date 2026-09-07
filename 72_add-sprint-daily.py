@@ -126,7 +126,7 @@ def add_sprint_daily():
             sc_send_critical(script_fullname, message, __file__, get_current_line_no())
             session.rollback()
             session.close()
-            exit(1)
+            raise SystemExit(1)
 
         session.close()
 
