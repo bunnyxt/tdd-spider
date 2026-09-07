@@ -60,9 +60,9 @@ class ScriptedSession:
 
 
 class WorkerSelectorConfigTest(TestCase):
-    def test_legacy_url_and_new_objects_are_supported(self):
+    def test_weight_repeats_a_worker_and_disabled_ones_are_left_out(self):
         selector = WorkerSelector(endpoints_for('view', [
-            'https://legacy.invalid/',
+            worker('one', 'https://one.invalid/'),
             worker('new', 'https://new.invalid/', weight=2),
             worker('off', 'https://off.invalid/', enabled=False),
         ]))
@@ -72,9 +72,14 @@ class WorkerSelectorConfigTest(TestCase):
             selector.select('view')
         available = choose.call_args.args[0]
         self.assertEqual([item.id for item in available].count('new'), 2)
-        self.assertEqual(sum(item.url == 'https://legacy.invalid/'
-                             for item in available), 1)
+        self.assertEqual([item.id for item in available].count('one'), 1)
         self.assertNotIn('off', {item.id for item in available})
+
+    def test_a_bare_url_string_is_rejected(self):
+        # the only accepted worker entry is a full object; a bare URL used to
+        # be accepted and silently invented an id, platform, weight and enabled
+        with self.assertRaises(WorkerConfigurationError):
+            WorkerSelector(endpoints_for('view', ['https://worker.invalid/']))
 
     def test_invalid_new_worker_fields_are_rejected(self):
         invalid = [
