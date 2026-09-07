@@ -1,3 +1,4 @@
+import inspect
 import json
 import logging
 from collections import Counter
@@ -135,14 +136,41 @@ class WorkerSelectorConfigTest(TestCase):
         with self.assertRaises(SystemExit):
             Service(mode='invalid', endpoints={})
 
-    def test_worker_configuration_is_validated_when_target_is_used(self):
-        service = Service(mode='worker', endpoints={
+    def test_worker_configuration_is_validated_at_construction(self):
+        endpoints = {
             'unused': {'workers': []},
             'view': {'workers': [worker('view-a', 'https://a.invalid/')]},
+        }
+        with self.assertRaises(SystemExit):
+            Service(mode='worker', endpoints=endpoints)
+
+    def test_direct_mode_does_not_validate_or_create_a_worker_selector(self):
+        endpoints = {
+            'view': {
+                'direct': 'https://direct.invalid/',
+                'workers': [{'not': 'a valid worker'}],
+            },
+        }
+        service = Service(mode='direct', endpoints=endpoints)
+        self.assertIsNone(service._worker_selector)
+        service._session = ScriptedSession({
+            'https://direct.invalid/': [response(200, {'code': 0})],
         })
-        self.assertEqual(service._worker_selector.select('view').id, 'view-a')
-        with self.assertRaises(ValueError):
-            service._worker_selector.select('unused')
+        self.assertEqual(service._get('view'), {'code': 0})
+
+    def test_request_methods_cannot_override_an_instances_mode(self):
+        methods = [Service._get, Service.get_video_view,
+                   Service.get_video_view_trimmed, Service.get_video_tags,
+                   Service.get_member_card, Service.get_member_relation,
+                   Service.get_newlist]
+        for method in methods:
+            self.assertNotIn('mode', inspect.signature(method).parameters)
+
+    def test_corrupted_private_mode_still_fails_explicitly(self):
+        service = Service(mode='direct', endpoints={})
+        service._mode = 'invalid'
+        with self.assertRaises(SystemExit):
+            service._get('view')
 
 
 class WorkerSelectorSelectionTest(TestCase):
@@ -177,9 +205,8 @@ class WorkerSelectorSelectionTest(TestCase):
                          {item.id for item in choose.call_args.args[0]})
 
     def test_empty_pool_is_reported(self):
-        selector = WorkerSelector({'view': {'workers': []}})
         with self.assertRaises(WorkerConfigurationError):
-            selector.select('view')
+            WorkerSelector({'view': {'workers': []}})
 
     def test_a_rate_limit_never_takes_a_worker_out_of_the_pool(self):
         # the selector is stateless: nothing a response says can shrink the
@@ -231,7 +258,7 @@ class ServiceWorkerRoutingTest(TestCase):
         ]})
 
         with mock.patch('service.Service.time.sleep'):
-            self.assertEqual(service._get('view', 'worker'), {'code': 0})
+            self.assertEqual(service._get('view'), {'code': 0})
 
         self.assertEqual(len(service._session.calls), 2)
 
@@ -242,7 +269,7 @@ class ServiceWorkerRoutingTest(TestCase):
 
         with mock.patch('service.Service.time.sleep'):
             with self.assertRaises(RateLimitError) as raised:
-                service._get('view', 'worker', retry=3)
+                service._get('view', retry=3)
 
         self.assertEqual(raised.exception.reason, 'http_412')
         self.assertEqual(len(service._session.calls), 3)
@@ -261,7 +288,7 @@ class ServiceWorkerRoutingTest(TestCase):
 
         with mock.patch('service.Service.time.sleep'):
             with self.assertRaises(ResponseError) as raised:
-                service._get('view', 'worker', retry=3)
+                service._get('view', retry=3)
 
         self.assertEqual(raised.exception.reason, 'http_412')
         self.assertEqual(raised.exception.trials, 3)
@@ -279,7 +306,7 @@ class ServiceWorkerRoutingTest(TestCase):
                 mock.patch('service.worker.random.choice',
                            side_effect=lambda items: items[0]) as choose:
             with self.assertRaises(RateLimitError):
-                service._get('view', 'worker', retry=3)
+                service._get('view', retry=3)
 
         # nothing a response says takes a worker out of the candidate set
         self.assertEqual({item.id for item in choose.call_args.args[0]},
@@ -294,7 +321,7 @@ class ServiceWorkerRoutingTest(TestCase):
 
         with mock.patch('service.Service.time.sleep'):
             with self.assertRaises(RateLimitError) as raised:
-                service._get('get_member_card', 'worker', retry=3)
+                service._get('get_member_card', retry=3)
 
         self.assertEqual(raised.exception.reason, 'code_-352')
 
@@ -307,7 +334,7 @@ class ServiceWorkerRoutingTest(TestCase):
         ]})
 
         with mock.patch('service.Service.time.sleep'):
-            self.assertEqual(service._get('get_member_card', 'worker'),
+            self.assertEqual(service._get('get_member_card'),
                              {'code': 0})
 
     @mock.patch('service.worker.random.choice', side_effect=lambda items: items[0])
@@ -322,7 +349,7 @@ class ServiceWorkerRoutingTest(TestCase):
         })
 
         with mock.patch('service.Service.time.sleep') as sleep:
-            result = service._get('get_member_card', 'worker')
+            result = service._get('get_member_card')
 
         self.assertEqual(result, {'code': 0})
         self.assertNotIn(mock.call(60), sleep.mock_calls)
@@ -336,7 +363,7 @@ class ServiceWorkerRoutingTest(TestCase):
         ]})
 
         with mock.patch('service.Service.time.sleep'):
-            result = service._get('get_member_card', 'worker')
+            result = service._get('get_member_card')
 
         self.assertEqual(result, {'code': 0})
         self.assertEqual(service._session.calls,
@@ -374,7 +401,7 @@ class ServiceWorkerRoutingTest(TestCase):
         ]})
 
         with mock.patch('service.Service.time.sleep'):
-            result = service._get('view', 'worker')
+            result = service._get('view')
 
         self.assertEqual(result, {'code': 0})
         self.assertEqual(service._session.calls,
@@ -389,7 +416,7 @@ class ServiceWorkerRoutingTest(TestCase):
 
         with mock.patch('service.Service.time.sleep'):
             with self.assertRaises(ResponseError) as raised:
-                service._get('view', 'worker', retry=3)
+                service._get('view', retry=3)
 
         self.assertEqual(raised.exception.reason, 'http_503')
         self.assertEqual(raised.exception.trials, 3)
@@ -405,7 +432,7 @@ class ServiceWorkerRoutingTest(TestCase):
 
         with mock.patch('service.Service.time.sleep'):
             with self.assertRaises(ResponseError) as raised:
-                service._get('view', 'worker', retry=2)
+                service._get('view', retry=2)
 
         self.assertEqual(raised.exception.reason, 'json_error')
 
@@ -414,9 +441,8 @@ class ServiceWorkerRoutingTest(TestCase):
         service._session = ScriptedSession({
             'https://direct.invalid/': [response(412, b'blocked')] * 2,
         })
-        with mock.patch('service.Service.time.sleep'), \
-                mock.patch.object(service._worker_selector, 'select') as select:
+        with mock.patch('service.Service.time.sleep'):
             with self.assertRaises(RateLimitError) as raised:
-                service._get('view', 'direct', retry=2)
+                service._get('view', retry=2)
         self.assertEqual(raised.exception.reason, 'http_412')
-        select.assert_not_called()
+        self.assertIsNone(service._worker_selector)

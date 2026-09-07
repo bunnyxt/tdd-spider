@@ -25,7 +25,7 @@ class ApiDebugLineTest(TestCase):
 
         with mock.patch('service.Service.time.sleep'), \
                 self.assertLogs('Service', level=logging.DEBUG) as logs:
-            service._get('view', 'worker')
+            service._get('view')
 
         api_lines = [line for line in logs.output if 'API target: ' in line]
         self.assertEqual(len(api_lines), 2)
@@ -42,7 +42,7 @@ class ApiDebugLineTest(TestCase):
         with mock.patch('service.Service.time.sleep'), \
                 self.assertLogs('Service', level=logging.DEBUG) as logs:
             with self.assertRaises(RateLimitError):
-                service._get('view', 'worker', retry=3)
+                service._get('view', retry=3)
 
         api_lines = [line for line in logs.output if 'API target: ' in line]
         self.assertEqual(len(api_lines), 3)
@@ -57,7 +57,7 @@ class ApiDebugLineTest(TestCase):
         with mock.patch('service.Service.time.sleep'), \
                 self.assertLogs('Service', level=logging.DEBUG) as logs:
             with self.assertRaises(RateLimitError):
-                service._get('get_member_card', 'worker', retry=1)
+                service._get('get_member_card', retry=1)
 
         api_lines = [line for line in logs.output if 'API target: ' in line]
         self.assertEqual(len(api_lines), 1)
@@ -71,7 +71,7 @@ class ApiDebugLineTest(TestCase):
             {'https://direct.invalid/': [response(200, {'code': 0})]})
 
         with self.assertLogs('Service', level=logging.DEBUG) as logs:
-            service._get('view', 'direct')
+            service._get('view')
 
         api_lines = [line for line in logs.output if 'API target: ' in line]
         self.assertEqual(len(api_lines), 1)

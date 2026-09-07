@@ -122,20 +122,22 @@ class Service:
                     self.endpoints = json.load(f)
             except FileNotFoundError:
                 logger.critical("The file 'endpoints.json' was not found.")
-                exit(1)
+                raise SystemExit(1)
             except json.JSONDecodeError:
                 logger.critical('Invalid JSON format in endpoints.json.')
-                exit(1)
+                raise SystemExit(1)
             except Exception as e:
                 logger.critical(
                     f'An unexpected error occurred when load and parse endpoints.json file. {e}')
-                exit(1)
+                raise SystemExit(1)
 
-        try:
-            self._worker_selector = WorkerSelector(self.endpoints)
-        except WorkerConfigurationError as e:
-            logger.critical(f'Invalid worker configuration: {e}')
-            raise SystemExit(1)
+        self._worker_selector = None
+        if self._mode == 'worker':
+            try:
+                self._worker_selector = WorkerSelector(self.endpoints)
+            except WorkerConfigurationError as e:
+                logger.critical(f'Invalid worker configuration: {e}')
+                raise SystemExit(1)
 
         # define User Agent list
         self._ua_list = [
@@ -201,7 +203,7 @@ class Service:
     # default config getters end
 
     def _get(
-            self, target: str, mode: RequestMode,
+            self, target: str,
             params: Optional[dict] = None, headers: Optional[dict] = None,
             retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
             deadline: Optional[float] = None,
@@ -226,16 +228,16 @@ class Service:
         deadline = deadline if deadline is not None else self._deadline
         rate_limit_checker = RATE_LIMIT_CHECKERS.get(target, default_rate_limit)
 
-        if mode == 'direct':
+        if self._mode == 'direct':
             try:
                 direct_url = self.endpoints[target]['direct']
             except KeyError:
                 logger.critical(f'Endpoint "{target}" not found.')
                 raise SystemExit(1)
-        elif mode == 'worker':
+        elif self._mode == 'worker':
             direct_url = None
         else:
-            logger.critical(f'Invalid request mode: {mode}.')
+            logger.critical(f'Invalid request mode: {self._mode}.')
             raise SystemExit(1)
 
         # go request
@@ -254,7 +256,7 @@ class Service:
         for trial in range(1, retry + 1):
             selected_worker = None
             request_url = direct_url
-            if mode == 'worker':
+            if self._mode == 'worker':
                 try:
                     selected_worker = self._worker_selector.select(target)
                 except WorkerConfigurationError as e:
@@ -398,23 +400,14 @@ class Service:
 
     def get_video_view(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,
-            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
-            mode: Optional[RequestMode] = None
+            retry: Optional[int] = None, timeout: Optional[float] = None,
+            colddown_factor: Optional[float] = None
     ) -> VideoView:
         """
         params: { aid: int }
-        mode: 'direct' | 'worker'
         """
-        # config mode
-        mode = mode if mode is not None else self._mode
-
-        # validate params
-        if mode not in ['direct', 'worker']:
-            logger.critical(f'Invalid request mode: {mode}.')
-            exit(1)
-
         # get response
-        response = self._get('get_video_view', mode, params=params, headers=headers,
+        response = self._get('get_video_view', params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor)
 
         # validate format
@@ -524,13 +517,11 @@ class Service:
 
     def get_video_view_trimmed(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,
-            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
-            mode: Optional[RequestMode] = None
+            retry: Optional[int] = None, timeout: Optional[float] = None,
+            colddown_factor: Optional[float] = None
     ) -> VideoViewTrimmed:
         """
         params: { aid: int }
-        mode: 'worker' only
-
         Stat-only variant of get_video_view for record jobs: hits the trimmed
         video_view worker (service/workers/video_view/), whose ~250B response
         avoids shipping the 200KB-2.8MB season/UGC bloat of the full view
@@ -541,18 +532,14 @@ class Service:
         worker URL a valid drop-in workers entry before the trimmed Lambda is
         deployed.
         """
-        # config mode
-        mode = mode if mode is not None else self._mode
-
-        # validate params
-        if mode != 'worker':
+        if self._mode != 'worker':
             logger.critical(f'Endpoint "get_video_view_trimmed" is worker-only '
-                            f'(no direct API serves the trimmed contract), got mode: {mode}. '
+                            f'(no direct API serves the trimmed contract), got mode: {self._mode}. '
                             f'Use get_video_view for direct mode.')
-            exit(1)
+            raise SystemExit(1)
 
         # get response
-        response = self._get('get_video_view_trimmed', 'worker', params=params, headers=headers,
+        response = self._get('get_video_view_trimmed', params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor)
 
         # validate format
@@ -609,21 +596,12 @@ class Service:
 
     def get_video_tags(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,
-            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
-            mode: Optional[RequestMode] = None
+            retry: Optional[int] = None, timeout: Optional[float] = None,
+            colddown_factor: Optional[float] = None
     ) -> VideoTags:
         """
         params: { aid: int }
-        mode: 'direct' | 'worker'
         """
-        # config mode
-        mode = mode if mode is not None else self._mode
-
-        # validate params
-        if mode not in ['direct', 'worker']:
-            logger.critical(f'Invalid request mode: {mode}.')
-            exit(1)
-
         # define parser
         def parser(text: str) -> Optional[dict]:
             logger.debug(
@@ -642,7 +620,7 @@ class Service:
             return parsed_response
 
         # get response
-        response = self._get('get_video_tags', mode, params=params, headers=headers,
+        response = self._get('get_video_tags', params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor,
                              parser=parser)
 
@@ -683,23 +661,14 @@ class Service:
 
     def get_member_card(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,
-            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
-            mode: Optional[RequestMode] = None
+            retry: Optional[int] = None, timeout: Optional[float] = None,
+            colddown_factor: Optional[float] = None
     ) -> MemberCard:
         """
         params: { mid: int }
-        mode: 'direct' | 'worker'
         """
-        # config mode
-        mode = mode if mode is not None else self._mode
-
-        # validate params
-        if mode not in ['direct', 'worker']:
-            logger.critical(f'Invalid request mode: {mode}.')
-            exit(1)
-
         # get response
-        response = self._get('get_member_card', mode, params=params, headers=headers,
+        response = self._get('get_member_card', params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor)
 
         # validate format
@@ -742,23 +711,14 @@ class Service:
 
     def get_member_relation(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,
-            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
-            mode: Optional[RequestMode] = None
+            retry: Optional[int] = None, timeout: Optional[float] = None,
+            colddown_factor: Optional[float] = None
     ) -> MemberRelation:
         """
         params: { vmid: int }
-        mode: 'direct' | 'worker'
         """
-        # config mode
-        mode = mode if mode is not None else self._mode
-
-        # validate params
-        if mode not in ['direct', 'worker']:
-            logger.critical(f'Invalid request mode: {mode}.')
-            exit(1)
-
         # get response
-        response = self._get('get_member_relation', mode, params=params, headers=headers,
+        response = self._get('get_member_relation', params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor)
 
         # validate format
@@ -791,21 +751,12 @@ class Service:
 
     def get_newlist(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,
-            retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
-            mode: Optional[RequestMode] = None
+            retry: Optional[int] = None, timeout: Optional[float] = None,
+            colddown_factor: Optional[float] = None
     ) -> Newlist:
         """
         params: { rid: int, pn: int, ps: int }
-        mode: 'direct' | 'worker'
         """
-        # config mode
-        mode = mode if mode is not None else self._mode
-
-        # validate params
-        if mode not in ['direct', 'worker']:
-            logger.critical(f'Invalid request mode: {mode}.')
-            exit(1)
-
         # get endpoint url
         # define parser
         def parser(text: str) -> Optional[dict]:
@@ -824,7 +775,7 @@ class Service:
             return parsed_response
 
         # get response
-        response = self._get('get_newlist', mode, params=params, headers=headers,
+        response = self._get('get_newlist', params=params, headers=headers,
                              retry=retry, timeout=timeout, colddown_factor=colddown_factor,
                              parser=parser)
 

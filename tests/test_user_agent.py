@@ -38,27 +38,27 @@ class UserAgentTest(TestCase):
         # so a process picked one at startup and sent it for its whole run
         service = self.make_service()
         for _ in range(40):
-            service._get('view', 'worker')
+            service._get('view')
 
         self.assertEqual(len(service._session.sent_agents), 40)
         self.assertGreater(len(set(service._session.sent_agents)), 1)
 
     def test_default_headers_are_not_mutated_by_a_request(self):
         service = self.make_service()
-        service._get('view', 'worker')
+        service._get('view')
         self.assertEqual(service._headers, {})
         self.assertEqual(service.get_default_headers(), {})
 
     def test_configured_headers_survive_and_are_not_mutated(self):
         service = self.make_service(headers={'Referer': 'https://ref.invalid/'})
-        service._get('view', 'worker')
-        service._get('view', 'worker')
+        service._get('view')
+        service._get('view')
         self.assertEqual(service._headers, {'Referer': 'https://ref.invalid/'})
 
     def test_an_explicit_agent_is_left_alone(self):
         service = self.make_service()
         for _ in range(5):
-            service._get('view', 'worker', headers={'User-Agent': 'mine/1.0'})
+            service._get('view', headers={'User-Agent': 'mine/1.0'})
         self.assertEqual(set(service._session.sent_agents), {'mine/1.0'})
 
     def test_the_symbian_agent_is_not_offered(self):

@@ -51,7 +51,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
     def test_success_on_first_trial_is_recorded_ok(self):
         service = self.make_service('view', [worker('w1', 'https://w1.invalid/')],
                                     {'https://w1.invalid/': [response(200, {'code': 0})]})
-        service._get('view', 'worker')
+        service._get('view')
         self.assertEqual(totals_dict(service.stats),
                          {('api:view:w1', 't1:ok'): 1.0})
 
@@ -59,7 +59,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
         service = self.make_service('view', [worker('w1', 'https://w1.invalid/')], {
             'https://w1.invalid/': [response(412, b'blocked'), response(200, {'code': 0})]})
         with mock.patch('service.Service.time.sleep'):
-            service._get('view', 'worker')
+            service._get('view')
         self.assertEqual(totals_dict(service.stats), {
             ('api:view:w1', 't1:http_412'): 1.0,
             ('api:view:w1', 't2:ok'): 1.0,
@@ -70,7 +70,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
             'https://w1.invalid/': [response(412, b'blocked')] * 3})
         with mock.patch('service.Service.time.sleep'):
             with self.assertRaises(RateLimitError):
-                service._get('view', 'worker', retry=3)
+                service._get('view', retry=3)
         self.assertEqual(totals_dict(service.stats), {
             ('api:view:w1', 't1:http_412'): 1.0,
             ('api:view:w1', 't2:http_412'): 1.0,
@@ -82,7 +82,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
                                     {'https://c1.invalid/': [response(200, {'code': -352})]})
         with mock.patch('service.Service.time.sleep'):
             with self.assertRaises(RateLimitError):
-                service._get('get_member_card', 'worker', retry=1)
+                service._get('get_member_card', retry=1)
         self.assertEqual(totals_dict(service.stats),
                          {('api:get_member_card:c1', 't1:code_-352'): 1.0})
 
@@ -91,7 +91,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
                                     {'https://w1.invalid/': [response(500, b'oops')]})
         with mock.patch('service.Service.time.sleep'):
             with self.assertRaises(ResponseError):
-                service._get('view', 'worker', retry=1)
+                service._get('view', retry=1)
         self.assertEqual(totals_dict(service.stats),
                          {('api:view:w1', 't1:http_500'): 1.0})
 
@@ -100,7 +100,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
                                     {'https://w1.invalid/': [response(200, b'not json')]})
         with mock.patch('service.Service.time.sleep'):
             with self.assertRaises(ResponseError):
-                service._get('view', 'worker', retry=1)
+                service._get('view', retry=1)
         self.assertEqual(totals_dict(service.stats),
                          {('api:view:w1', 't1:json_error'): 1.0})
 
@@ -114,7 +114,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
         service._session = RaisingSession()
         with mock.patch('service.Service.time.sleep'):
             with self.assertRaises(ResponseError):
-                service._get('view', 'worker', retry=1)
+                service._get('view', retry=1)
         self.assertEqual(totals_dict(service.stats),
                          {('api:view:w1', 't1:request_exception'): 1.0})
 
@@ -124,7 +124,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
                                          [raising_response(requests.exceptions.ChunkedEncodingError())]})
         with mock.patch('service.Service.time.sleep'):
             with self.assertRaises(ResponseError):
-                service._get('view', 'worker', retry=1)
+                service._get('view', retry=1)
         self.assertEqual(totals_dict(service.stats),
                          {('api:view:w1', 't1:body_exception'): 1.0})
 
@@ -138,7 +138,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
                 mock.patch('service.Service.time.perf_counter',
                            side_effect=[0.0, 100.0, 100.0]):
             with self.assertRaises(ResponseError):
-                service._get('view', 'worker', retry=1)
+                service._get('view', retry=1)
         self.assertEqual(totals_dict(service.stats),
                          {('api:view:w1', 't1:deadline_exceeded'): 1.0})
 
@@ -147,7 +147,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
                           endpoints=endpoints_for('view', [worker('a', 'https://a.invalid/')]))
         service._session = ScriptedSession(
             {'https://direct.invalid/': [response(200, {'code': 0})]})
-        service._get('view', 'direct')
+        service._get('view')
         self.assertEqual(totals_dict(service.stats),
                          {('api:view:direct', 't1:ok'): 1.0})
 
@@ -157,7 +157,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
                                     {'https://w1.invalid/': [response(200, {'code': 0})]},
                                     stats=False)
         self.assertIsInstance(service.stats, NullApiStatTracker)
-        service._get('view', 'worker')
+        service._get('view')
         self.assertEqual(service.stats.totals(), [])
         service.stats.log_summary()
 
@@ -167,7 +167,7 @@ class ServiceApiStatWiringTest(unittest.TestCase):
                                     {'https://w1.invalid/': [response(200, {'code': 0})]},
                                     stats=shared)
         self.assertIs(service.stats, shared)
-        service._get('view', 'worker')
+        service._get('view')
         self.assertEqual(totals_dict(shared), {('api:view:w1', 't1:ok'): 1.0})
 
     def test_default_service_creates_its_own_tracker(self):

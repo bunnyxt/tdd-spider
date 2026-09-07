@@ -46,7 +46,11 @@ class WorkerSelector:
             if len(worker_ids) != len(set(worker_ids)):
                 raise WorkerConfigurationError(
                     f'Duplicate worker id for {target!r}.')
-            self._workers[target] = self._weighted(workers)
+            weighted = self._weighted(workers)
+            if not weighted:
+                raise WorkerConfigurationError(
+                    f'Endpoint {target!r} has no enabled worker configured.')
+            self._workers[target] = weighted
 
     @staticmethod
     def _parse_worker(target: str, index: int, raw) -> WorkerEndpoint:
