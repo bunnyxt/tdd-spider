@@ -122,14 +122,14 @@ class Service:
                     self.endpoints = json.load(f)
             except FileNotFoundError:
                 logger.critical("The file 'endpoints.json' was not found.")
-                exit(1)
+                raise SystemExit(1)
             except json.JSONDecodeError:
                 logger.critical('Invalid JSON format in endpoints.json.')
-                exit(1)
+                raise SystemExit(1)
             except Exception as e:
                 logger.critical(
                     f'An unexpected error occurred when load and parse endpoints.json file. {e}')
-                exit(1)
+                raise SystemExit(1)
 
         self._worker_selector = None
         if self._mode == 'worker':
@@ -536,7 +536,7 @@ class Service:
             logger.critical(f'Endpoint "get_video_view_trimmed" is worker-only '
                             f'(no direct API serves the trimmed contract), got mode: {self._mode}. '
                             f'Use get_video_view for direct mode.')
-            exit(1)
+            raise SystemExit(1)
 
         # get response
         response = self._get('get_video_view_trimmed', params=params, headers=headers,
