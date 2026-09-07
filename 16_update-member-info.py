@@ -46,13 +46,13 @@ def update_member_info():
     # Shared Service state keeps rate-limited member-card workers out of the
     # candidate pool. If every worker is limited, each job records that condition
     # and briefly slows down before moving to the next member.
-    # 2, not 50. Each job thread sustains ~1.8 req/s, and the member-card
-    # limit is on request rate: measured at roughly 24-30 req/s, against the
-    # 33-37 req/s that 20 threads were producing. Two threads is ~3.6 req/s,
-    # about a seventh of the threshold, and finishes the day's ~25k members in
-    # two hours -- there is no reason for this job to be fast, and the headroom
-    # belongs to the jobs that add videos.
-    job_num = 2
+    # Concurrency is what sets the request rate here -- a member takes about
+    # 0.7s, so the rate is roughly job_num / 0.7 -- and the member-card
+    # endpoint limits on rate. This is deliberately kept well inside what it
+    # sustains. Raise it only together with a run whose api stat summary shows
+    # the rejection rate staying flat; a rate that survives a short burst is
+    # not necessarily one that survives the whole job.
+    job_num = 20
     for _ in range(job_num):
         mid_queue.put(None)
     logger.info(f'{len(mids)} mids put into queue.')
