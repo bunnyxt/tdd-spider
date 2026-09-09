@@ -81,11 +81,13 @@ def update_video_info():
         # run-record metrics, keyed by the same label the summary log uses
         # (best-effort; a disabled recorder is a no-op)
         recorder.add_job_stat_metrics('video-update', job_stat_merged)
+        recorder.add_api_stat_metrics(service.stats)
 
         # summary
         logger.info(f'Finish {script_fullname}!')
         logger.info(timer.get_summary())
         logger.info(job_stat_merged.get_summary('video-update'))
+        service.stats.log_summary(logger)
         sc_send_summary(script_fullname, timer, job_stat_merged)
 
 

@@ -3,6 +3,7 @@ from util import logging_init, get_week_day, fullname
 from queue import Queue
 from service import Service
 from serverchan import sc_send_summary
+from runrecord import track
 from timer import Timer
 from job import UpdateMemberJob, JobPool
 import logging
@@ -18,67 +19,73 @@ def update_member_info():
     timer = Timer()
     timer.start()
 
-    session = Session()
-    service = Service(mode='worker')
+    with track(script_fullname) as recorder:
+        session = Session()
+        service = Service(mode='worker')
 
-    # get all mids
-    all_mids: list[int] = DBOperation.query_all_member_mids(session)
-    logger.info(f'Total {len(all_mids)} members got.')
+        # get all mids
+        all_mids: list[int] = DBOperation.query_all_member_mids(session)
+        logger.info(f'Total {len(all_mids)} members got.')
 
-    # add latest 1000 mids first
-    mids = all_mids[-1000:]
+        # add latest 1000 mids first
+        mids = all_mids[-1000:]
 
-    # TODO: add top 200 follower mids
+        # TODO: add top 200 follower mids
 
-    # for the rest, add 1 / 7 of them, according to the week day (0-6)
-    week_day = get_week_day()
-    for idx, mid in enumerate(all_mids[:-1000]):
-        if idx % 7 == week_day:
-            mids.append(mid)
+        # for the rest, add 1 / 7 of them, according to the week day (0-6)
+        week_day = get_week_day()
+        for idx, mid in enumerate(all_mids[:-1000]):
+            if idx % 7 == week_day:
+                mids.append(mid)
 
-    logger.info(f'Will update {len(mids)} members info.')
+        logger.info(f'Will update {len(mids)} members info.')
 
-    # put mid into queue
-    mid_queue: Queue[int] = Queue()
-    for mid in mids:
-        mid_queue.put(mid)
-    # one sentinel per worker (UpdateMemberJob is sentinel-terminated)
-    # Shared Service state keeps rate-limited member-card workers out of the
-    # candidate pool. If every worker is limited, each job records that condition
-    # and briefly slows down before moving to the next member.
-    # Concurrency is what sets the request rate here -- a member takes about
-    # 0.7s, so the rate is roughly job_num / 0.7 -- and the member-card
-    # endpoint limits on rate. This is deliberately kept well inside what it
-    # sustains. Raise it only together with a run whose api stat summary shows
-    # the rejection rate staying flat; a rate that survives a short burst is
-    # not necessarily one that survives the whole job.
-    job_num = 10
-    for _ in range(job_num):
-        mid_queue.put(None)
-    logger.info(f'{len(mids)} mids put into queue.')
+        # put mid into queue
+        mid_queue: Queue[int] = Queue()
+        for mid in mids:
+            mid_queue.put(mid)
+        # one sentinel per worker (UpdateMemberJob is sentinel-terminated)
+        # Shared Service state keeps rate-limited member-card workers out of the
+        # candidate pool. If every worker is limited, each job records that condition
+        # and briefly slows down before moving to the next member.
+        # Concurrency is what sets the request rate here -- a member takes about
+        # 0.7s, so the rate is roughly job_num / 0.7 -- and the member-card
+        # endpoint limits on rate. This is deliberately kept well inside what it
+        # sustains. Raise it only together with a run whose api stat summary shows
+        # the rejection rate staying flat; a rate that survives a short burst is
+        # not necessarily one that survives the whole job.
+        job_num = 10
+        for _ in range(job_num):
+            mid_queue.put(None)
+        logger.info(f'{len(mids)} mids put into queue.')
 
-    # JobPool gives a per-30s PROGRESS heartbeat over the multi-hour run
-    # (previously blind) and merges the workers' stats.
-    pool = JobPool(
-        [UpdateMemberJob(f'job_{i}', mid_queue, service) for i in range(job_num)],
-        progress_total=len(mids),
-        progress_label='member-update',
-        progress_interval_s=30.0,  # very slow job (~25s/member) -- 30s is plenty
-        logger_name=script_id)
-    pool.start()
-    logger.info(f'{job_num} job(s) started.')
-    job_stat_merged = pool.join()
+        # JobPool gives a per-30s PROGRESS heartbeat over the multi-hour run
+        # (previously blind) and merges the workers' stats.
+        pool = JobPool(
+            [UpdateMemberJob(f'job_{i}', mid_queue, service) for i in range(job_num)],
+            progress_total=len(mids),
+            progress_label='member-update',
+            progress_interval_s=30.0,  # very slow job (~25s/member) -- 30s is plenty
+            logger_name=script_id)
+        pool.start()
+        logger.info(f'{job_num} job(s) started.')
+        job_stat_merged = pool.join()
 
-    session.close()
+        session.close()
 
-    timer.stop()
+        timer.stop()
 
-    # summary
-    logger.info(f'Finish {script_fullname}!')
-    logger.info(timer.get_summary())
-    logger.info(job_stat_merged.get_summary('member-update'))
-    service.stats.log_summary(logger)
-    sc_send_summary(script_fullname, timer, job_stat_merged)
+        # run-record metrics, keyed by the same label the summary log uses
+        # (best-effort; a disabled recorder is a no-op)
+        recorder.add_job_stat_metrics('member-update', job_stat_merged)
+        recorder.add_api_stat_metrics(service.stats)
+
+        # summary
+        logger.info(f'Finish {script_fullname}!')
+        logger.info(timer.get_summary())
+        logger.info(job_stat_merged.get_summary('member-update'))
+        service.stats.log_summary(logger)
+        sc_send_summary(script_fullname, timer, job_stat_merged)
 
 
 def main():

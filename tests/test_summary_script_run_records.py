@@ -1,7 +1,7 @@
 """
-Per-entry-point verification that the five ``sc_send_summary`` production
-scripts (12_/15_/17_/62_/71_) now open, populate and close a run record without
-changing their Timer / JobStat summary or ServerChan behaviour.
+Per-entry-point verification that the six ``sc_send_summary`` production
+scripts (12_/15_/16_/17_/62_/71_) now open, populate and close a run record
+without changing their Timer / JobStat summary or ServerChan behaviour.
 
 Each script is imported by file path; its collaborators (Service, Session, the
 Job classes / JobPool, ``requests``) are replaced with inert fakes and its
@@ -96,6 +96,27 @@ from service.apistat import NullApiStatTracker  # noqa: E402
 class _FakeService:
     def __init__(self, *a, **kw):
         self.stats = NullApiStatTracker()
+
+
+class _FakeApiStats:
+    def __init__(self):
+        self.log_calls = []
+
+    def totals(self):
+        return [
+            {'scope': 'api:test_target:test_worker', 'name': 't1:ok',
+             'value': 90.0},
+            {'scope': 'api:test_target:test_worker', 'name': 't1:http_412',
+             'value': 10.0},
+        ]
+
+    def log_summary(self, log=None):
+        self.log_calls.append(log)
+
+
+class _FakeServiceWithApiStats:
+    def __init__(self, *a, **kw):
+        self.stats = _FakeApiStats()
 
 
 class _FakeSession:
@@ -208,8 +229,9 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
     def test_15_update_video_info(self):
         m = _load('15_update-video-info.py')
         merged = _stat(120, **{'0_update': 118, 'update_exception': 2})
+        service = _FakeServiceWithApiStats()
 
-        with mock.patch.object(m, 'Service', _FakeService), \
+        with mock.patch.object(m, 'Service', return_value=service), \
              mock.patch.object(m, 'Session', _FakeSession), \
              mock.patch.object(m.DBOperation, 'query_all_video_bvids',
                                staticmethod(lambda s: [])), \
@@ -224,11 +246,61 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         metrics = self._metrics(run_id)
         self.assertEqual(metrics['video-update']['total_count'], 120.0)
         self.assertEqual(metrics['video-update']['update_exception'], 2.0)
+        self.assertEqual(metrics['api:test_target:test_worker']['t1:ok'], 90.0)
+        self.assertEqual(
+            metrics['api:test_target:test_worker']['t1:http_412'], 10.0)
+        self.assertEqual(service.stats.log_calls, [m.logger])
         # 15_ sends unconditionally; same (name, timer, merged stat) as before
         sc.assert_called_once()
         args = sc.call_args.args
         self.assertEqual(args[0], '15_update-video-info')
         self.assertIs(args[2], merged)
+
+    # ----------------------------------------------------------------- 16_ ---
+    def test_16_update_member_info(self):
+        m = _load('16_update-member-info.py')
+        merged = _stat(100, **{'0_update': 98, 'update_exception': 2})
+        service = _FakeServiceWithApiStats()
+
+        with mock.patch.object(m, 'Service', return_value=service), \
+             mock.patch.object(m, 'Session', _FakeSession), \
+             mock.patch.object(m.DBOperation, 'query_all_member_mids',
+                               staticmethod(lambda s: [])), \
+             mock.patch.object(m, 'JobPool', lambda *a, **kw: _FakePool(merged)), \
+             mock.patch.object(m, 'sc_send_summary') as sc:
+            m.update_member_info()
+
+        (run_id, script_name, status, finished_at), = self._runs()
+        self.assertEqual(script_name, '16_update-member-info')
+        self.assertEqual(status, 'succeeded')
+        self.assertTrue(finished_at)
+        metrics = self._metrics(run_id)
+        self.assertEqual(metrics['member-update']['total_count'], 100.0)
+        self.assertEqual(metrics['member-update']['update_exception'], 2.0)
+        self.assertEqual(metrics['api:test_target:test_worker']['t1:ok'], 90.0)
+        self.assertEqual(
+            metrics['api:test_target:test_worker']['t1:http_412'], 10.0)
+        self.assertEqual(service.stats.log_calls, [m.logger])
+        sc.assert_called_once()
+        args = sc.call_args.args
+        self.assertEqual(args[0], '16_update-member-info')
+        self.assertIs(args[2], merged)
+
+    def test_16_failure_is_recorded(self):
+        m = _load('16_update-member-info.py')
+
+        with mock.patch.object(m, 'Service', _FakeService), \
+             mock.patch.object(m, 'Session', _FakeSession), \
+             mock.patch.object(m.DBOperation, 'query_all_member_mids',
+                               side_effect=RuntimeError('boom')), \
+             mock.patch.object(m, 'sc_send_summary'):
+            with self.assertRaises(RuntimeError):
+                m.update_member_info()
+
+        (_, script_name, status, finished_at), = self._runs()
+        self.assertEqual(script_name, '16_update-member-info')
+        self.assertEqual(status, 'failed')
+        self.assertTrue(finished_at)
 
     # ----------------------------------------------------------------- 17_ ---
     def test_17_add_member_follower_record(self):
