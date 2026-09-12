@@ -12,10 +12,10 @@ from .error import (ResponseError, RateLimitError,
 from .worker import WorkerConfigurationError, WorkerSelector
 from .apistat import ApiStatTracker, NullApiStatTracker
 from .ua import UA_LIST
-from .endpoints import get_member_card, get_member_relation
+from .endpoints import get_member_card, get_member_relation, get_video_tags
 from .response import \
     VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, VideoViewTrimmed, \
-    VideoTag, VideoTags, \
+    VideoTags, \
     MemberCard, \
     MemberRelation, \
     NewlistPage, NewlistArchiveStat, NewlistArchiveOwner, NewlistArchive, Newlist
@@ -563,65 +563,9 @@ class Service:
             retry: Optional[int] = None, timeout: Optional[float] = None,
             colddown_factor: Optional[float] = None
     ) -> VideoTags:
-        """
-        params: { aid: int }
-        """
-        # define parser
-        def parser(text: str) -> Optional[dict]:
-            logger.debug(
-                f'Try to parse video tags response text. text: {text}.')
-            parsed_response = None
-            try:
-                parsed_response = json.loads(text)
-            except json.JSONDecodeError:
-                logger.debug(f'Fail to decode text to json. Return None.')
-            if parsed_response is not None:
-                code = parsed_response['code']
-                if code in [-500, -504]:
-                    logger.debug(
-                        f'Status code {code} found. Server timeout occurred, return None for retry.')
-                    parsed_response = None
-            return parsed_response
-
-        # get response
-        response = self._get('get_video_tags', params=params, headers=headers,
-                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
-                             parser=parser)
-
-        # validate format
-
-        # response should contain keys
-        for key in ['code', 'message', 'ttl']:
-            if key not in response.keys():
-                raise FormatError('get_video_tags', VideoTags, params, response,
-                                  f'Response should contain key {key}.')
-        # response code should be 0
-        if response['code'] != 0:
-            raise CodeError('get_video_tags', VideoTags, params, response, response['code'])
-        # response data should be a list
-        if type(response['data']) != list:
-            raise FormatError('get_video_tags', VideoTags, params, response,
-                              'Response data should be a list.')
-        # for each data item
-        for data_item in response['data']:
-            # data item should be a dict
-            if type(data_item) != dict:
-                raise FormatError('get_video_tags', VideoTags, params, response,
-                                  'Response data item should be a dict.')
-            # data item should contain keys
-            for key in ['tag_id', 'tag_name']:
-                if key not in data_item.keys():
-                    raise FormatError('get_video_tags', VideoTags, params, response,
-                                      f'Response data item should contain key {key}.')
-
-        # assemble data
-        videoTags = VideoTags(tags=[])
-        for data_item in response['data']:
-            videoTags.tags.append(VideoTag(
-                tag_id=data_item['tag_id'],
-                tag_name=data_item['tag_name']
-            ))
-        return videoTags
+        return get_video_tags.get(
+            self._get, params=params, headers=headers, retry=retry,
+            timeout=timeout, colddown_factor=colddown_factor)
 
     def get_member_card(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,
