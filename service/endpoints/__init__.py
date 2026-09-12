@@ -1,1 +1,1 @@
-from . import get_member_relation
+from . import get_member_card, get_member_relation
