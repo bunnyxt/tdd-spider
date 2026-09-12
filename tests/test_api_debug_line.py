@@ -25,14 +25,19 @@ class ApiDebugLineTest(TestCase):
 
         with mock.patch('service.Service.time.sleep'), \
                 self.assertLogs('Service', level=logging.DEBUG) as logs:
-            service._get('view')
+            service._get('view', params={'aid': 7},
+                         headers={'User-Agent': 'test-agent'})
 
         api_lines = [line for line in logs.output if 'API endpoint=' in line]
         self.assertEqual(len(api_lines), 2)
-        self.assertIn('endpoint=view worker=only trial=1 outcome=http_500 status=500',
+        self.assertIn("endpoint=view params={'aid': 7} url='https://only.invalid/' ",
                       api_lines[0])
-        self.assertIn('endpoint=view worker=only trial=2 outcome=ok status=200',
+        self.assertIn("user_agent='test-agent' worker=only trial=1 outcome=http_500 status=500",
+                      api_lines[0])
+        self.assertIn("response_body='upstream failed'", api_lines[0])
+        self.assertIn('worker=only trial=2 outcome=ok status=200',
                       api_lines[1])
+        self.assertIn("response_body='{" + '"code"' + ": 0}'", api_lines[1])
 
     def test_every_rate_limited_attempt_gets_its_own_line(self):
         service = self.make_service('view', [
