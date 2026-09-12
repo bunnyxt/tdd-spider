@@ -34,6 +34,16 @@ class RateLimit:
     reason: str
 
 
+@dataclass
+class FetchResponse:
+    response: Optional[requests.Response]
+    failure: Optional[str]
+    duration_ms: int
+    content_length: Optional[str] = None
+    deadline_s: Optional[float] = None
+    error: Optional[Exception] = None
+
+
 def default_rate_limit(response: requests.Response) -> Optional[RateLimit]:
     if response.status_code == 412:
         return RateLimit('http_412')
@@ -205,14 +215,6 @@ class Service:
         last_failure = None
         rate_limited_trials = 0
 
-        def note(outcome: str) -> None:
-            """Classify this attempt once: remember why it failed, and count
-            it. One call site per outcome so the two can never drift apart."""
-            nonlocal last_failure
-            if outcome != 'ok':
-                last_failure = outcome
-            self.stats.record(endpoint, worker_id, trial, outcome)
-
         for trial in range(1, retry + 1):
             if not ua_given_by_caller:
                 # redrawn every attempt; not guaranteed to differ from the last
@@ -234,132 +236,82 @@ class Service:
                 time.sleep((trial - 1) * (random.random()
                            * 0.5 + 0.75) * colddown_factor)
 
-            # try to get response
-            trial_start = time.perf_counter()
-            try:
-                r = self._session.get(request_url, params=params, headers=headers,
-                                      timeout=timeout, stream=True)
-            except requests.exceptions.RequestException as e:
-                note('request_exception')
-                logger.debug(
-                    f'Fail to get response. '
-                    f'url: {request_url}, params: {params}, trial: {trial}, error: {e}'
-                )
-                continue
-
-            # `timeout` above only bounds the gap between individual socket
-            # reads. A response that trickles bytes slower than that gap but
-            # never actually stalls sails right through it -- observed in
-            # production as 100+ second single-trial requests against the
-            # worker Lambda, each one parking a fetch thread the whole time.
-            # Enforce a real wall-clock budget across the whole download and
-            # abandon (close) the connection the moment it's blown, so the
-            # thread is freed instead of stuck waiting on a slow socket.
-            #
-            # A flat budget isn't enough though: some responses (season /
-            # multi-part videos) run 200KB-2.8MB against a typical few-KB
-            # payload, and legitimately need more wall-clock time under
-            # concurrent load. Scale the budget by the declared response size
-            # so those aren't killed mid-transfer.
-            trial_deadline = deadline
-            content_length = r.headers.get('Content-Length')
-            if content_length is not None:
-                try:
-                    trial_deadline = max(deadline, int(content_length) / self._min_throughput_bps)
-                except ValueError:
-                    pass
-
-            body = bytearray()
-            deadline_exceeded = False
-            try:
-                for chunk in r.iter_content(chunk_size=65536):
-                    body += chunk
-                    if time.perf_counter() - trial_start > trial_deadline:
-                        deadline_exceeded = True
-                        break
-            except requests.exceptions.RequestException as e:
-                r.close()
-                note('body_exception')
-                logger.debug(
-                    f'Fail to read response body. '
-                    f'url: {request_url}, params: {params}, trial: {trial}, error: {e}'
-                )
-                continue
-            if deadline_exceeded:
-                r.close()
-                note('deadline_exceeded')
-                trial_ms = int((time.perf_counter() - trial_start) * 1000)
-                logger.debug(
-                    f'Deadline exceeded while downloading response body. '
-                    f'url: {request_url}, params: {params}, trial: {trial}, deadline: {trial_deadline:.1f}s, '
-                    f'content_length: {content_length}, duration: {trial_ms}ms'
-                )
-                continue
-            # populate requests' internal cache with what we already
-            # downloaded, so r.json()/r.text below read it directly instead
-            # of trying to re-read the now-exhausted stream
-            r._content = bytes(body)
-            r._content_consumed = True
-
-            trial_ms = int((time.perf_counter() - trial_start) * 1000)
-
-            # One line per HTTP attempt: which API, on which worker, and how
-            # it came back -- `result` is the rate-limit reason (http_412,
-            # code_-352) when there is one, else `ok`. Attempts that never got
-            # a response (network error, deadline) log their own line above.
-            limited = rate_limit_checker(r)
-            logger.debug(
-                f'API endpoint: {endpoint}, '
-                f'worker: {selected_worker.id if selected_worker else "direct"}, '
-                f'status: {r.status_code}, '
-                f'result: {limited.reason if limited else "ok"}, '
-                f'trial: {trial}, duration: {trial_ms}ms'
-            )
-            if limited is not None:
-                # `continue`, not fall through: a -352 comes back as status 200
-                # with a valid body, which would otherwise be returned as data
-                note(limited.reason)
-                rate_limited_trials += 1
-                continue
-
-            # check status code
-            if r.status_code != 200:
-                note(f'http_{r.status_code}')
-                logger.debug(
-                    f'Fail to get response with status code {r.status_code}. '
-                    f'url: {request_url}, params: {params}, trial: {trial}, duration: {trial_ms}ms'
-                )
-                continue
-
-            # greppable per-request line (REQUEST): trial > 1 means retries
-            # happened; duration is the pure network round-trip of this trial
-            logger.debug(
-                f'REQUEST url: {request_url}, params: {params}, trial: {trial}, duration: {trial_ms}ms')
-
-            # parse response
-            if parser is None:
-                try:
-                    response = r.json()
-                    note('ok')
-                    break
-                except json.JSONDecodeError:
-                    note('json_error')
-                    logger.debug(
-                        f'Fail to decode response to json. '
-                        f'response: {r.text}, url: {request_url}, params: {params}, trial: {trial}'
-                    )
-                    continue
+            fetched = self._fetch_response(
+                request_url, params, headers, timeout, deadline)
+            if fetched.failure is not None:
+                parsed_response, outcome, limited = None, fetched.failure, False
             else:
-                response = parser(r.text)
-                if response is not None:
-                    note('ok')
-                    break
-                note('parse_error')
+                parsed_response, outcome, limited = self._classify_response(
+                    fetched.response, parser, rate_limit_checker)
+            self._record_trial(endpoint, worker_id, trial, outcome, fetched)
+            if outcome == 'ok':
+                response = parsed_response
+                break
+            last_failure = outcome
+            if limited:
+                rate_limited_trials += 1
         if response is None:
             if retry > 0 and rate_limited_trials == retry:
                 raise RateLimitError(endpoint, last_failure)
             raise ResponseError(endpoint, params or {}, last_failure, retry)
         return response
+
+    def _fetch_response(self, request_url, params, headers, timeout, deadline) -> FetchResponse:
+        trial_start = time.perf_counter()
+        try:
+            response = self._session.get(request_url, params=params, headers=headers,
+                                         timeout=timeout, stream=True)
+        except requests.exceptions.RequestException as error:
+            return FetchResponse(None, 'request_exception',
+                                 int((time.perf_counter() - trial_start) * 1000), error=error)
+        content_length = response.headers.get('Content-Length')
+        trial_deadline = deadline
+        if content_length is not None:
+            try:
+                trial_deadline = max(deadline, int(content_length) / self._min_throughput_bps)
+            except ValueError:
+                pass
+        body = bytearray()
+        try:
+            for chunk in response.iter_content(chunk_size=65536):
+                body += chunk
+                if time.perf_counter() - trial_start > trial_deadline:
+                    response.close()
+                    return FetchResponse(response, 'deadline_exceeded',
+                                         int((time.perf_counter() - trial_start) * 1000),
+                                         content_length, trial_deadline)
+        except requests.exceptions.RequestException as error:
+            response.close()
+            return FetchResponse(response, 'body_exception',
+                                 int((time.perf_counter() - trial_start) * 1000),
+                                 content_length, trial_deadline, error)
+        response._content = bytes(body)
+        response._content_consumed = True
+        return FetchResponse(response, None, int((time.perf_counter() - trial_start) * 1000),
+                             content_length, trial_deadline)
+
+    def _classify_response(self, response, parser, rate_limit_checker):
+        limited = rate_limit_checker(response)
+        if limited is not None:
+            return None, limited.reason, True
+        if response.status_code != 200:
+            return None, f'http_{response.status_code}', False
+        if parser is None:
+            try:
+                return response.json(), 'ok', False
+            except json.JSONDecodeError:
+                return None, 'json_error', False
+        parsed_response = parser(response.text)
+        return parsed_response, 'ok' if parsed_response is not None else 'parse_error', False
+
+    def _record_trial(self, endpoint, worker, trial, outcome, fetched) -> None:
+        self.stats.record(endpoint, worker, trial, outcome)
+        status = fetched.response.status_code if fetched.response is not None else None
+        logger.debug(
+            f'API endpoint={endpoint} worker={worker} trial={trial} outcome={outcome} '
+            f'status={status} duration_ms={fetched.duration_ms} '
+            f'content_length={fetched.content_length} deadline_s={fetched.deadline_s} '
+            f'error={fetched.error}')
 
     def get_video_view(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,
