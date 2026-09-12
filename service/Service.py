@@ -13,7 +13,7 @@ from .worker import WorkerConfigurationError, WorkerSelector
 from .apistat import ApiStatTracker, NullApiStatTracker
 from .ua import UA_LIST
 from .endpoints import (get_member_card, get_member_relation, get_video_tags,
-                        get_video_view)
+                        get_video_view, get_video_view_trimmed)
 from .response import \
     VideoView, VideoViewTrimmed, VideoTags, \
     MemberCard, \
@@ -393,61 +393,9 @@ class Service:
                             f'Use get_video_view for direct mode.')
             raise SystemExit(1)
 
-        # get response
-        response = self._get('get_video_view_trimmed', params=params, headers=headers,
-                             retry=retry, timeout=timeout, colddown_factor=colddown_factor)
-
-        # validate format
-
-        # response should contain keys
-        for key in ['code', 'message', 'ttl']:
-            if key not in response.keys():
-                raise FormatError('get_video_view_trimmed', VideoViewTrimmed, params, response,
-                                  f'Response should contain key {key}.')
-        # response code should be 0
-        if response['code'] != 0:
-            raise CodeError('get_video_view_trimmed', VideoViewTrimmed, params,
-                            response, response['code'])
-        # response data should be a dict
-        if type(response['data']) != dict:
-            raise FormatError('get_video_view_trimmed', VideoViewTrimmed, params, response,
-                              'Response data should be a dict.')
-        # data should contain keys
-        for key in ['bvid', 'aid', 'stat']:
-            if key not in response['data'].keys():
-                raise FormatError('get_video_view_trimmed', VideoViewTrimmed, params, response,
-                                  f'Response data should contain key {key}.')
-        # response data stat should be a dict
-        if type(response['data']['stat']) != dict:
-            raise FormatError('get_video_view_trimmed', VideoViewTrimmed, params, response,
-                              'Response data stat should be a dict.')
-        # data stat should contain keys
-        for key in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
-                    'dislike']:
-            if key not in response['data']['stat'].keys():
-                raise FormatError('get_video_view_trimmed', VideoViewTrimmed, params, response,
-                                  f'Response data stat should contain key {key}.')
-
-        # assemble data
-        return VideoViewTrimmed(
-            bvid=response['data']['bvid'],
-            aid=response['data']['aid'],
-            stat=VideoViewStat(
-                aid=response['data']['stat']['aid'],
-                view=response['data']['stat']['view'],
-                danmaku=response['data']['stat']['danmaku'],
-                reply=response['data']['stat']['reply'],
-                favorite=response['data']['stat']['favorite'],
-                coin=response['data']['stat']['coin'],
-                share=response['data']['stat']['share'],
-                now_rank=response['data']['stat']['now_rank'],
-                his_rank=response['data']['stat']['his_rank'],
-                like=response['data']['stat']['like'],
-                dislike=response['data']['stat']['dislike'],
-                vt=response['data']['stat'].get('vt', None),
-                vv=response['data']['stat'].get('vv', None),
-            ),
-        )
+        return get_video_view_trimmed.get(
+            self._get, params=params, headers=headers, retry=retry,
+            timeout=timeout, colddown_factor=colddown_factor)
 
     def get_video_tags(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,
