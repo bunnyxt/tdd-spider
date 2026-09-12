@@ -12,6 +12,7 @@ from .error import (ResponseError, RateLimitError,
 from .worker import WorkerConfigurationError, WorkerSelector
 from .apistat import ApiStatTracker, NullApiStatTracker
 from .ua import UA_LIST
+from .endpoints import get_member_relation
 from .response import \
     VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, VideoViewTrimmed, \
     VideoTag, VideoTags, \
@@ -676,40 +677,9 @@ class Service:
             retry: Optional[int] = None, timeout: Optional[float] = None,
             colddown_factor: Optional[float] = None
     ) -> MemberRelation:
-        """
-        params: { vmid: int }
-        """
-        # get response
-        response = self._get('get_member_relation', params=params, headers=headers,
-                             retry=retry, timeout=timeout, colddown_factor=colddown_factor)
-
-        # validate format
-
-        # response should contain keys
-        for key in ['code', 'message', 'ttl']:
-            if key not in response.keys():
-                raise FormatError('member_relation', params,
-                                  response, f'Response should contain key {key}.')
-        # response code should be 0
-        if response['code'] != 0:
-            raise CodeError('member_relation', params,
-                            response, response['code'])
-        # response data should be a dict
-        if type(response['data']) != dict:
-            raise FormatError('member_relation', params,
-                              response, 'Response data should be a dict.')
-        # data should contain keys
-        for key in ['mid', 'following', 'follower']:
-            if key not in response['data'].keys():
-                raise FormatError('member_relation', params, response,
-                                  f'Response data should contain key {key}.')
-
-        # assemble data
-        return MemberRelation(
-            mid=response['data']['mid'],
-            following=response['data']['following'],
-            follower=response['data']['follower']
-        )
+        return get_member_relation.get(
+            self._get, params=params, headers=headers, retry=retry,
+            timeout=timeout, colddown_factor=colddown_factor)
 
     def get_newlist(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,
