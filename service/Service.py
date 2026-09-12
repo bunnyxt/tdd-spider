@@ -12,7 +12,7 @@ from .error import (ResponseError, RateLimitError,
 from .worker import WorkerConfigurationError, WorkerSelector
 from .apistat import ApiStatTracker, NullApiStatTracker
 from .ua import UA_LIST
-from .endpoints import get_member_relation
+from .endpoints import get_member_card, get_member_relation
 from .response import \
     VideoViewOwner, VideoViewStat, VideoViewStaffItem, VideoView, VideoViewTrimmed, \
     VideoTag, VideoTags, \
@@ -628,50 +628,9 @@ class Service:
             retry: Optional[int] = None, timeout: Optional[float] = None,
             colddown_factor: Optional[float] = None
     ) -> MemberCard:
-        """
-        params: { mid: int }
-        """
-        # get response
-        response = self._get('get_member_card', params=params, headers=headers,
-                             retry=retry, timeout=timeout, colddown_factor=colddown_factor)
-
-        # validate format
-
-        # response should contain keys
-        for key in ['code', 'message', 'ttl']:
-            if key not in response.keys():
-                raise FormatError('get_member_card', MemberCard, params, response,
-                                  f'Response should contain key {key}.')
-        # response code should be 0
-        if response['code'] != 0:
-            raise CodeError('get_member_card', MemberCard, params, response, response['code'])
-        # response data should be a dict
-        if type(response['data']) != dict:
-            raise FormatError('get_member_card', MemberCard, params, response,
-                              'Response data should be a dict.')
-        # data should contain keys
-        for key in ['card']:
-            if key not in response['data'].keys():
-                raise FormatError('get_member_card', MemberCard, params, response,
-                                  f'Response data should contain key {key}.')
-        # data card should be a dict
-        if type(response['data']['card']) != dict:
-            raise FormatError('get_member_card', MemberCard, params, response,
-                              'Response data card should be a dict.')
-        # data card should contain keys
-        for key in ['mid', 'name', 'sex', 'face', 'sign']:
-            if key not in response['data']['card'].keys():
-                raise FormatError('get_member_card', MemberCard, params, response,
-                                  f'Response data card should contain key {key}.')
-
-        # assemble data
-        return MemberCard(
-            mid=response['data']['card']['mid'],
-            name=response['data']['card']['name'],
-            sex=response['data']['card']['sex'],
-            face=response['data']['card']['face'],
-            sign=response['data']['card']['sign']
-        )
+        return get_member_card.get(
+            self._get, params=params, headers=headers, retry=retry,
+            timeout=timeout, colddown_factor=colddown_factor)
 
     def get_member_relation(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,
