@@ -1,3 +1,4 @@
+import math
 import time
 import logging
 from collections import Counter
@@ -19,6 +20,12 @@ class JobPool:
     `stat.total_count`. When enabled it emits one greppable line per interval:
 
         PROGRESS <label>: <done> done, <left> left (<pct>%), <rate>/s
+
+    When the total is known and the current interval made positive progress,
+    a linear ETA (from this interval's rate and the current left) is appended
+    after the rate: ", ETA <remaining> (<HH:MM:SS>)". It is a rough,
+    interval-local estimate for a human watching the log, not a scheduling
+    input -- it never affects completion, retries, or run-record data.
 
     Use start() then join() (rather than a single blocking call) so the caller
     can run other work concurrently between them.
@@ -83,6 +90,28 @@ class JobPool:
     def _fmt_ms(ms: float) -> str:
         return f'{ms / 1000:.2f}s' if ms >= 1000 else f'{ms:.0f}ms'
 
+    @staticmethod
+    def _fmt_duration(seconds: float) -> str:
+        seconds = max(0, int(round(seconds)))
+        if seconds < 60:
+            return f'{seconds}s'
+        minutes, secs = divmod(seconds, 60)
+        if minutes < 60:
+            return f'{minutes}m{secs:02d}s'
+        hours, minutes = divmod(minutes, 60)
+        return f'{hours}h{minutes:02d}m'
+
+    @classmethod
+    def _format_eta(cls, left: int, rate: float, now: float) -> str:
+        # left/rate is only a meaningful forecast when there is remaining
+        # work and this interval actually made positive, finite progress;
+        # otherwise stay silent rather than print a bogus ETA.
+        if left <= 0 or rate <= 0 or not math.isfinite(rate):
+            return ''
+        remaining_s = left / rate
+        eta_time = time.strftime('%H:%M:%S', time.localtime(now + remaining_s))
+        return f'ETA {cls._fmt_duration(remaining_s)} ({eta_time})'
+
     def _report_progress(self):
         last_done = 0
         last_ts = time.time()
@@ -99,6 +128,9 @@ class JobPool:
                 pct = done / self.progress_total * 100
                 msg = (f'PROGRESS {self.progress_label}: {done} done, {left} left '
                        f'({pct:.1f}%), {rate:.0f}/s')
+                eta = self._format_eta(left, rate, now)
+                if eta:
+                    msg = f'{msg}, {eta}'
             else:
                 msg = f'PROGRESS {self.progress_label}: {done} done, {rate:.0f}/s'
             if self.progress_show_conditions:
