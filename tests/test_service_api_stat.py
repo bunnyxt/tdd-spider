@@ -41,10 +41,10 @@ def raising_response(exc):
 
 
 class ServiceApiStatWiringTest(unittest.TestCase):
-    def make_service(self, target, workers, responses, **kwargs):
+    def make_service(self, endpoint, workers, responses, **kwargs):
         service = Service(mode='worker', retry=kwargs.pop('retry', 3),
                           colddown_factor=0,
-                          endpoints=endpoints_for(target, workers), **kwargs)
+                          endpoints=endpoints_for(endpoint, workers), **kwargs)
         service._session = ScriptedSession(responses)
         return service
 

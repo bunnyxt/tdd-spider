@@ -22,8 +22,8 @@ def worker(worker_id, url, platform='test', weight=1, enabled=True):
     }
 
 
-def endpoints_for(target, workers):
-    return {target: {'direct': 'https://direct.invalid/', 'workers': workers}}
+def endpoints_for(endpoint, workers):
+    return {endpoint: {'direct': 'https://direct.invalid/', 'workers': workers}}
 
 
 class FakeClock:
@@ -119,7 +119,7 @@ class WorkerSelectorConfigTest(TestCase):
         with self.assertRaisesRegex(ValueError, 'Unknown worker field'):
             WorkerSelector(endpoints_for('view', [item]))
 
-    def test_worker_ids_only_need_to_be_unique_within_a_target(self):
+    def test_worker_ids_only_need_to_be_unique_within_an_endpoint(self):
         endpoints = {
             'view': {'workers': [worker('same', 'https://one.invalid/')]},
             'card': {'workers': [worker('same', 'https://two.invalid/')]},
@@ -246,10 +246,10 @@ class RateLimitCheckerTest(TestCase):
 
 
 class ServiceWorkerRoutingTest(TestCase):
-    def make_service(self, target, workers, responses):
+    def make_service(self, endpoint, workers, responses):
         service = Service(
             mode='worker', retry=3, colddown_factor=0,
-            endpoints=endpoints_for(target, workers))
+            endpoints=endpoints_for(endpoint, workers))
         service._session = ScriptedSession(responses)
         return service
 
@@ -427,7 +427,7 @@ class ServiceWorkerRoutingTest(TestCase):
 
         self.assertEqual(raised.exception.reason, 'http_503')
         self.assertEqual(raised.exception.trials, 3)
-        self.assertEqual(raised.exception.target, 'view')
+        self.assertEqual(raised.exception.endpoint, 'view')
 
     def test_exhaustion_reason_tracks_the_last_failure_not_the_first(self):
         service = self.make_service('view', [

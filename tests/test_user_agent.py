@@ -70,7 +70,7 @@ class UserAgentTest(TestCase):
 
 
 class UserAgentPoolTest(TestCase):
-    """The pool comes from endpoints.json; UA_LIST is what a target that
+    """The pool comes from endpoints.json; UA_LIST is what an endpoint that
     configures none uses."""
 
     def endpoints_with_agents(self, agents):
@@ -89,7 +89,7 @@ class UserAgentPoolTest(TestCase):
             service._get('view')
         self.assertEqual(set(service._session.sent_agents), {'x-1', 'x-2'})
 
-    def test_a_target_without_a_pool_uses_ua_list(self):
+    def test_an_endpoint_without_a_pool_uses_ua_list(self):
         service = self.make_service(
             endpoints_for('view', [worker('a', 'https://a.invalid/')]))
         for _ in range(40):

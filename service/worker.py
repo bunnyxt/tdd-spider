@@ -33,35 +33,35 @@ class WorkerSelector:
     def __init__(self, endpoints: Mapping[str, dict]):
         self._workers: dict[str, tuple[WorkerEndpoint, ...]] = {}
 
-        for target, endpoint_config in endpoints.items():
+        for endpoint, endpoint_config in endpoints.items():
             raw_workers = endpoint_config.get('workers', [])
-            workers = tuple(self._parse_worker(target, raw)
+            workers = tuple(self._parse_worker(endpoint, raw)
                             for raw in raw_workers)
             worker_ids = [worker.id for worker in workers]
             if len(worker_ids) != len(set(worker_ids)):
                 raise WorkerConfigurationError(
-                    f'Duplicate worker id for {target!r}.')
+                    f'Duplicate worker id for {endpoint!r}.')
             weighted = self._weighted(workers)
             if not weighted:
                 raise WorkerConfigurationError(
-                    f'Endpoint {target!r} has no enabled worker configured.')
-            self._workers[target] = weighted
+                    f'Endpoint {endpoint!r} has no enabled worker configured.')
+            self._workers[endpoint] = weighted
 
     @staticmethod
-    def _parse_worker(target: str, raw) -> WorkerEndpoint:
+    def _parse_worker(endpoint: str, raw) -> WorkerEndpoint:
         if not isinstance(raw, dict):
             raise WorkerConfigurationError(
-                f'Worker entry for {target!r} must be an object.')
+                f'Worker entry for {endpoint!r} must be an object.')
 
         fields = {'id', 'url', 'platform', 'weight', 'enabled'}
         missing = fields - set(raw)
         if missing:
             raise WorkerConfigurationError(
-                f'Missing worker field(s) for {target!r}: {sorted(missing)!r}.')
+                f'Missing worker field(s) for {endpoint!r}: {sorted(missing)!r}.')
         unknown = set(raw) - fields
         if unknown:
             raise WorkerConfigurationError(
-                f'Unknown worker field(s) for {target!r}: {sorted(unknown)!r}.')
+                f'Unknown worker field(s) for {endpoint!r}: {sorted(unknown)!r}.')
 
         worker_id = raw['id']
         url = raw['url']
@@ -70,7 +70,7 @@ class WorkerSelector:
         enabled = raw['enabled']
         if not isinstance(worker_id, str) or not worker_id:
             raise WorkerConfigurationError(
-                f'Worker id for {target!r} must be a non-empty string.')
+                f'Worker id for {endpoint!r} must be a non-empty string.')
         if not isinstance(url, str) or not url:
             raise WorkerConfigurationError(
                 f'Worker URL for {worker_id!r} must be a non-empty string.')
@@ -85,14 +85,14 @@ class WorkerSelector:
                 f'Worker enabled for {worker_id!r} must be a boolean.')
         return WorkerEndpoint(worker_id, url, platform, weight, enabled)
 
-    def select(self, target: str) -> WorkerEndpoint:
-        return random.choice(self._enabled_workers(target))
+    def select(self, endpoint: str) -> WorkerEndpoint:
+        return random.choice(self._enabled_workers(endpoint))
 
-    def _enabled_workers(self, target: str) -> tuple[WorkerEndpoint, ...]:
-        workers = self._workers.get(target, ())
+    def _enabled_workers(self, endpoint: str) -> tuple[WorkerEndpoint, ...]:
+        workers = self._workers.get(endpoint, ())
         if not workers:
             raise WorkerConfigurationError(
-                f'Endpoint {target!r} has no enabled worker configured.')
+                f'Endpoint {endpoint!r} has no enabled worker configured.')
         return workers
 
     @staticmethod

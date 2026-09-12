@@ -165,7 +165,7 @@ class Service:
     # default config getters end
 
     def _get(
-            self, target: str,
+            self, endpoint: str,
             params: Optional[dict] = None, headers: Optional[dict] = None,
             retry: Optional[int] = None, timeout: Optional[float] = None, colddown_factor: Optional[float] = None,
             deadline: Optional[float] = None,
@@ -179,20 +179,20 @@ class Service:
         else:
             headers = {**self._headers, **headers}
         ua_given_by_caller = 'User-Agent' in headers
-        ua_pool = self.endpoints.get(target, {}).get('user_agents') or UA_LIST
+        ua_pool = self.endpoints.get(endpoint, {}).get('user_agents') or UA_LIST
 
         # config
         retry = retry if retry is not None else self._retry
         timeout = timeout if timeout is not None else self._timeout
         colddown_factor = colddown_factor if colddown_factor is not None else self._colddown_factor
         deadline = deadline if deadline is not None else self._deadline
-        rate_limit_checker = RATE_LIMIT_CHECKERS.get(target, default_rate_limit)
+        rate_limit_checker = RATE_LIMIT_CHECKERS.get(endpoint, default_rate_limit)
 
         if self._mode == 'direct':
             try:
-                direct_url = self.endpoints[target]['direct']
+                direct_url = self.endpoints[endpoint]['direct']
             except KeyError:
-                logger.critical(f'Endpoint "{target}" not found.')
+                logger.critical(f'Endpoint "{endpoint}" not found.')
                 raise SystemExit(1)
         elif self._mode == 'worker':
             direct_url = None
@@ -211,7 +211,7 @@ class Service:
             nonlocal last_failure
             if outcome != 'ok':
                 last_failure = outcome
-            self.stats.record(target, worker_id, trial, outcome)
+            self.stats.record(endpoint, worker_id, trial, outcome)
 
         for trial in range(1, retry + 1):
             if not ua_given_by_caller:
@@ -221,7 +221,7 @@ class Service:
             request_url = direct_url
             if self._mode == 'worker':
                 try:
-                    selected_worker = self._worker_selector.select(target)
+                    selected_worker = self._worker_selector.select(endpoint)
                 except WorkerConfigurationError as e:
                     logger.critical(f'Invalid worker configuration: {e}')
                     raise SystemExit(1)
@@ -309,7 +309,7 @@ class Service:
             # a response (network error, deadline) log their own line above.
             limited = rate_limit_checker(r)
             logger.debug(
-                f'API target: {target}, '
+                f'API endpoint: {endpoint}, '
                 f'worker: {selected_worker.id if selected_worker else "direct"}, '
                 f'status: {r.status_code}, '
                 f'result: {limited.reason if limited else "ok"}, '
@@ -357,8 +357,8 @@ class Service:
                 note('parse_error')
         if response is None:
             if retry > 0 and rate_limited_trials == retry:
-                raise RateLimitError(target, last_failure)
-            raise ResponseError(target, params or {}, last_failure, retry)
+                raise RateLimitError(endpoint, last_failure)
+            raise ResponseError(endpoint, params or {}, last_failure, retry)
         return response
 
     def get_video_view(
@@ -378,54 +378,55 @@ class Service:
         # response should contain keys
         for key in ['code', 'message', 'ttl']:
             if key not in response.keys():
-                raise FormatError('video_view', params, response,
+                raise FormatError('get_video_view', VideoView, params, response,
                                   f'Response should contain key {key}.')
         # response code should be 0
         if response['code'] != 0:
-            raise CodeError('video_view', params, response, response['code'])
+            raise CodeError('get_video_view', VideoView, params, response, response['code'])
         # response data should be a dict
         if type(response['data']) != dict:
-            raise FormatError('video_view', params, response,
+            raise FormatError('get_video_view', VideoView, params, response,
                               'Response data should be a dict.')
         # data should contain keys
         for key in ['bvid', 'aid', 'videos', 'tid', 'tname', 'copyright', 'pic', 'title', 'pubdate', 'ctime', 'desc',
                     'state', 'duration', 'owner', 'stat']:
             if key not in response['data'].keys():
-                raise FormatError('video_view', params, response,
+                raise FormatError('get_video_view', VideoView, params, response,
                                   f'Response data should contain key {key}.')
         # response data owner should be a dict
         if type(response['data']['owner']) != dict:
-            raise FormatError('video_view', params, response,
+            raise FormatError('get_video_view', VideoView, params, response,
                               'Response data owner should be a dict.')
         # data owner should contain keys
         for key in ['mid', 'name', 'face']:
             if key not in response['data']['owner'].keys():
-                raise FormatError('video_view', params, response,
+                raise FormatError('get_video_view', VideoView, params, response,
                                   f'Response data owner should contain key {key}.')
         # response data stat should be a dict
         if type(response['data']['stat']) != dict:
-            raise FormatError('video_view', params, response,
+            raise FormatError('get_video_view', VideoView, params, response,
                               'Response data stat should be a dict.')
         # data stat should contain keys
         for key in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
                     'dislike']:
             if key not in response['data']['stat'].keys():
-                raise FormatError('video_view', params, response,
+                raise FormatError('get_video_view', VideoView, params, response,
                                   f'Response data stat should contain key {key}.')
         # response data staff should be a list if exists
         if 'staff' in response['data'].keys():
             if type(response['data']['staff']) != list:
-                raise FormatError('video_view', params, response,
+                raise FormatError('get_video_view', VideoView, params, response,
                                   'Response data staff should be a list.')
             # staff item should be a dict
             for staff_item in response['data']['staff']:
                 if type(staff_item) != dict:
                     raise FormatError(
-                        'video_view', params, response, 'Response data staff item should be a dict.')
+                        'get_video_view', VideoView, params, response,
+                        'Response data staff item should be a dict.')
                 # staff item should contain keys
                 for key in ['mid', 'title', 'name', 'face']:
                     if key not in staff_item.keys():
-                        raise FormatError('video_view', params, response,
+                        raise FormatError('get_video_view', VideoView, params, response,
                                           f'Response data staff item should contain key {key}.')
 
         # assemble data
@@ -510,30 +511,30 @@ class Service:
         # response should contain keys
         for key in ['code', 'message', 'ttl']:
             if key not in response.keys():
-                raise FormatError('video_view_trimmed', params, response,
+                raise FormatError('get_video_view_trimmed', VideoViewTrimmed, params, response,
                                   f'Response should contain key {key}.')
         # response code should be 0
         if response['code'] != 0:
-            raise CodeError('video_view_trimmed', params,
+            raise CodeError('get_video_view_trimmed', VideoViewTrimmed, params,
                             response, response['code'])
         # response data should be a dict
         if type(response['data']) != dict:
-            raise FormatError('video_view_trimmed', params, response,
+            raise FormatError('get_video_view_trimmed', VideoViewTrimmed, params, response,
                               'Response data should be a dict.')
         # data should contain keys
         for key in ['bvid', 'aid', 'stat']:
             if key not in response['data'].keys():
-                raise FormatError('video_view_trimmed', params, response,
+                raise FormatError('get_video_view_trimmed', VideoViewTrimmed, params, response,
                                   f'Response data should contain key {key}.')
         # response data stat should be a dict
         if type(response['data']['stat']) != dict:
-            raise FormatError('video_view_trimmed', params, response,
+            raise FormatError('get_video_view_trimmed', VideoViewTrimmed, params, response,
                               'Response data stat should be a dict.')
         # data stat should contain keys
         for key in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank', 'like',
                     'dislike']:
             if key not in response['data']['stat'].keys():
-                raise FormatError('video_view_trimmed', params, response,
+                raise FormatError('get_video_view_trimmed', VideoViewTrimmed, params, response,
                                   f'Response data stat should contain key {key}.')
 
         # assemble data
@@ -592,25 +593,25 @@ class Service:
         # response should contain keys
         for key in ['code', 'message', 'ttl']:
             if key not in response.keys():
-                raise FormatError('video_tags', params, response,
+                raise FormatError('get_video_tags', VideoTags, params, response,
                                   f'Response should contain key {key}.')
         # response code should be 0
         if response['code'] != 0:
-            raise CodeError('video_tags', params, response, response['code'])
+            raise CodeError('get_video_tags', VideoTags, params, response, response['code'])
         # response data should be a list
         if type(response['data']) != list:
-            raise FormatError('video_tags', params, response,
+            raise FormatError('get_video_tags', VideoTags, params, response,
                               'Response data should be a list.')
         # for each data item
         for data_item in response['data']:
             # data item should be a dict
             if type(data_item) != dict:
-                raise FormatError('video_tags', params, response,
+                raise FormatError('get_video_tags', VideoTags, params, response,
                                   'Response data item should be a dict.')
             # data item should contain keys
             for key in ['tag_id', 'tag_name']:
                 if key not in data_item.keys():
-                    raise FormatError('video_tags', params, response,
+                    raise FormatError('get_video_tags', VideoTags, params, response,
                                       f'Response data item should contain key {key}.')
 
         # assemble data
@@ -639,28 +640,28 @@ class Service:
         # response should contain keys
         for key in ['code', 'message', 'ttl']:
             if key not in response.keys():
-                raise FormatError('member_card', params, response,
+                raise FormatError('get_member_card', MemberCard, params, response,
                                   f'Response should contain key {key}.')
         # response code should be 0
         if response['code'] != 0:
-            raise CodeError('member_card', params, response, response['code'])
+            raise CodeError('get_member_card', MemberCard, params, response, response['code'])
         # response data should be a dict
         if type(response['data']) != dict:
-            raise FormatError('member_card', params, response,
+            raise FormatError('get_member_card', MemberCard, params, response,
                               'Response data should be a dict.')
         # data should contain keys
         for key in ['card']:
             if key not in response['data'].keys():
-                raise FormatError('member_card', params, response,
+                raise FormatError('get_member_card', MemberCard, params, response,
                                   f'Response data should contain key {key}.')
         # data card should be a dict
         if type(response['data']['card']) != dict:
-            raise FormatError('member_card', params, response,
+            raise FormatError('get_member_card', MemberCard, params, response,
                               'Response data card should be a dict.')
         # data card should contain keys
         for key in ['mid', 'name', 'sex', 'face', 'sign']:
             if key not in response['data']['card'].keys():
-                raise FormatError('member_card', params, response,
+                raise FormatError('get_member_card', MemberCard, params, response,
                                   f'Response data card should contain key {key}.')
 
         # assemble data
@@ -716,62 +717,62 @@ class Service:
         # response should contain keys
         for key in ['code', 'message']:
             if key not in response.keys():
-                raise FormatError('newlist', params, response,
+                raise FormatError('get_newlist', Newlist, params, response,
                                   f'Response should contain key {key}.')
         # response code should be 0
         if response['code'] != 0:
-            raise CodeError('newlist', params, response, response['code'])
+            raise CodeError('get_newlist', Newlist, params, response, response['code'])
         # response data should be a dict
         if type(response['data']) != dict:
-            raise FormatError('newlist', params, response,
+            raise FormatError('get_newlist', Newlist, params, response,
                               'Response data should be a dict.')
         # data should contain keys
         for key in ['archives', 'page']:
             if key not in response['data'].keys():
-                raise FormatError('newlist', params, response,
+                raise FormatError('get_newlist', Newlist, params, response,
                                   f'Response data should contain key {key}.')
         # data archives should be a list
         if type(response['data']['archives']) != list:
-            raise FormatError('newlist', params, response,
+            raise FormatError('get_newlist', Newlist, params, response,
                               'Response data archives should be a list.')
         # for each data archives item
         for data_archives_item in response['data']['archives']:
             # data archives item should be a dict
             if type(data_archives_item) != dict:
-                raise FormatError('newlist', params, response,
+                raise FormatError('get_newlist', Newlist, params, response,
                                   'Response data archives item should be a dict.')
             # data archives item should contain keys
             for key in ['aid', 'videos', 'tid', 'tname', 'copyright', 'pic', 'title', 'stat', 'bvid', 'desc', 'owner']:
                 if key not in data_archives_item.keys():
-                    raise FormatError('newlist', params, response,
+                    raise FormatError('get_newlist', Newlist, params, response,
                                       f'Response data archives item should contain key {key}.')
                 # data archives item stat should be a dict
                 if type(data_archives_item['stat']) != dict:
-                    raise FormatError('newlist', params, response,
+                    raise FormatError('get_newlist', Newlist, params, response,
                                       'Response data archives item stat should be a dict.')
                 # data archives item stat should contain keys
                 for key2 in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank',
                              'like', 'dislike', 'vt', 'vv']:
                     if key2 not in data_archives_item['stat'].keys():
-                        raise FormatError('newlist', params, response,
+                        raise FormatError('get_newlist', Newlist, params, response,
                                           f'Response data archives item stat should contain key {key2}.')
                 # data archives item owner should be a dict
                 if type(data_archives_item['owner']) != dict:
-                    raise FormatError('newlist', params, response,
+                    raise FormatError('get_newlist', Newlist, params, response,
                                       'Response data archives item owner should be a dict.')
                 # data archives item stat should contain keys
                 for key2 in ['mid', 'name', 'face']:
                     if key2 not in data_archives_item['owner'].keys():
-                        raise FormatError('newlist', params, response,
+                        raise FormatError('get_newlist', Newlist, params, response,
                                           f'Response data archives item owner should contain key {key2}.')
         # data page should be a dict
         if type(response['data']['page']) != dict:
-            raise FormatError('newlist', params, response,
+            raise FormatError('get_newlist', Newlist, params, response,
                               'Response data page should be a dict.')
         # data page should contain keys
         for key in ['count', 'num', 'size']:
             if key not in response['data']['page'].keys():
-                raise FormatError('newlist', params, response,
+                raise FormatError('get_newlist', Newlist, params, response,
                                   f'Response data page should contain key {key}.')
 
         # assemble data
