@@ -13,12 +13,12 @@ from .worker import WorkerConfigurationError, WorkerSelector
 from .apistat import ApiStatTracker, NullApiStatTracker
 from .ua import UA_LIST
 from .endpoints import (get_member_card, get_member_relation, get_video_tags,
-                        get_video_view, get_video_view_trimmed)
+                        get_video_view, get_video_view_trimmed, get_newlist)
 from .response import \
     VideoView, VideoViewTrimmed, VideoTags, \
     MemberCard, \
     MemberRelation, \
-    NewlistPage, NewlistArchiveStat, NewlistArchiveOwner, NewlistArchive, Newlist
+    Newlist
 from util import a2b
 import logging
 
@@ -429,134 +429,6 @@ class Service:
             retry: Optional[int] = None, timeout: Optional[float] = None,
             colddown_factor: Optional[float] = None
     ) -> Newlist:
-        """
-        params: { rid: int, pn: int, ps: int }
-        """
-        # get endpoint url
-        # define parser
-        def parser(text: str) -> Optional[dict]:
-            logger.debug(f'Try to parse newlist response text. text: {text}.')
-            parsed_response = None
-            try:
-                parsed_response = json.loads(text)
-            except json.JSONDecodeError:
-                logger.debug(f'Fail to decode text to json. Return None.')
-            if parsed_response is not None:
-                code = parsed_response['code']
-                if code in [-40002]:
-                    logger.debug(
-                        f'Status code {code} found. Server timeout occurred, return None for retry.')
-                    parsed_response = None
-            return parsed_response
-
-        # get response
-        response = self._get('get_newlist', params=params, headers=headers,
-                             retry=retry, timeout=timeout, colddown_factor=colddown_factor,
-                             parser=parser)
-
-        # validate format
-
-        # response should contain keys
-        for key in ['code', 'message']:
-            if key not in response.keys():
-                raise FormatError('get_newlist', Newlist, params, response,
-                                  f'Response should contain key {key}.')
-        # response code should be 0
-        if response['code'] != 0:
-            raise CodeError('get_newlist', Newlist, params, response, response['code'])
-        # response data should be a dict
-        if type(response['data']) != dict:
-            raise FormatError('get_newlist', Newlist, params, response,
-                              'Response data should be a dict.')
-        # data should contain keys
-        for key in ['archives', 'page']:
-            if key not in response['data'].keys():
-                raise FormatError('get_newlist', Newlist, params, response,
-                                  f'Response data should contain key {key}.')
-        # data archives should be a list
-        if type(response['data']['archives']) != list:
-            raise FormatError('get_newlist', Newlist, params, response,
-                              'Response data archives should be a list.')
-        # for each data archives item
-        for data_archives_item in response['data']['archives']:
-            # data archives item should be a dict
-            if type(data_archives_item) != dict:
-                raise FormatError('get_newlist', Newlist, params, response,
-                                  'Response data archives item should be a dict.')
-            # data archives item should contain keys
-            for key in ['aid', 'videos', 'tid', 'tname', 'copyright', 'pic', 'title', 'stat', 'bvid', 'desc', 'owner']:
-                if key not in data_archives_item.keys():
-                    raise FormatError('get_newlist', Newlist, params, response,
-                                      f'Response data archives item should contain key {key}.')
-                # data archives item stat should be a dict
-                if type(data_archives_item['stat']) != dict:
-                    raise FormatError('get_newlist', Newlist, params, response,
-                                      'Response data archives item stat should be a dict.')
-                # data archives item stat should contain keys
-                for key2 in ['aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'now_rank', 'his_rank',
-                             'like', 'dislike', 'vt', 'vv']:
-                    if key2 not in data_archives_item['stat'].keys():
-                        raise FormatError('get_newlist', Newlist, params, response,
-                                          f'Response data archives item stat should contain key {key2}.')
-                # data archives item owner should be a dict
-                if type(data_archives_item['owner']) != dict:
-                    raise FormatError('get_newlist', Newlist, params, response,
-                                      'Response data archives item owner should be a dict.')
-                # data archives item stat should contain keys
-                for key2 in ['mid', 'name', 'face']:
-                    if key2 not in data_archives_item['owner'].keys():
-                        raise FormatError('get_newlist', Newlist, params, response,
-                                          f'Response data archives item owner should contain key {key2}.')
-        # data page should be a dict
-        if type(response['data']['page']) != dict:
-            raise FormatError('get_newlist', Newlist, params, response,
-                              'Response data page should be a dict.')
-        # data page should contain keys
-        for key in ['count', 'num', 'size']:
-            if key not in response['data']['page'].keys():
-                raise FormatError('get_newlist', Newlist, params, response,
-                                  f'Response data page should contain key {key}.')
-
-        # assemble data
-        newlistPage = NewlistPage(
-            count=response['data']['page']['count'],
-            num=response['data']['page']['num'],
-            size=response['data']['page']['size']
-        )
-        newlistArchives = []
-        for data_archives_item in response['data']['archives']:
-            newlistArchives.append(NewlistArchive(
-                aid=data_archives_item['aid'],
-                videos=data_archives_item['videos'],
-                tid=data_archives_item['tid'],
-                tname=data_archives_item['tname'],
-                copyright=data_archives_item['copyright'],
-                pic=data_archives_item['pic'],
-                title=data_archives_item['title'],
-                stat=NewlistArchiveStat(
-                    aid=data_archives_item['stat']['aid'],
-                    view=data_archives_item['stat']['view'],
-                    danmaku=data_archives_item['stat']['danmaku'],
-                    reply=data_archives_item['stat']['reply'],
-                    favorite=data_archives_item['stat']['favorite'],
-                    coin=data_archives_item['stat']['coin'],
-                    share=data_archives_item['stat']['share'],
-                    now_rank=data_archives_item['stat']['now_rank'],
-                    his_rank=data_archives_item['stat']['his_rank'],
-                    like=data_archives_item['stat']['like'],
-                    dislike=data_archives_item['stat']['dislike'],
-                    vt=data_archives_item['stat']['vt'],
-                    vv=data_archives_item['stat']['vv']
-                ),
-                bvid=data_archives_item['bvid'],
-                desc=data_archives_item['desc'],
-                owner=NewlistArchiveOwner(
-                    mid=data_archives_item['owner']['mid'],
-                    name=data_archives_item['owner']['name'],
-                    face=data_archives_item['owner']['face']
-                ),
-            ))
-        return Newlist(
-            archives=newlistArchives,
-            page=newlistPage
-        )
+        return get_newlist.get(
+            self._get, params=params, headers=headers, retry=retry,
+            timeout=timeout, colddown_factor=colddown_factor)
