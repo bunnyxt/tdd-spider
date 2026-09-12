@@ -42,6 +42,7 @@ class FetchResponse:
     content_length: Optional[str] = None
     deadline_s: Optional[float] = None
     error: Optional[Exception] = None
+    body: Optional[bytes] = None
 
 
 def default_rate_limit(response: requests.Response) -> Optional[RateLimit]:
@@ -243,7 +244,8 @@ class Service:
             else:
                 parsed_response, outcome, limited = self._classify_response(
                     fetched.response, parser, rate_limit_checker)
-            self._record_trial(endpoint, worker_id, trial, outcome, fetched)
+            self._record_trial(endpoint, worker_id, trial, outcome, fetched,
+                               params, request_url, headers.get('User-Agent'))
             if outcome == 'ok':
                 response = parsed_response
                 break
@@ -279,16 +281,17 @@ class Service:
                     response.close()
                     return FetchResponse(response, 'deadline_exceeded',
                                          int((time.perf_counter() - trial_start) * 1000),
-                                         content_length, trial_deadline)
+                                         content_length, trial_deadline, body=bytes(body))
         except requests.exceptions.RequestException as error:
             response.close()
             return FetchResponse(response, 'body_exception',
                                  int((time.perf_counter() - trial_start) * 1000),
-                                 content_length, trial_deadline, error)
-        response._content = bytes(body)
+                                 content_length, trial_deadline, error, bytes(body))
+        body_bytes = bytes(body)
+        response._content = body_bytes
         response._content_consumed = True
         return FetchResponse(response, None, int((time.perf_counter() - trial_start) * 1000),
-                             content_length, trial_deadline)
+                             content_length, trial_deadline, body=body_bytes)
 
     def _classify_response(self, response, parser, rate_limit_checker):
         limited = rate_limit_checker(response)
@@ -304,14 +307,18 @@ class Service:
         parsed_response = parser(response.text)
         return parsed_response, 'ok' if parsed_response is not None else 'parse_error', False
 
-    def _record_trial(self, endpoint, worker, trial, outcome, fetched) -> None:
+    def _record_trial(self, endpoint, worker, trial, outcome, fetched,
+                      params, request_url, user_agent) -> None:
         self.stats.record(endpoint, worker, trial, outcome)
         status = fetched.response.status_code if fetched.response is not None else None
+        response_body = (fetched.body.decode('utf-8', errors='replace')
+                         if fetched.body is not None else None)
         logger.debug(
-            f'API endpoint={endpoint} worker={worker} trial={trial} outcome={outcome} '
+            f'API endpoint={endpoint} params={params!r} url={request_url!r} '
+            f'user_agent={user_agent!r} worker={worker} trial={trial} outcome={outcome} '
             f'status={status} duration_ms={fetched.duration_ms} '
             f'content_length={fetched.content_length} deadline_s={fetched.deadline_s} '
-            f'error={fetched.error}')
+            f'error={fetched.error!r} response_body={response_body!r}')
 
     def get_video_view(
             self, params: Optional[dict] = None, headers: Optional[dict] = None,
