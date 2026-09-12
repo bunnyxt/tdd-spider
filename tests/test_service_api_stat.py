@@ -104,6 +104,18 @@ class ServiceApiStatWiringTest(unittest.TestCase):
         self.assertEqual(totals_dict(service.stats),
                          {('api:view:w1', 't1:json_error'): 1.0})
 
+    def test_endpoint_parser_reads_the_streamed_body_after_cache_refill(self):
+        service = self.make_service('view', [worker('w1', 'https://w1.invalid/')],
+                                    {'https://w1.invalid/': [response(200, b'{"code": 0}')]})
+        seen = []
+
+        result = service._get('view', parser=lambda text: seen.append(text) or {'code': 0})
+
+        self.assertEqual(result, {'code': 0})
+        self.assertEqual(seen, ['{"code": 0}'])
+        self.assertEqual(totals_dict(service.stats),
+                         {('api:view:w1', 't1:ok'): 1.0})
+
     def test_request_exception_is_recorded(self):
         service = self.make_service('view', [worker('w1', 'https://w1.invalid/')], {})
 
