@@ -3,7 +3,7 @@ Always-on aggregation of the per-attempt outcome `Service._get` already
 classifies, so `p`, retry recovery and the shape of a run are readable
 without --debug (150 MB+ per hourly run in production).
 
-Dimensions kept: (target, worker, trial, outcome), in fixed-length windows.
+Dimensions kept: (endpoint, worker, trial, outcome), in fixed-length windows.
 Deliberately not kept: aid/mid or any per-request identifier, User-Agent,
 URLs, query strings, headers, bodies. Memory and log size are bounded by the
 number of distinct combinations seen, never by request volume.
@@ -59,7 +59,7 @@ def _exhausted(trials: Dict[int, Counter]) -> int:
     fails trial N either makes a trial N+1 attempt or gives up, so
     `failures(N) - attempts(N+1)` is the number that gave up at N. That holds
     whatever `retry` each call was given, unlike reading the last trial's
-    failures. Only valid per target: a retry may pick a different worker, so
+    failures. Only valid per endpoint: a retry may pick a different worker, so
     the chain does not hold within one worker's counts.
     """
     total = 0
@@ -72,7 +72,7 @@ def _exhausted(trials: Dict[int, Counter]) -> int:
 class NullApiStatTracker:
     """Stand-in so callers never have to test `stats is not None`."""
 
-    def record(self, target, worker, trial, outcome, now=None):
+    def record(self, endpoint, worker, trial, outcome, now=None):
         pass
 
     def totals(self) -> List[dict]:
@@ -97,10 +97,10 @@ class ApiStatTracker:
         self._index = 0
         self._window: Counter = Counter()
         self._totals: Counter = Counter()
-        # (window index) -> {(target, worker): [trial-1 attempts, trial-1 ok]}
+        # (window index) -> {(endpoint, worker): [trial-1 attempts, trial-1 ok]}
         self._series: List[Tuple[int, Dict[Tuple[str, str], List[int]]]] = []
 
-    def record(self, target: str, worker: str, trial: int, outcome: str,
+    def record(self, endpoint: str, worker: str, trial: int, outcome: str,
                now: Optional[float] = None) -> None:
         """One HTTP attempt. Called once per `_get` loop iteration, not once
         per logical call -- that is what makes retry recovery derivable."""
@@ -112,8 +112,8 @@ class ApiStatTracker:
                 if self._window:
                     closed = self._close_locked()
                 self._index = index
-            self._window[(target, worker, trial, outcome)] += 1
-            self._totals[(target, worker, trial, outcome)] += 1
+            self._window[(endpoint, worker, trial, outcome)] += 1
+            self._totals[(endpoint, worker, trial, outcome)] += 1
         # logged outside the lock: a slow handler must not block record()
         if closed is not None:
             self._log_window(*closed)
@@ -122,10 +122,10 @@ class ApiStatTracker:
         """Run totals as run-record metric rows, one per combination seen."""
         with self._lock:
             counts = dict(self._totals)
-        return [{'scope': f'api:{target}:{worker}',
+        return [{'scope': f'api:{endpoint}:{worker}',
                  'name': f't{trial}:{outcome}',
                  'value': float(value)}
-                for (target, worker, trial, outcome), value in counts.items()]
+                for (endpoint, worker, trial, outcome), value in counts.items()]
 
     def log_summary(self, log: Optional[logging.Logger] = None) -> None:
         """Close the last window and emit the end-of-run report."""
@@ -140,10 +140,10 @@ class ApiStatTracker:
         counts = dict(self._window)
         self._window = Counter()
         trial1: Dict[Tuple[str, str], List[int]] = {}
-        for (target, worker, trial, outcome), n in counts.items():
+        for (endpoint, worker, trial, outcome), n in counts.items():
             if trial != 1:
                 continue
-            slot = trial1.setdefault((target, worker), [0, 0])
+            slot = trial1.setdefault((endpoint, worker), [0, 0])
             slot[0] += n
             if outcome == OK:
                 slot[1] += n
@@ -151,14 +151,14 @@ class ApiStatTracker:
         return self._index, counts
 
     def _log_window(self, index: int, counts: Dict[Tuple[str, str, int, str], int]) -> None:
-        by_target: Dict[str, Counter] = {}
-        for (target, _w, _t, outcome), n in counts.items():
-            by_target.setdefault(target, Counter())[outcome] += n
+        by_endpoint: Dict[str, Counter] = {}
+        for (endpoint, _w, _t, outcome), n in counts.items():
+            by_endpoint.setdefault(endpoint, Counter())[outcome] += n
         parts = []
-        for target in sorted(by_target):
-            outcomes = by_target[target]
+        for endpoint in sorted(by_endpoint):
+            outcomes = by_endpoint[endpoint]
             rejected = ' '.join(f'{k}={v}' for k, v in sorted(outcomes.items()) if k != OK)
-            parts.append(f'{target}: n={sum(outcomes.values())} ok={outcomes.get(OK, 0)}'
+            parts.append(f'{endpoint}: n={sum(outcomes.values())} ok={outcomes.get(OK, 0)}'
                          + (f' {rejected}' if rejected else ''))
         elapsed = int(index * self._window_s)
         logger.info(f'API stat window #{index} (t+{format_ts_s(elapsed)}, '
@@ -169,16 +169,16 @@ class ApiStatTracker:
             counts = dict(self._totals)
             series = list(self._series)
         grouped: Dict[Tuple[str, str], Dict[int, Counter]] = {}
-        for (target, worker, trial, outcome), n in counts.items():
-            grouped.setdefault((target, worker), {}).setdefault(trial, Counter())[outcome] += n
+        for (endpoint, worker, trial, outcome), n in counts.items():
+            grouped.setdefault((endpoint, worker), {}).setdefault(trial, Counter())[outcome] += n
 
         lines = [f'## api stat summary (window={self._window_s:.0f}s, '
                  f'windows={len(series)})']
         if not grouped:
             return lines + ['(no requests recorded)']
-        for target, worker in sorted(grouped):
-            trials = grouped[(target, worker)]
-            lines.append(f'- {target} / {worker}')
+        for endpoint, worker in sorted(grouped):
+            trials = grouped[(endpoint, worker)]
+            lines.append(f'- {endpoint} / {worker}')
             for trial in sorted(trials):
                 outcomes = trials[trial]
                 detail = ' '.join(f'{k}={v}' for k, v in sorted(outcomes.items()))
@@ -188,16 +188,16 @@ class ApiStatTracker:
             lines.append(f'  - derived: p={p} (n={d["n1"]}), '
                          f'retry_recovered={d["retry_recovered"]}')
 
-        by_target: Dict[str, Dict[int, Counter]] = {}
-        for (target, _worker), trials in grouped.items():
-            per_trial = by_target.setdefault(target, {})
+        by_endpoint: Dict[str, Dict[int, Counter]] = {}
+        for (endpoint, _worker), trials in grouped.items():
+            per_trial = by_endpoint.setdefault(endpoint, {})
             for trial, outcomes in trials.items():
                 per_trial.setdefault(trial, Counter()).update(outcomes)
-        for target in sorted(by_target):
-            trials = by_target[target]
+        for endpoint in sorted(by_endpoint):
+            trials = by_endpoint[endpoint]
             d = _derive(trials)
             p = f'{d["p"] * 100:.2f}%' if d['p'] is not None else 'n/a'
-            lines.append(f'- {target} (all workers): p={p} (n={d["n1"]}), '
+            lines.append(f'- {endpoint} (all workers): p={p} (n={d["n1"]}), '
                          f'retry_recovered={d["retry_recovered"]}, '
                          f'exhausted={_exhausted(trials)}')
 
@@ -216,11 +216,11 @@ class ApiStatTracker:
                 per_key.setdefault(key, {})[index] = [n1, ok1]
         lines = []
         first, last = series[0][0], series[-1][0]
-        for target, worker in sorted(per_key):
-            points = per_key[(target, worker)]
+        for endpoint, worker in sorted(per_key):
+            points = per_key[(endpoint, worker)]
             fractions = []
             for index in range(first, last + 1):
                 n1, ok1 = points.get(index, (0, 0))
                 fractions.append(None if not n1 else (n1 - ok1) / n1)
-            lines.append(f'  {target} / {worker}: {_sparkline(fractions)}')
+            lines.append(f'  {endpoint} / {worker}: {_sparkline(fractions)}')
         return lines

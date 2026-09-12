@@ -35,8 +35,9 @@ class GetMemberRelationEndpointTest(unittest.TestCase):
             get_member_relation.get(lambda *args, **kwargs: response,
                                     params={'vmid': 7})
 
-        self.assertEqual((raised.exception.target, raised.exception.code),
-                         ('member_relation', -404))
+        self.assertEqual((raised.exception.endpoint, raised.exception.result_type,
+                          raised.exception.code),
+                         ('get_member_relation', MemberRelation, -404))
 
     def test_invalid_shape_keeps_the_existing_format_error(self):
         response = valid_response()
@@ -46,7 +47,8 @@ class GetMemberRelationEndpointTest(unittest.TestCase):
             get_member_relation.get(lambda *args, **kwargs: response,
                                     params={'vmid': 7})
 
-        self.assertEqual(raised.exception.target, 'member_relation')
+        self.assertEqual(raised.exception.endpoint, 'get_member_relation')
+        self.assertIs(raised.exception.result_type, MemberRelation)
 
     def test_service_public_method_delegates_to_the_adapter(self):
         service = Service(mode='direct', endpoints={})

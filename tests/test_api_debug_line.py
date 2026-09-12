@@ -8,14 +8,14 @@ from test_worker_selector import (ScriptedSession, endpoints_for, response,
 
 
 class ApiDebugLineTest(TestCase):
-    def make_service(self, target, workers, responses):
+    def make_service(self, endpoint, workers, responses):
         service = Service(
             mode='worker', retry=3, colddown_factor=0,
-            endpoints=endpoints_for(target, workers))
+            endpoints=endpoints_for(endpoint, workers))
         service._session = ScriptedSession(responses)
         return service
 
-    def test_one_line_per_attempt_names_target_worker_and_result(self):
+    def test_one_line_per_attempt_names_endpoint_worker_and_result(self):
         service = self.make_service('view', [
             worker('only', 'https://only.invalid/'),
         ], {'https://only.invalid/': [
@@ -27,11 +27,11 @@ class ApiDebugLineTest(TestCase):
                 self.assertLogs('Service', level=logging.DEBUG) as logs:
             service._get('view')
 
-        api_lines = [line for line in logs.output if 'API target: ' in line]
+        api_lines = [line for line in logs.output if 'API endpoint: ' in line]
         self.assertEqual(len(api_lines), 2)
-        self.assertIn('target: view, worker: only, status: 500, result: ok',
+        self.assertIn('endpoint: view, worker: only, status: 500, result: ok',
                       api_lines[0])
-        self.assertIn('target: view, worker: only, status: 200, result: ok',
+        self.assertIn('endpoint: view, worker: only, status: 200, result: ok',
                       api_lines[1])
 
     def test_every_rate_limited_attempt_gets_its_own_line(self):
@@ -44,7 +44,7 @@ class ApiDebugLineTest(TestCase):
             with self.assertRaises(RateLimitError):
                 service._get('view', retry=3)
 
-        api_lines = [line for line in logs.output if 'API target: ' in line]
+        api_lines = [line for line in logs.output if 'API endpoint: ' in line]
         self.assertEqual(len(api_lines), 3)
         self.assertTrue(all('status: 412, result: http_412' in line
                             for line in api_lines))
@@ -59,7 +59,7 @@ class ApiDebugLineTest(TestCase):
             with self.assertRaises(RateLimitError):
                 service._get('get_member_card', retry=1)
 
-        api_lines = [line for line in logs.output if 'API target: ' in line]
+        api_lines = [line for line in logs.output if 'API endpoint: ' in line]
         self.assertEqual(len(api_lines), 1)
         self.assertIn('status: 200, result: code_-352', api_lines[0])
 
@@ -73,6 +73,6 @@ class ApiDebugLineTest(TestCase):
         with self.assertLogs('Service', level=logging.DEBUG) as logs:
             service._get('view')
 
-        api_lines = [line for line in logs.output if 'API target: ' in line]
+        api_lines = [line for line in logs.output if 'API endpoint: ' in line]
         self.assertEqual(len(api_lines), 1)
         self.assertIn('worker: direct, status: 200, result: ok', api_lines[0])

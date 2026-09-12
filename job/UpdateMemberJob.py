@@ -50,7 +50,7 @@ class UpdateMemberJob(Job):
             except RateLimitError as e:
                 self.logger.warning(
                     f'Member API rate limited; sleep {RATE_LIMIT_SLEEP_S}s before next member. '
-                    f'mid: {mid}, target: {e.target}, reason: {e.reason}')
+                    f'mid: {mid}, endpoint: {e.endpoint}, reason: {e.reason}')
                 self.stat.condition['rate_limited'] += 1
                 time.sleep(RATE_LIMIT_SLEEP_S)
             except Exception as e:

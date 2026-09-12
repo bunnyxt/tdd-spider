@@ -41,9 +41,9 @@ class DimensionTest(unittest.TestCase):
     def test_record_accepts_only_low_cardinality_dimensions(self):
         # a future change that starts passing aid/mid or a URL must touch this
         params = list(inspect.signature(ApiStatTracker.record).parameters)
-        self.assertEqual(params, ['self', 'target', 'worker', 'trial', 'outcome', 'now'])
+        self.assertEqual(params, ['self', 'endpoint', 'worker', 'trial', 'outcome', 'now'])
 
-    def test_targets_and_workers_do_not_share_counters(self):
+    def test_endpoints_and_workers_do_not_share_counters(self):
         t = ApiStatTracker(clock=FakeClock())
         t.record('get_member_card', 'card-aws', 1, 'code_-352')
         t.record('get_video_view_trimmed', 'vv-aws', 1, 'http_412')
@@ -115,7 +115,7 @@ class DerivedTest(unittest.TestCase):
         self.assertIn('exhausted=2', '\n'.join(report(t)))
 
     def test_exhaustion_chains_across_workers(self):
-        # a retry may land on another worker, so the count is per target
+        # a retry may land on another worker, so the count is per endpoint
         t = ApiStatTracker(clock=FakeClock())
         t.record('view', 'w-a', 1, 'http_412')
         t.record('view', 'w-b', 2, 'http_412')

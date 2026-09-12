@@ -90,7 +90,7 @@ class FetchVideoRecordJob(Job):
             except RateLimitError as e:
                 self.logger.warning(
                     f'Video API rate limited; skipping current aid. '
-                    f'aid: {aid}, target: {e.target}, reason: {e.reason}')
+                    f'aid: {aid}, endpoint: {e.endpoint}, reason: {e.reason}')
                 self.stat.condition['rate_limited'] += 1
             except CodeError as e:
                 # hand off to the UpdateVideoJob pool: refreshing tdd_video.code

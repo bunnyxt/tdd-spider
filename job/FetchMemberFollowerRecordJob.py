@@ -67,7 +67,7 @@ class FetchMemberFollowerRecordJob(Job):
             except RateLimitError as e:
                 self.logger.warning(
                     f'Member follower API rate limited; skipping current mid. '
-                    f'mid: {mid}, target: {e.target}, reason: {e.reason}')
+                    f'mid: {mid}, endpoint: {e.endpoint}, reason: {e.reason}')
                 self.stat.condition['rate_limited'] += 1
             except ServiceError as e:
                 self.logger.error(f'Fail to fetch member follower record. mid: {mid}, error: {e}')
