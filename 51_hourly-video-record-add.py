@@ -300,7 +300,7 @@ def prune_full_scan_snapshots(folder: str, time_task: str,
 
 
 def iter_full_scan_snapshot_views(path: str):
-    """Stream (aid, view) from a snapshot, line by line, without loading it."""
+    # stream (aid, view) from a snapshot, line by line, without loading it
     with gzip.open(path, 'rt') as f:
         header = f.readline().rstrip('\n').split(',')
         aid_idx, view_idx = header.index('aid'), header.index('view')
