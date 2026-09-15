@@ -6,8 +6,10 @@ from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, \
     SysStatLogger
 import time
 import datetime
+import gzip
 import os
 import re
+import shutil
 import sys
 from serverchan import sc_send_critical
 from collections import namedtuple, defaultdict, Counter
@@ -246,6 +248,21 @@ class VideoRecordAcquisitionJob(Job):
                  (self.UPDATE_LABEL, self.update_stat))
         return {label: stat for label, stat in pairs if stat is not None}
 
+# 04:00 full scans kept as gzip of the hourly csv; data/ packing and clean-up never touch this folder
+FULL_SCAN_SNAPSHOT_DIR = 'data/0400'
+FULL_SCAN_SNAPSHOT_RETENTION_DAYS = 30
+
+
+def time_task_days_before(time_task: str, days: int) -> str:
+    # '2026-09-13 04:00', 7 -> '2026-09-06 04:00'
+    return (datetime.datetime.strptime(time_task, '%Y-%m-%d %H:%M')
+            - datetime.timedelta(days=days)).strftime('%Y-%m-%d %H:%M')
+
+
+def full_scan_snapshot_path(time_task: str) -> str:
+    return os.path.join(FULL_SCAN_SNAPSHOT_DIR, '%s.csv.gz' % time_task)
+
+
 # TODO: change to record new
 class RecordsSaveToFileRunner(Thread):
     def __init__(self, records, time_task, data_folder='data/'):
@@ -274,6 +291,21 @@ class RecordsSaveToFileRunner(Thread):
                              (len(self.records), len(self.records)))
         self.logger.info('Finish save %d records into file %s!' %
                          (len(self.records), current_filename_path))
+
+        # keep the full scan as a snapshot for next week's activity update
+        if self.time_label == '04:00':
+            try:
+                os.makedirs(FULL_SCAN_SNAPSHOT_DIR, exist_ok=True)
+                with open(current_filename_path, 'rb') as src, \
+                        gzip.open(full_scan_snapshot_path(self.time_task), 'wb', compresslevel=6) as dst:
+                    shutil.copyfileobj(src, dst)
+                cutoff = os.path.basename(full_scan_snapshot_path(
+                    time_task_days_before(self.time_task, FULL_SCAN_SNAPSHOT_RETENTION_DAYS)))
+                for name in os.listdir(FULL_SCAN_SNAPSHOT_DIR):
+                    if name < cutoff:  # names start with the time task, so string order is time order
+                        os.remove(os.path.join(FULL_SCAN_SNAPSHOT_DIR, name))
+            except Exception as e:
+                self.logger.error('Fail to save full scan snapshot. Exception caught. Detail: %s' % e)
 
         # TODO ugly design, should be separated into another class
         if self.time_label == '23:00':
@@ -607,9 +639,12 @@ class RecentRecordsAnalystRunner(Thread):
 
 
 class RecentActivityFreqUpdateRunner(Thread):
-    def __init__(self, time_label):
+    def __init__(self, time_task, records):
         super().__init__()
-        self.time_label = time_label
+        self.time_task = time_task
+        self.time_label = time_task[-5:]
+        self.records = records
+        self.metrics = {}  # activity counts, written into the run record by the caller
         self.logger = logging.getLogger('RecentActivityFreqUpdateRunner')
 
     def _update_recent(self, session):
@@ -627,77 +662,53 @@ class RecentActivityFreqUpdateRunner(Thread):
             session.commit()
             self.logger.info('Finish update recent field!')
         except Exception as e:
-            self.logger.info(
-                'Fail to update recent field. Exception caught. Detail: %s' % e)
+            self.logger.error('Fail to update recent field. Exception caught. Detail: %s' % e)
             session.rollback()
 
     def _update_activity(self, session, active_threshold=1000, hot_threshold=5000):
         self.logger.info('Now start update activity field...')
         try:
-            this_week_ts_begin = int(time.mktime(time.strptime(
-                str(datetime.date.today()), '%Y-%m-%d'))) + 4 * 60 * 60
-            this_week_ts_end = this_week_ts_begin + 30 * 60
-            this_week_results = session.execute(
-                'select r.`aid`, `view` from tdd_video_record r join tdd_video v on r.aid = v.aid ' +
-                'where r.added >= %d && r.added <= %d' % (this_week_ts_begin, this_week_ts_end))
-            this_week_records = {}
-            for result in this_week_results:
-                aid = result[0]
-                view = result[1]
-                if aid in this_week_records.keys():
-                    last_view = this_week_records[aid]
-                    if view > last_view:
-                        this_week_records[aid] = view
-                else:
-                    this_week_records[aid] = view
+            last_path = full_scan_snapshot_path(time_task_days_before(self.time_task, 7))
+            if not os.path.isfile(last_path):
+                self.logger.warning('Skip update activity field: %s not found.' % last_path)
+                return
 
-            last_week_ts_begin = this_week_ts_begin - 7 * 24 * 60 * 60
-            last_week_ts_end = last_week_ts_begin + 30 * 60
-            last_week_results = session.execute(
-                'select r.`aid`, `view` from tdd_video_record r join tdd_video v on r.aid = v.aid ' +
-                'where r.added >= %d && r.added <= %d' % (last_week_ts_begin, last_week_ts_end))
-            last_week_records = {}
-            for result in last_week_results:
-                aid = result[0]
-                view = result[1]
-                if aid in last_week_records.keys():
-                    last_view = last_week_records[aid]
-                    if view < last_view:
-                        last_week_records[aid] = view
-                else:
-                    last_week_records[aid] = view
+            current = {aid: activity for aid, activity in session.execute(
+                'select aid, activity from tdd_video where activity != 0')}
+            this_views = {r.aid: r.view for r in self.records if r.view >= 0}  # -1 is '--' from the api
 
-            last_week_record_keys = last_week_records.keys()
-            diff_records = {}
-            for aid in this_week_records.keys():
-                if aid in last_week_record_keys:
-                    diff_records[aid] = this_week_records[aid] - \
-                        last_week_records[aid]
-                else:
-                    diff_records[aid] = this_week_records[aid]
+            # only videos in both scans get a new activity, and only changed ones are written
+            changes = defaultdict(list)  # new activity -> aids
+            paired = hot = active = 0
+            with gzip.open(last_path, 'rt') as f:
+                next(f)  # header
+                for line in f:
+                    fields = line.split(',')
+                    aid, last_view = int(fields[1]), int(fields[3])
+                    view = this_views.pop(aid, None)  # pop: a repeated row pairs only once
+                    if view is None or last_view < 0:
+                        continue
+                    paired += 1
+                    growth = view - last_view
+                    activity = 2 if growth >= hot_threshold else 1 if growth >= active_threshold else 0
+                    hot += activity == 2
+                    active += activity == 1
+                    if current.get(aid, 0) != activity:
+                        changes[activity].append(aid)
 
-            active_aids = []
-            hot_aids = []
-            for aid, view in diff_records.items():
-                if view >= hot_threshold:
-                    hot_aids.append(aid)
-                elif view >= active_threshold:
-                    active_aids.append(aid)
-
-            session.execute('update tdd_video set activity = 0')
-            for aid in active_aids:
-                session.execute(
-                    'update tdd_video set activity = 1 where aid = %d' % aid)
-            for aid in hot_aids:
-                session.execute(
-                    'update tdd_video set activity = 2 where aid = %d' % aid)
+            for activity, aids in sorted(changes.items()):
+                for i in range(0, len(aids), 1000):
+                    session.execute('update tdd_video set activity = %d where aid in (%s)' % (
+                        activity, ','.join(map(str, aids[i:i + 1000]))))
             session.commit()
 
-            self.logger.info('Finish update activity field! %d active videos and %d hot videos set.' % (
-                len(active_aids), len(hot_aids)))
+            changed = sum(len(aids) for aids in changes.values())
+            self.metrics.update(activity_paired=paired, activity_hot=hot, activity_active=active,
+                                activity_changed=changed)
+            self.logger.info('Finish update activity field! %d paired, %d hot, %d active, %d changed.' % (
+                paired, hot, active, changed))
         except Exception as e:
-            self.logger.info(
-                'Fail to update activity field. Exception caught. Detail: %s' % e)
+            self.logger.error('Fail to update activity field. Exception caught. Detail: %s' % e)
             session.rollback()
 
     def _update_freq(self, session):
@@ -710,8 +721,7 @@ class RecentActivityFreqUpdateRunner(Thread):
             session.commit()
             self.logger.info('Finish update freq field!')
         except Exception as e:
-            self.logger.info(
-                'Fail to update freq field. Exception caught. Detail: %s' % e)
+            self.logger.error('Fail to update freq field. Exception caught. Detail: %s' % e)
             session.rollback()
 
     def run(self):
@@ -782,15 +792,20 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
 
     # downstream data analysis pipeline
     logger.info('Now start downstream data analysis pipelines...')
+    activity_freq_runner = RecentActivityFreqUpdateRunner(time_task, records)
     data_analysis_pipeline_runner_list = [
         RecordsSaveToFileRunner(records, time_task),
         RecentRecordsAnalystRunner(records, time_task),
-        RecentActivityFreqUpdateRunner(time_label),
+        activity_freq_runner,
     ]
     for runner in data_analysis_pipeline_runner_list:
         runner.start()
     for runner in data_analysis_pipeline_runner_list:
         runner.join()
+
+    if recorder is not None:
+        for name, value in activity_freq_runner.metrics.items():
+            recorder.add_metric('recent-activity-freq-update', name, value, unit='count')
 
     logger.info('Finish downstream data analysis pipelines!')
     del data_analysis_pipeline_runner_list  # release memory
