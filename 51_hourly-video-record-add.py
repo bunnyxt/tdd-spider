@@ -15,7 +15,7 @@ from collections import namedtuple, defaultdict, Counter
 from typing import Optional
 from core import RecordNew
 from service import Service
-from job import FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool, JobStat
+from job import FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool
 from runrecord import RunRecorder
 from timer import Timer
 import logging
@@ -683,7 +683,7 @@ class RecentRecordsAnalystRunner(Thread):
 
 class RecentActivityFreqUpdateRunner(Thread):
     """Update recent, activity (04:00 only: weekly view growth vs the snapshot 7 days earlier) and freq, in order.
-    Only videos present in both scans get a new activity; step failures log ERROR and count in `stat`."""
+    Only videos present in both scans get a new activity; step failures log ERROR and count in `metrics`."""
 
     LABEL = 'recent-activity-freq-update'
     ACTIVE_THRESHOLD = 1000
@@ -697,7 +697,7 @@ class RecentActivityFreqUpdateRunner(Thread):
         self.time_label = time_task[-5:]
         self.records = records
         self.snapshot_folder = snapshot_folder
-        self.stat = JobStat()
+        self.metrics = {}  # name -> count, written into the run record by the caller
         self.logger = logging.getLogger('RecentActivityFreqUpdateRunner')
 
     def _update_recent(self, session):
@@ -713,25 +713,25 @@ class RecentActivityFreqUpdateRunner(Thread):
             session.execute(
                 'update tdd_video set recent = 2 where added >= %d' % last_1d_ts)
             session.commit()
-            self.stat.condition['recent_update_fail'] = 0
+            self.metrics['recent_update_fail'] = 0
             self.logger.info('Finish update recent field!')
         except Exception as e:
-            self.stat.condition['recent_update_fail'] = 1
+            self.metrics['recent_update_fail'] = 1
             self.logger.error('Fail to update recent field. Exception caught. Detail: %s' % e)
             session.rollback()
 
     def _update_activity(self, session):
         self.logger.info('Now start update activity field...')
-        condition = self.stat.condition
+        metrics = self.metrics
         try:
             last_path = full_scan_snapshot_path(self.snapshot_folder, time_task_days_before(self.time_task, 7))
             if not os.path.isfile(last_path):
-                condition['activity_skipped_no_last_scan'] = 1
-                condition['activity_update_fail'] = 0
+                metrics['activity_skipped_no_last_scan'] = 1
+                metrics['activity_update_fail'] = 0
                 self.logger.warning('Skip update activity field: last week full scan snapshot %s not found. '
                                     'Activity left unchanged.' % last_path)
                 return
-            condition['activity_skipped_no_last_scan'] = 0
+            metrics['activity_skipped_no_last_scan'] = 0
 
             current = {aid: activity for aid, activity in session.execute(
                 'select aid, activity from tdd_video where activity != 0')}
@@ -776,16 +776,16 @@ class RecentActivityFreqUpdateRunner(Thread):
             session.commit()
 
             changed = sum(len(aids) for aids in changes.values())
-            self.stat.total_count = paired
-            condition['activity_hot'] = hot
-            condition['activity_active'] = active
-            condition['activity_changed'] = changed
-            condition['activity_low_pair_ratio'] = int(low_pair_ratio)
-            condition['activity_update_fail'] = 0
+            metrics['activity_paired'] = paired
+            metrics['activity_hot'] = hot
+            metrics['activity_active'] = active
+            metrics['activity_changed'] = changed
+            metrics['activity_low_pair_ratio'] = int(low_pair_ratio)
+            metrics['activity_update_fail'] = 0
             self.logger.info('Finish update activity field! %d hot and %d active videos, %d changed.' % (
                 hot, active, changed))
         except Exception as e:
-            condition['activity_update_fail'] = 1
+            metrics['activity_update_fail'] = 1
             self.logger.error('Fail to update activity field. Exception caught. Detail: %s' % e)
             session.rollback()
 
@@ -797,10 +797,10 @@ class RecentActivityFreqUpdateRunner(Thread):
             session.execute(
                 'update tdd_video set freq = 2 where activity = 2 || recent = 1')
             session.commit()
-            self.stat.condition['freq_update_fail'] = 0
+            self.metrics['freq_update_fail'] = 0
             self.logger.info('Finish update freq field!')
         except Exception as e:
-            self.stat.condition['freq_update_fail'] = 1
+            self.metrics['freq_update_fail'] = 1
             self.logger.error('Fail to update freq field. Exception caught. Detail: %s' % e)
             session.rollback()
 
@@ -885,9 +885,10 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     for runner in data_analysis_pipeline_runner_list:
         runner.join()
 
-    logger.info(activity_freq_runner.stat.get_summary(RecentActivityFreqUpdateRunner.LABEL))
+    logger.info('%s metrics: %s' % (RecentActivityFreqUpdateRunner.LABEL, activity_freq_runner.metrics))
     if recorder is not None:
-        recorder.add_job_stat_metrics(RecentActivityFreqUpdateRunner.LABEL, activity_freq_runner.stat)
+        for name, value in activity_freq_runner.metrics.items():
+            recorder.add_metric(RecentActivityFreqUpdateRunner.LABEL, name, value, unit='count')
 
     logger.info('Finish downstream data analysis pipelines!')
     del data_analysis_pipeline_runner_list  # release memory

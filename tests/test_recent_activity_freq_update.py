@@ -150,8 +150,8 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
             'update tdd_video set activity = 1 where aid in (2,3)',
             'update tdd_video set activity = 2 where aid in (4)',
         ])
-        self.assertEqual(runner.stat.total_count, 5)
-        self.assertEqual((runner.stat.condition['activity_hot'], runner.stat.condition['activity_active']), (1, 2))
+        self.assertEqual(runner.metrics['activity_paired'], 5)
+        self.assertEqual((runner.metrics['activity_hot'], runner.metrics['activity_active']), (1, 2))
 
     def test_missing_last_week_scan_warns_and_writes_nothing(self):
         # a snapshot from 6 days ago does not stand in for 7
@@ -162,7 +162,7 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
             runner._update_activity(session)
         self.assertIn('not found', '\n'.join(logs.output))
         self.assertEqual((session.statements, session.commits), ([], 0))
-        self.assertEqual(dict(runner.stat.condition),
+        self.assertEqual(runner.metrics,
                          {'activity_skipped_no_last_scan': 1, 'activity_update_fail': 0})
 
     def test_partial_last_week_scan_updates_paired_videos_only(self):
@@ -181,9 +181,9 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
             'update tdd_video set activity = 2 where aid in (3)',
         ])
         self.assertEqual(session.commits, 1)
-        self.assertEqual(runner.stat.total_count, 2)
-        self.assertEqual(dict(runner.stat.condition), {
-            'activity_skipped_no_last_scan': 0, 'activity_hot': 1, 'activity_active': 0,
+        self.assertEqual(runner.metrics['activity_paired'], 2)
+        self.assertEqual(runner.metrics, {
+            'activity_skipped_no_last_scan': 0, 'activity_paired': 2, 'activity_hot': 1, 'activity_active': 0,
             'activity_changed': 2, 'activity_low_pair_ratio': 1, 'activity_update_fail': 0})
 
     def test_unchanged_activity_writes_nothing_and_large_changes_are_chunked(self):
@@ -196,8 +196,8 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
             'update tdd_video set activity = 2 where aid in (2,3,4,5)',
             'update tdd_video set activity = 2 where aid in (6,7)',
         ])
-        self.assertEqual(runner.stat.condition['activity_low_pair_ratio'], 0)
-        self.assertEqual(runner.stat.condition['activity_changed'], 6)
+        self.assertEqual(runner.metrics['activity_low_pair_ratio'], 0)
+        self.assertEqual(runner.metrics['activity_changed'], 6)
 
     def test_row_order_and_duplicates_do_not_matter(self):
         # neither side is sorted; a repeated snapshot row pairs only once
@@ -209,7 +209,7 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
             'update tdd_video set activity = 1 where aid in (3)',
             'update tdd_video set activity = 2 where aid in (1,2)',
         ])
-        self.assertEqual((runner.stat.total_count, runner.stat.condition['activity_hot']), (3, 2))
+        self.assertEqual((runner.metrics['activity_paired'], runner.metrics['activity_hot']), (3, 2))
 
     def test_db_failure_rolls_back_and_is_counted(self):
         self._last_week([_rec(1, 0)])
@@ -218,7 +218,7 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
         with self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
             runner._update_activity(session)
         self.assertEqual((session.commits, session.rollbacks), (0, 1))
-        self.assertEqual(runner.stat.condition['activity_update_fail'], 1)
+        self.assertEqual(runner.metrics['activity_update_fail'], 1)
 
     def test_recent_and_freq_failures_are_errors(self):
         session = FakeSession(fail_on='update tdd_video set')
@@ -227,7 +227,7 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
             runner._update_recent(session)
             runner._update_freq(session)
         self.assertEqual(len(logs.records), 2)
-        self.assertEqual(dict(runner.stat.condition), {'recent_update_fail': 1, 'freq_update_fail': 1})
+        self.assertEqual(runner.metrics, {'recent_update_fail': 1, 'freq_update_fail': 1})
 
     def test_run_skips_activity_outside_0400_and_closes_session(self):
         session = FakeSession()
@@ -235,7 +235,7 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
         with mock.patch.object(s51, 'Session', return_value=session), \
                 self.assertLogs('RecentActivityFreqUpdateRunner', level='INFO'):
             runner.run()
-        self.assertNotIn('activity_update_fail', runner.stat.condition)
+        self.assertNotIn('activity_update_fail', runner.metrics)
         self.assertEqual(session.activity_updates(), [])
         self.assertTrue(session.closed)
 
@@ -259,7 +259,7 @@ class PipelineTest(unittest.TestCase):
                                     data_folder=self.data, snapshot_folder=self.snap).run()
         self.assertEqual(os.listdir(self.snap), ['2026-09-13 04:00.csv.gz'])
 
-    def test_runner_stat_lands_in_run_record(self):
+    def test_runner_metrics_land_in_run_record(self):
         class FakeAcquisition:
             api_stats = None
 
@@ -298,7 +298,6 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(sorted(rows), [
             ('recent-activity-freq-update', 'freq_update_fail', 1.0),
             ('recent-activity-freq-update', 'recent_update_fail', 0.0),
-            ('recent-activity-freq-update', 'total_count', 0.0),
         ])
 
 
