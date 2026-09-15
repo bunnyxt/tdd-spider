@@ -688,7 +688,6 @@ class RecentActivityFreqUpdateRunner(Thread):
     LABEL = 'recent-activity-freq-update'
     ACTIVE_THRESHOLD = 1000
     HOT_THRESHOLD = 5000
-    LOW_PAIR_RATIO = 0.9
     UPDATE_CHUNK_SIZE = 1000
 
     def __init__(self, time_task: str, records: list, snapshot_folder: str = FULL_SCAN_SNAPSHOT_DIR):
@@ -762,11 +761,6 @@ class RecentActivityFreqUpdateRunner(Thread):
             pair_ratio = paired / this_count if this_count else 0.0
             self.logger.info('%d videos in this scan, %d paired with %s (%.1f%%): %d hot, %d active.' % (
                 this_count, paired, last_path, pair_ratio * 100, hot, active))
-            low_pair_ratio = pair_ratio < self.LOW_PAIR_RATIO
-            if low_pair_ratio:
-                self.logger.warning('Only %.1f%% of this scan paired with last week scan (< %.0f%%); '
-                                    'unpaired videos keep their activity.' % (
-                                        pair_ratio * 100, self.LOW_PAIR_RATIO * 100))
 
             # write only changed activity of paired videos; unpaired ones are never touched
             for activity, aids in sorted(changes.items()):
@@ -780,7 +774,6 @@ class RecentActivityFreqUpdateRunner(Thread):
             metrics['activity_hot'] = hot
             metrics['activity_active'] = active
             metrics['activity_changed'] = changed
-            metrics['activity_low_pair_ratio'] = int(low_pair_ratio)
             metrics['activity_update_fail'] = 0
             self.logger.info('Finish update activity field! %d hot and %d active videos, %d changed.' % (
                 hot, active, changed))

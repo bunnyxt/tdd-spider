@@ -173,9 +173,7 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
         # 1 was hot, 2 and 7 were hot (unpaired, must stay), 3 was 0
         session = FakeSession(current={1: 2, 2: 2, 7: 2})
         runner = self._runner(this)
-        with self.assertLogs('RecentActivityFreqUpdateRunner', level='WARNING') as logs:
-            runner._update_activity(session)
-        self.assertIn('paired with last week scan', '\n'.join(logs.output))
+        runner._update_activity(session)
         self.assertEqual(session.activity_updates(), [
             'update tdd_video set activity = 0 where aid in (1)',
             'update tdd_video set activity = 2 where aid in (3)',
@@ -184,7 +182,7 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
         self.assertEqual(runner.metrics['activity_paired'], 2)
         self.assertEqual(runner.metrics, {
             'activity_skipped_no_last_scan': 0, 'activity_paired': 2, 'activity_hot': 1, 'activity_active': 0,
-            'activity_changed': 2, 'activity_low_pair_ratio': 1, 'activity_update_fail': 0})
+            'activity_changed': 2, 'activity_update_fail': 0})
 
     def test_unchanged_activity_writes_nothing_and_large_changes_are_chunked(self):
         self._last_week([_rec(aid, 0) for aid in range(1, 8)])
@@ -196,7 +194,6 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
             'update tdd_video set activity = 2 where aid in (2,3,4,5)',
             'update tdd_video set activity = 2 where aid in (6,7)',
         ])
-        self.assertEqual(runner.metrics['activity_low_pair_ratio'], 0)
         self.assertEqual(runner.metrics['activity_changed'], 6)
 
     def test_row_order_and_duplicates_do_not_matter(self):
