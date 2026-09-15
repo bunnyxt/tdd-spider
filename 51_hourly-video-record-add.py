@@ -249,14 +249,15 @@ class VideoRecordAcquisitionJob(Job):
         return {label: stat for label, stat in pairs if stat is not None}
 
 # ---- daily full-scan snapshots ----------------------------------------------
-# The 04:00 run keeps its records as data/0400/YYYY-MM-DD.csv.gz, in ascending
-# aid order, for FULL_SCAN_SNAPSHOT_RETENTION_DAYS days. The 23:00 packing, its
+# The 04:00 run keeps its records as data/0400/<time task>.csv.gz -- the name of
+# its hourly csv plus .gz, e.g. '2026-09-13 04:00.csv.gz' -- in ascending aid
+# order, for FULL_SCAN_SNAPSHOT_RETENTION_DAYS days. The 23:00 packing, its
 # 3-day csv removal and the manual clean-up scripts only glob top-level,
 # date-prefixed files in data/, so they never reach this sub-directory.
 # ActivityFreqUpdateJob reads the snapshot from 7 days earlier back.
 FULL_SCAN_SNAPSHOT_DIR = 'data/0400'
 FULL_SCAN_SNAPSHOT_RETENTION_DAYS = 30
-_FULL_SCAN_SNAPSHOT_NAME = re.compile(r'^\d{4}-\d{2}-\d{2}\.csv\.gz$')
+_FULL_SCAN_SNAPSHOT_NAME = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}\.csv\.gz$')
 
 RECORD_CSV_HEADER = 'added,aid,bvid,view,danmaku,reply,favorite,coin,share,like\n'
 
@@ -267,15 +268,21 @@ def record_csv_line(record) -> str:
         record.favorite, record.coin, record.share, record.like)
 
 
-def full_scan_snapshot_path(folder: str, date: datetime.date) -> str:
-    return os.path.join(folder, f'{date.isoformat()}.csv.gz')
+def time_task_days_before(time_task: str, days: int) -> str:
+    # '2026-09-13 04:00', 7 -> '2026-09-06 04:00'
+    return (datetime.datetime.strptime(time_task, '%Y-%m-%d %H:%M')
+            - datetime.timedelta(days=days)).strftime('%Y-%m-%d %H:%M')
 
 
-def write_full_scan_snapshot(records, folder: str, date: datetime.date) -> str:
+def full_scan_snapshot_path(folder: str, time_task: str) -> str:
+    # same name as the hourly csv of that run (RecordsSaveToFileRunner), plus .gz
+    return os.path.join(folder, '%s.csv.gz' % time_task)
+
+
+def write_full_scan_snapshot(records, path: str) -> str:
     # write to .tmp then rename: a crash mid-write must not leave a truncated
     # snapshot that next week's run would read as a complete scan
-    os.makedirs(folder, exist_ok=True)
-    path = full_scan_snapshot_path(folder, date)
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     tmp_path = path + '.tmp'
     with gzip.open(tmp_path, 'wt', compresslevel=6) as f:
         f.write(RECORD_CSV_HEADER)
@@ -285,12 +292,12 @@ def write_full_scan_snapshot(records, folder: str, date: datetime.date) -> str:
     return path
 
 
-def prune_full_scan_snapshots(folder: str, today: datetime.date,
+def prune_full_scan_snapshots(folder: str, time_task: str,
                               retention_days: int = FULL_SCAN_SNAPSHOT_RETENTION_DAYS) -> list:
-    # snapshot names are ISO dates, so string order is date order
+    # snapshot names start with an ISO time task, so string order is time order
     if not os.path.isdir(folder):
         return []
-    cutoff = os.path.basename(full_scan_snapshot_path(folder, today - datetime.timedelta(days=retention_days)))
+    cutoff = full_scan_snapshot_path('', time_task_days_before(time_task, retention_days))
     removed = []
     for name in sorted(os.listdir(folder)):
         if _FULL_SCAN_SNAPSHOT_NAME.match(name) and name < cutoff:
@@ -350,11 +357,11 @@ class RecordsSaveToFileRunner(Thread):
         # 3-day removal below; next week's activity update reads it back
         if self.time_label == '04:00':
             try:
-                scan_date = datetime.date.fromisoformat(self.time_task[:10])
-                path = write_full_scan_snapshot(self.records, self.snapshot_folder, scan_date)
+                path = write_full_scan_snapshot(
+                    self.records, full_scan_snapshot_path(self.snapshot_folder, self.time_task))
                 self.logger.info('Saved %d records into full scan snapshot %s.' % (
                     len(self.records), path))
-                for removed in prune_full_scan_snapshots(self.snapshot_folder, scan_date):
+                for removed in prune_full_scan_snapshots(self.snapshot_folder, self.time_task):
                     self.logger.info('Removed expired full scan snapshot %s.' % removed)
             except Exception as e:
                 self.logger.error(
@@ -759,8 +766,7 @@ class ActivityFreqUpdateJob(Job):
         self.logger.info('Now start update activity field...')
         condition = self.stat.condition
         try:
-            scan_date = datetime.date.fromisoformat(self.time_task[:10])
-            last_path = full_scan_snapshot_path(self.snapshot_folder, scan_date - datetime.timedelta(days=7))
+            last_path = full_scan_snapshot_path(self.snapshot_folder, time_task_days_before(self.time_task, 7))
             if not os.path.isfile(last_path):
                 condition['activity_skipped_no_last_scan'] = 1
                 condition['activity_update_fail'] = 0

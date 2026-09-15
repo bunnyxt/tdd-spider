@@ -11,7 +11,6 @@
 The script imports ``db`` (SQLAlchemy); where that is absent the module skips.
 """
 
-import datetime
 import gzip
 import importlib.util
 import logging
@@ -61,8 +60,7 @@ except Exception as _e:  # pragma: no cover - depends on the environment
     _DEPS = False
     _DEPS_ERR = repr(_e)
 
-TODAY = datetime.date(2026, 9, 13)
-LAST_WEEK = datetime.date(2026, 9, 6)
+TASK = '2026-09-13 04:00'
 
 
 def _rec(aid, view):
@@ -107,54 +105,53 @@ class SnapshotTest(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
 
     def test_round_trip_streams_views_in_file_order(self):
-        path = s51.write_full_scan_snapshot([_rec(1, 10), _rec(2, -1), _rec(5, 20)], self.dir, TODAY)
-        self.assertEqual(path, s51.full_scan_snapshot_path(self.dir, TODAY))
-        self.assertTrue(path.endswith('2026-09-13.csv.gz'))
+        path = s51.write_full_scan_snapshot([_rec(1, 10), _rec(2, -1), _rec(5, 20)],
+                                            s51.full_scan_snapshot_path(self.dir, TASK))
+        self.assertEqual(path, os.path.join(self.dir, '2026-09-13 04:00.csv.gz'))
         self.assertEqual(list(s51.iter_full_scan_snapshot_views(path)), [(1, 10), (2, -1), (5, 20)])
         with gzip.open(path, 'rt') as f:
             self.assertEqual(f.readline(), s51.RECORD_CSV_HEADER)
-        self.assertEqual(os.listdir(self.dir), ['2026-09-13.csv.gz'])
+        self.assertEqual(os.listdir(self.dir), ['2026-09-13 04:00.csv.gz'])
 
     def test_unsorted_snapshot_raises(self):
-        path = s51.write_full_scan_snapshot([_rec(5, 1), _rec(3, 1)], self.dir, TODAY)
+        path = s51.write_full_scan_snapshot([_rec(5, 1), _rec(3, 1)], s51.full_scan_snapshot_path(self.dir, TASK))
         with self.assertRaises(ValueError):
             list(s51.iter_full_scan_snapshot_views(path))
 
     def test_failed_write_keeps_previous_snapshot(self):
-        s51.write_full_scan_snapshot([_rec(1, 10)], self.dir, TODAY)
+        path = s51.full_scan_snapshot_path(self.dir, TASK)
+        s51.write_full_scan_snapshot([_rec(1, 10)], path)
 
         def broken():
             yield _rec(1, 99)
             raise RuntimeError('boom')
 
         with self.assertRaises(RuntimeError):
-            s51.write_full_scan_snapshot(broken(), self.dir, TODAY)
-        path = s51.full_scan_snapshot_path(self.dir, TODAY)
+            s51.write_full_scan_snapshot(broken(), path)
         self.assertEqual(list(s51.iter_full_scan_snapshot_views(path)), [(1, 10)])
 
     def test_prune_keeps_retention_window_and_ignores_other_files(self):
-        names = ['2026-08-13.csv.gz',       # 31 days old -> removed
-                 '2026-08-14.csv.gz',       # 30 days old -> kept
-                 '2026-09-12.csv.gz',
-                 '2025-01-01.csv.gz.tmp',   # not a snapshot name
+        names = ['2026-08-13 04:00.csv.gz',       # 31 days old -> removed
+                 '2026-08-14 04:00.csv.gz',       # 30 days old -> kept
+                 '2026-09-12 04:00.csv.gz',
+                 '2025-01-01 04:00.csv.gz.tmp',   # not a snapshot name
+                 '2025-01-01.csv.gz',             # not a snapshot name
                  'notes.txt']
         for name in names:
             open(os.path.join(self.dir, name), 'w').close()
-        removed = s51.prune_full_scan_snapshots(self.dir, TODAY)
-        self.assertEqual([os.path.basename(p) for p in removed], ['2026-08-13.csv.gz'])
+        removed = s51.prune_full_scan_snapshots(self.dir, TASK)
+        self.assertEqual([os.path.basename(p) for p in removed], ['2026-08-13 04:00.csv.gz'])
         self.assertEqual(sorted(os.listdir(self.dir)), sorted(names[1:]))
-        self.assertEqual(s51.prune_full_scan_snapshots(os.path.join(self.dir, 'absent'), TODAY), [])
+        self.assertEqual(s51.prune_full_scan_snapshots(os.path.join(self.dir, 'absent'), TASK), [])
 
 
 @unittest.skipUnless(_DEPS, 'db dependencies unavailable')
 class ActivityFreqUpdateJobTest(unittest.TestCase):
-    TASK = '2026-09-13 04:00'
-
     def setUp(self):
         self.dir = tempfile.mkdtemp()
 
     def _last_week(self, records):
-        s51.write_full_scan_snapshot(records, self.dir, LAST_WEEK)
+        s51.write_full_scan_snapshot(records, s51.full_scan_snapshot_path(self.dir, '2026-09-06 04:00'))
 
     def _job(self, records, session, task=TASK):
         with mock.patch.object(s51, 'Session', return_value=session):
@@ -175,7 +172,7 @@ class ActivityFreqUpdateJobTest(unittest.TestCase):
 
     def test_missing_last_week_scan_warns_and_writes_nothing(self):
         # a snapshot from 6 days ago does not stand in for 7
-        s51.write_full_scan_snapshot([_rec(1, 0)], self.dir, datetime.date(2026, 9, 7))
+        s51.write_full_scan_snapshot([_rec(1, 0)], s51.full_scan_snapshot_path(self.dir, '2026-09-07 04:00'))
         session = FakeSession(current={2: 2})
         job = self._job([_rec(1, 99999)], session)
         with self.assertLogs('ActivityFreqUpdateJob', level='WARNING') as logs:
@@ -269,14 +266,14 @@ class PipelineTest(unittest.TestCase):
 
     def test_0400_run_writes_snapshot_and_prunes(self):
         os.makedirs(self.snap)
-        open(os.path.join(self.snap, '2026-08-01.csv.gz'), 'w').close()
+        open(os.path.join(self.snap, '2026-08-01 04:00.csv.gz'), 'w').close()
         s51.RecordsSaveToFileRunner([_rec(1, 10), _rec(2, 20)], '2026-09-13 04:00',
                                     data_folder=self.data, snapshot_folder=self.snap).run()
-        self.assertEqual(os.listdir(self.snap), ['2026-09-13.csv.gz'])
+        self.assertEqual(os.listdir(self.snap), ['2026-09-13 04:00.csv.gz'])
         self.assertTrue(os.path.isfile(os.path.join(self.data, '2026-09-13 04:00.csv')))
         s51.RecordsSaveToFileRunner([_rec(1, 10)], '2026-09-13 05:00',
                                     data_folder=self.data, snapshot_folder=self.snap).run()
-        self.assertEqual(os.listdir(self.snap), ['2026-09-13.csv.gz'])
+        self.assertEqual(os.listdir(self.snap), ['2026-09-13 04:00.csv.gz'])
 
     def test_records_sorted_and_job_stat_lands_in_run_record(self):
         class FakeAcquisition:
