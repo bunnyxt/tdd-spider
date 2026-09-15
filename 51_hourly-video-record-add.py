@@ -683,7 +683,7 @@ class RecentRecordsAnalystRunner(Thread):
 
 class RecentActivityFreqUpdateRunner(Thread):
     """Update recent, activity (04:00 only: weekly view growth vs the snapshot 7 days earlier) and freq, in order.
-    Only videos present in both scans get a new activity; step failures log ERROR and count in `metrics`."""
+    Only videos present in both scans get a new activity; step failures log ERROR; activity counts go to `metrics`."""
 
     LABEL = 'recent-activity-freq-update'
     ACTIVE_THRESHOLD = 1000
@@ -712,25 +712,19 @@ class RecentActivityFreqUpdateRunner(Thread):
             session.execute(
                 'update tdd_video set recent = 2 where added >= %d' % last_1d_ts)
             session.commit()
-            self.metrics['recent_update_fail'] = 0
             self.logger.info('Finish update recent field!')
         except Exception as e:
-            self.metrics['recent_update_fail'] = 1
             self.logger.error('Fail to update recent field. Exception caught. Detail: %s' % e)
             session.rollback()
 
     def _update_activity(self, session):
         self.logger.info('Now start update activity field...')
-        metrics = self.metrics
         try:
             last_path = full_scan_snapshot_path(self.snapshot_folder, time_task_days_before(self.time_task, 7))
             if not os.path.isfile(last_path):
-                metrics['activity_skipped_no_last_scan'] = 1
-                metrics['activity_update_fail'] = 0
                 self.logger.warning('Skip update activity field: last week full scan snapshot %s not found. '
                                     'Activity left unchanged.' % last_path)
                 return
-            metrics['activity_skipped_no_last_scan'] = 0
 
             current = {aid: activity for aid, activity in session.execute(
                 'select aid, activity from tdd_video where activity != 0')}
@@ -770,15 +764,11 @@ class RecentActivityFreqUpdateRunner(Thread):
             session.commit()
 
             changed = sum(len(aids) for aids in changes.values())
-            metrics['activity_paired'] = paired
-            metrics['activity_hot'] = hot
-            metrics['activity_active'] = active
-            metrics['activity_changed'] = changed
-            metrics['activity_update_fail'] = 0
+            self.metrics.update(activity_paired=paired, activity_hot=hot, activity_active=active,
+                                activity_changed=changed)
             self.logger.info('Finish update activity field! %d hot and %d active videos, %d changed.' % (
                 hot, active, changed))
         except Exception as e:
-            metrics['activity_update_fail'] = 1
             self.logger.error('Fail to update activity field. Exception caught. Detail: %s' % e)
             session.rollback()
 
@@ -790,10 +780,8 @@ class RecentActivityFreqUpdateRunner(Thread):
             session.execute(
                 'update tdd_video set freq = 2 where activity = 2 || recent = 1')
             session.commit()
-            self.metrics['freq_update_fail'] = 0
             self.logger.info('Finish update freq field!')
         except Exception as e:
-            self.metrics['freq_update_fail'] = 1
             self.logger.error('Fail to update freq field. Exception caught. Detail: %s' % e)
             session.rollback()
 

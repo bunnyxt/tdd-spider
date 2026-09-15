@@ -162,8 +162,7 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
             runner._update_activity(session)
         self.assertIn('not found', '\n'.join(logs.output))
         self.assertEqual((session.statements, session.commits), ([], 0))
-        self.assertEqual(runner.metrics,
-                         {'activity_skipped_no_last_scan': 1, 'activity_update_fail': 0})
+        self.assertEqual(runner.metrics, {})
 
     def test_partial_last_week_scan_updates_paired_videos_only(self):
         # last week's scan only reached aids 1 and 3 (and 5 with an invalid view);
@@ -179,10 +178,8 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
             'update tdd_video set activity = 2 where aid in (3)',
         ])
         self.assertEqual(session.commits, 1)
-        self.assertEqual(runner.metrics['activity_paired'], 2)
         self.assertEqual(runner.metrics, {
-            'activity_skipped_no_last_scan': 0, 'activity_paired': 2, 'activity_hot': 1, 'activity_active': 0,
-            'activity_changed': 2, 'activity_update_fail': 0})
+            'activity_paired': 2, 'activity_hot': 1, 'activity_active': 0, 'activity_changed': 2})
 
     def test_unchanged_activity_writes_nothing_and_large_changes_are_chunked(self):
         self._last_week([_rec(aid, 0) for aid in range(1, 8)])
@@ -208,14 +205,14 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
         ])
         self.assertEqual((runner.metrics['activity_paired'], runner.metrics['activity_hot']), (3, 2))
 
-    def test_db_failure_rolls_back_and_is_counted(self):
+    def test_db_failure_rolls_back(self):
         self._last_week([_rec(1, 0)])
         session = FakeSession(fail_on='update tdd_video set activity')
         runner = self._runner([_rec(1, 7000)])
         with self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
             runner._update_activity(session)
         self.assertEqual((session.commits, session.rollbacks), (0, 1))
-        self.assertEqual(runner.metrics['activity_update_fail'], 1)
+        self.assertEqual(runner.metrics, {})
 
     def test_recent_and_freq_failures_are_errors(self):
         session = FakeSession(fail_on='update tdd_video set')
@@ -224,7 +221,7 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
             runner._update_recent(session)
             runner._update_freq(session)
         self.assertEqual(len(logs.records), 2)
-        self.assertEqual(runner.metrics, {'recent_update_fail': 1, 'freq_update_fail': 1})
+        self.assertEqual(runner.metrics, {})
 
     def test_run_skips_activity_outside_0400_and_closes_session(self):
         session = FakeSession()
@@ -232,7 +229,7 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
         with mock.patch.object(s51, 'Session', return_value=session), \
                 self.assertLogs('RecentActivityFreqUpdateRunner', level='INFO'):
             runner.run()
-        self.assertNotIn('activity_update_fail', runner.metrics)
+        self.assertEqual(runner.metrics, {})
         self.assertEqual(session.activity_updates(), [])
         self.assertTrue(session.closed)
 
@@ -261,7 +258,7 @@ class PipelineTest(unittest.TestCase):
             api_stats = None
 
             def __init__(self, time_task, record_queue):
-                pass
+                record_queue.put(_rec(1, 9000))
 
             def start(self):
                 pass
@@ -276,13 +273,21 @@ class PipelineTest(unittest.TestCase):
             def __init__(self, *args, **kwargs):
                 super().__init__()
 
-        db_path = os.path.join(tempfile.mkdtemp(), 'run-records.sqlite3')
+        workdir = tempfile.mkdtemp()  # the runner reads data/0400 relative to cwd, like cron
+        s51.write_full_scan_snapshot([_rec(1, 0)], s51.full_scan_snapshot_path(
+            os.path.join(workdir, s51.FULL_SCAN_SNAPSHOT_DIR), '2026-09-06 04:00'))
+        db_path = os.path.join(workdir, 'run-records.sqlite3')
         recorder = s51.RunRecorder.start('51_hourly-video-record-add', db_path=db_path)
-        with mock.patch.object(s51, 'VideoRecordAcquisitionJob', FakeAcquisition), \
-                mock.patch.object(s51, 'RecordsSaveToFileRunner', NoopRunner), \
-                mock.patch.object(s51, 'RecentRecordsAnalystRunner', NoopRunner), \
-                mock.patch.object(s51, 'Session', return_value=FakeSession(fail_on='set freq')):
-            s51.run_hourly_video_record_add('2026-09-13 05:00', recorder)
+        cwd = os.getcwd()
+        os.chdir(workdir)
+        try:
+            with mock.patch.object(s51, 'VideoRecordAcquisitionJob', FakeAcquisition), \
+                    mock.patch.object(s51, 'RecordsSaveToFileRunner', NoopRunner), \
+                    mock.patch.object(s51, 'RecentRecordsAnalystRunner', NoopRunner), \
+                    mock.patch.object(s51, 'Session', return_value=FakeSession()):
+                s51.run_hourly_video_record_add('2026-09-13 04:00', recorder)
+        finally:
+            os.chdir(cwd)
         run_id = recorder.run_id
         recorder.finish('succeeded')
 
@@ -293,10 +298,11 @@ class PipelineTest(unittest.TestCase):
         finally:
             conn.close()
         self.assertEqual(sorted(rows), [
-            ('recent-activity-freq-update', 'freq_update_fail', 1.0),
-            ('recent-activity-freq-update', 'recent_update_fail', 0.0),
+            ('recent-activity-freq-update', 'activity_active', 0.0),
+            ('recent-activity-freq-update', 'activity_changed', 1.0),
+            ('recent-activity-freq-update', 'activity_hot', 1.0),
+            ('recent-activity-freq-update', 'activity_paired', 1.0),
         ])
-
 
 if __name__ == '__main__':
     unittest.main()
