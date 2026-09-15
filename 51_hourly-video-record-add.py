@@ -9,6 +9,7 @@ import datetime
 import gzip
 import os
 import re
+import shutil
 import sys
 from serverchan import sc_send_critical
 from collections import namedtuple, defaultdict, Counter
@@ -247,19 +248,9 @@ class VideoRecordAcquisitionJob(Job):
                  (self.UPDATE_LABEL, self.update_stat))
         return {label: stat for label, stat in pairs if stat is not None}
 
-# 04:00 full-scan snapshots, e.g. data/0400/2026-09-13 04:00.csv.gz, read back a week later for activity.
-# The data/ packing and clean-up only touch top-level files, never this folder.
+# 04:00 full scans kept as gzip of the hourly csv; data/ packing and clean-up never touch this folder
 FULL_SCAN_SNAPSHOT_DIR = 'data/0400'
 FULL_SCAN_SNAPSHOT_RETENTION_DAYS = 30
-_FULL_SCAN_SNAPSHOT_NAME = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}\.csv\.gz$')
-
-RECORD_CSV_HEADER = 'added,aid,bvid,view,danmaku,reply,favorite,coin,share,like\n'
-
-
-def record_csv_line(record) -> str:
-    return '%d,%d,%s,%d,%d,%d,%d,%d,%d,%d\n' % (
-        record.added, record.aid, record.bvid, record.view, record.danmaku, record.reply,
-        record.favorite, record.coin, record.share, record.like)
 
 
 def time_task_days_before(time_task: str, days: int) -> str:
@@ -268,56 +259,18 @@ def time_task_days_before(time_task: str, days: int) -> str:
             - datetime.timedelta(days=days)).strftime('%Y-%m-%d %H:%M')
 
 
-def full_scan_snapshot_path(folder: str, time_task: str) -> str:
-    # same name as the hourly csv of that run (RecordsSaveToFileRunner), plus .gz
-    return os.path.join(folder, '%s.csv.gz' % time_task)
-
-
-def write_full_scan_snapshot(records, path: str) -> str:
-    # .tmp then rename, so a crash never leaves a truncated snapshot behind
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    tmp_path = path + '.tmp'
-    with gzip.open(tmp_path, 'wt', compresslevel=6) as f:
-        f.write(RECORD_CSV_HEADER)
-        for record in records:
-            f.write(record_csv_line(record))
-    os.replace(tmp_path, path)
-    return path
-
-
-def prune_full_scan_snapshots(folder: str, time_task: str,
-                              retention_days: int = FULL_SCAN_SNAPSHOT_RETENTION_DAYS) -> list:
-    # snapshot names start with an ISO time task, so string order is time order
-    if not os.path.isdir(folder):
-        return []
-    cutoff = full_scan_snapshot_path('', time_task_days_before(time_task, retention_days))
-    removed = []
-    for name in sorted(os.listdir(folder)):
-        if _FULL_SCAN_SNAPSHOT_NAME.match(name) and name < cutoff:
-            os.remove(os.path.join(folder, name))
-            removed.append(os.path.join(folder, name))
-    return removed
-
-
-def iter_full_scan_snapshot_views(path: str):
-    # stream (aid, view) from a snapshot, line by line, without loading it
-    with gzip.open(path, 'rt') as f:
-        header = f.readline().rstrip('\n').split(',')
-        aid_idx, view_idx = header.index('aid'), header.index('view')
-        for line in f:
-            fields = line.split(',')
-            yield int(fields[aid_idx]), int(fields[view_idx])
+def full_scan_snapshot_path(time_task: str) -> str:
+    return os.path.join(FULL_SCAN_SNAPSHOT_DIR, '%s.csv.gz' % time_task)
 
 
 # TODO: change to record new
 class RecordsSaveToFileRunner(Thread):
-    def __init__(self, records, time_task, data_folder='data/', snapshot_folder=FULL_SCAN_SNAPSHOT_DIR):
+    def __init__(self, records, time_task, data_folder='data/'):
         super().__init__()
         self.records = records
         self.time_task = time_task
         self.time_label = time_task[-5:]
         self.data_folder = data_folder.rstrip('/') + '/'
-        self.snapshot_folder = snapshot_folder
         self.current_filename = '%s.csv' % self.time_task
         self.logger = logging.getLogger('RecordsSaveToFileRunner')
 
@@ -327,9 +280,11 @@ class RecordsSaveToFileRunner(Thread):
         self.logger.info('will save %d records into file %s' %
                          (len(self.records), current_filename_path))
         with open(current_filename_path, 'w') as f:
-            f.write(RECORD_CSV_HEADER)
+            f.write('added,aid,bvid,view,danmaku,reply,favorite,coin,share,like\n')
             for idx, record in enumerate(self.records, 1):
-                f.write(record_csv_line(record))
+                f.write('%d,%d,%s,%d,%d,%d,%d,%d,%d,%d\n' % (
+                    record.added, record.aid, record.bvid, record.view, record.danmaku, record.reply, record.favorite,
+                    record.coin, record.share, record.like))
                 if idx % 20000 == 0:
                     self.logger.info('%d / %d done' % (idx, len(self.records)))
             self.logger.info('%d / %d done' %
@@ -340,15 +295,17 @@ class RecordsSaveToFileRunner(Thread):
         # keep the full scan as a snapshot for next week's activity update
         if self.time_label == '04:00':
             try:
-                path = write_full_scan_snapshot(
-                    self.records, full_scan_snapshot_path(self.snapshot_folder, self.time_task))
-                self.logger.info('Saved %d records into full scan snapshot %s.' % (
-                    len(self.records), path))
-                for removed in prune_full_scan_snapshots(self.snapshot_folder, self.time_task):
-                    self.logger.info('Removed expired full scan snapshot %s.' % removed)
+                os.makedirs(FULL_SCAN_SNAPSHOT_DIR, exist_ok=True)
+                with open(current_filename_path, 'rb') as src, \
+                        gzip.open(full_scan_snapshot_path(self.time_task), 'wb', compresslevel=6) as dst:
+                    shutil.copyfileobj(src, dst)
+                cutoff = os.path.basename(full_scan_snapshot_path(
+                    time_task_days_before(self.time_task, FULL_SCAN_SNAPSHOT_RETENTION_DAYS)))
+                for name in os.listdir(FULL_SCAN_SNAPSHOT_DIR):
+                    if name < cutoff:  # names start with the time task, so string order is time order
+                        os.remove(os.path.join(FULL_SCAN_SNAPSHOT_DIR, name))
             except Exception as e:
-                self.logger.error(
-                    'Fail to save full scan snapshot. Exception caught. Detail: %s' % e)
+                self.logger.error('Fail to save full scan snapshot. Exception caught. Detail: %s' % e)
 
         # TODO ugly design, should be separated into another class
         if self.time_label == '23:00':
@@ -682,21 +639,12 @@ class RecentRecordsAnalystRunner(Thread):
 
 
 class RecentActivityFreqUpdateRunner(Thread):
-    """Update recent, activity (04:00 only: weekly view growth vs the snapshot 7 days earlier) and freq, in order.
-    Only videos present in both scans get a new activity; step failures log ERROR; activity counts go to `metrics`."""
-
-    LABEL = 'recent-activity-freq-update'
-    ACTIVE_THRESHOLD = 1000
-    HOT_THRESHOLD = 5000
-    UPDATE_CHUNK_SIZE = 1000
-
-    def __init__(self, time_task: str, records: list, snapshot_folder: str = FULL_SCAN_SNAPSHOT_DIR):
+    def __init__(self, time_task, records):
         super().__init__()
         self.time_task = time_task
         self.time_label = time_task[-5:]
         self.records = records
-        self.snapshot_folder = snapshot_folder
-        self.metrics = {}  # name -> count, written into the run record by the caller
+        self.metrics = {}  # activity counts, written into the run record by the caller
         self.logger = logging.getLogger('RecentActivityFreqUpdateRunner')
 
     def _update_recent(self, session):
@@ -717,57 +665,48 @@ class RecentActivityFreqUpdateRunner(Thread):
             self.logger.error('Fail to update recent field. Exception caught. Detail: %s' % e)
             session.rollback()
 
-    def _update_activity(self, session):
+    def _update_activity(self, session, active_threshold=1000, hot_threshold=5000):
         self.logger.info('Now start update activity field...')
         try:
-            last_path = full_scan_snapshot_path(self.snapshot_folder, time_task_days_before(self.time_task, 7))
+            last_path = full_scan_snapshot_path(time_task_days_before(self.time_task, 7))
             if not os.path.isfile(last_path):
-                self.logger.warning('Skip update activity field: last week full scan snapshot %s not found. '
-                                    'Activity left unchanged.' % last_path)
+                self.logger.warning('Skip update activity field: %s not found.' % last_path)
                 return
 
             current = {aid: activity for aid, activity in session.execute(
                 'select aid, activity from tdd_video where activity != 0')}
+            this_views = {r.aid: r.view for r in self.records if r.view >= 0}  # -1 is '--' from the api
 
-            # a view of -1 stands for '--' from the api: treat it as missing
-            this_views = {record.aid: record.view for record in self.records if record.view >= 0}
-            this_count = len(this_views)
-
-            changes = defaultdict(list)  # new activity -> aids whose activity changes
+            # only videos in both scans get a new activity, and only changed ones are written
+            changes = defaultdict(list)  # new activity -> aids
             paired = hot = active = 0
-            for aid, last_view in iter_full_scan_snapshot_views(last_path):
-                # pop: each video pairs at most once, and the index shrinks as it goes
-                view = this_views.pop(aid, None)
-                if view is None or last_view < 0:
-                    continue
-                paired += 1
-                growth = view - last_view
-                if growth >= self.HOT_THRESHOLD:
-                    activity, hot = 2, hot + 1
-                elif growth >= self.ACTIVE_THRESHOLD:
-                    activity, active = 1, active + 1
-                else:
-                    activity = 0
-                if current.get(aid, 0) != activity:
-                    changes[activity].append(aid)
-            del this_views, current
+            with gzip.open(last_path, 'rt') as f:
+                next(f)  # header
+                for line in f:
+                    fields = line.split(',')
+                    aid, last_view = int(fields[1]), int(fields[3])
+                    view = this_views.pop(aid, None)  # pop: a repeated row pairs only once
+                    if view is None or last_view < 0:
+                        continue
+                    paired += 1
+                    growth = view - last_view
+                    activity = 2 if growth >= hot_threshold else 1 if growth >= active_threshold else 0
+                    hot += activity == 2
+                    active += activity == 1
+                    if current.get(aid, 0) != activity:
+                        changes[activity].append(aid)
 
-            pair_ratio = paired / this_count if this_count else 0.0
-            self.logger.info('%d videos in this scan, %d paired with %s (%.1f%%): %d hot, %d active.' % (
-                this_count, paired, last_path, pair_ratio * 100, hot, active))
-
-            # write only changed activity of paired videos; unpaired ones are never touched
             for activity, aids in sorted(changes.items()):
-                for i in range(0, len(aids), self.UPDATE_CHUNK_SIZE):
+                for i in range(0, len(aids), 1000):
                     session.execute('update tdd_video set activity = %d where aid in (%s)' % (
-                        activity, ','.join('%d' % aid for aid in aids[i:i + self.UPDATE_CHUNK_SIZE])))
+                        activity, ','.join(map(str, aids[i:i + 1000]))))
             session.commit()
 
             changed = sum(len(aids) for aids in changes.values())
             self.metrics.update(activity_paired=paired, activity_hot=hot, activity_active=active,
                                 activity_changed=changed)
-            self.logger.info('Finish update activity field! %d hot and %d active videos, %d changed.' % (
-                hot, active, changed))
+            self.logger.info('Finish update activity field! %d paired, %d hot, %d active, %d changed.' % (
+                paired, hot, active, changed))
         except Exception as e:
             self.logger.error('Fail to update activity field. Exception caught. Detail: %s' % e)
             session.rollback()
@@ -789,13 +728,11 @@ class RecentActivityFreqUpdateRunner(Thread):
         self.logger.info(
             'Now start updating recent, activity, freq fields of video...')
         session = Session()
-        try:
-            self._update_recent(session)
-            if self.time_label == '04:00':
-                self._update_activity(session)
-            self._update_freq(session)
-        finally:
-            session.close()
+        self._update_recent(session)
+        if self.time_label == '04:00':
+            self._update_activity(session)
+        self._update_freq(session)
+        session.close()
         self.logger.info(
             'Finish update recent, activity, freq fields of video!')
 
@@ -866,10 +803,9 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     for runner in data_analysis_pipeline_runner_list:
         runner.join()
 
-    logger.info('%s metrics: %s' % (RecentActivityFreqUpdateRunner.LABEL, activity_freq_runner.metrics))
     if recorder is not None:
         for name, value in activity_freq_runner.metrics.items():
-            recorder.add_metric(RecentActivityFreqUpdateRunner.LABEL, name, value, unit='count')
+            recorder.add_metric('recent-activity-freq-update', name, value, unit='count')
 
     logger.info('Finish downstream data analysis pipelines!')
     del data_analysis_pipeline_runner_list  # release memory
