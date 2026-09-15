@@ -247,13 +247,8 @@ class VideoRecordAcquisitionJob(Job):
                  (self.UPDATE_LABEL, self.update_stat))
         return {label: stat for label, stat in pairs if stat is not None}
 
-# ---- daily full-scan snapshots ----------------------------------------------
-# The 04:00 run keeps its records as data/0400/<time task>.csv.gz -- the name of
-# its hourly csv plus .gz, e.g. '2026-09-13 04:00.csv.gz' -- for
-# FULL_SCAN_SNAPSHOT_RETENTION_DAYS days. The 23:00 packing, its
-# 3-day csv removal and the manual clean-up scripts only glob top-level,
-# date-prefixed files in data/, so they never reach this sub-directory.
-# RecentActivityFreqUpdateRunner reads the snapshot from 7 days earlier back.
+# 04:00 full-scan snapshots, e.g. data/0400/2026-09-13 04:00.csv.gz, read back a week later for activity.
+# The data/ packing and clean-up only touch top-level files, never this folder.
 FULL_SCAN_SNAPSHOT_DIR = 'data/0400'
 FULL_SCAN_SNAPSHOT_RETENTION_DAYS = 30
 _FULL_SCAN_SNAPSHOT_NAME = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}\.csv\.gz$')
@@ -279,8 +274,7 @@ def full_scan_snapshot_path(folder: str, time_task: str) -> str:
 
 
 def write_full_scan_snapshot(records, path: str) -> str:
-    # write to .tmp then rename: a crash mid-write must not leave a truncated
-    # snapshot that next week's run would read as a complete scan
+    # .tmp then rename, so a crash never leaves a truncated snapshot behind
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     tmp_path = path + '.tmp'
     with gzip.open(tmp_path, 'wt', compresslevel=6) as f:
@@ -343,8 +337,7 @@ class RecordsSaveToFileRunner(Thread):
         self.logger.info('Finish save %d records into file %s!' %
                          (len(self.records), current_filename_path))
 
-        # keep the daily full scan as a dated snapshot, outside the packing /
-        # 3-day removal below; next week's activity update reads it back
+        # keep the full scan as a snapshot for next week's activity update
         if self.time_label == '04:00':
             try:
                 path = write_full_scan_snapshot(
@@ -689,27 +682,10 @@ class RecentRecordsAnalystRunner(Thread):
 
 
 class RecentActivityFreqUpdateRunner(Thread):
-    """
-    Refresh the recent / activity / freq fields of tdd_video from this run's
-    records. The three steps run in order in one runner: freq is derived from
-    the activity and recent values written just before it.
+    """Update recent, activity (04:00 only: weekly view growth vs the snapshot 7 days earlier) and freq, in order.
+    Only videos present in both scans get a new activity; step failures log ERROR and count in `stat`."""
 
-    activity (04:00 only) is the weekly view growth between this full scan and
-    the snapshot saved by the full scan 7 days earlier: >= HOT_THRESHOLD -> 2
-    (fetched hourly), >= ACTIVE_THRESHOLD -> 1 (every 4 hours), otherwise 0.
-    Only videos with a valid view in both scans are classified; any other video
-    keeps its activity, so a partial scan updates the videos it did reach. A
-    missing snapshot skips the step entirely.
-
-    Memory: the only per-video index is aid -> view over this run's records,
-    whose int objects already exist; last week's snapshot is streamed against
-    it line by line. Neither side depends on row order.
-
-    Every step catches its own failure, logs it at ERROR and counts it in
-    `stat` (a JobStat), which the caller persists into the run record.
-    """
-
-    LABEL = 'activity-freq-update'
+    LABEL = 'recent-activity-freq-update'
     ACTIVE_THRESHOLD = 1000
     HOT_THRESHOLD = 5000
     LOW_PAIR_RATIO = 0.9
@@ -792,8 +768,7 @@ class RecentActivityFreqUpdateRunner(Thread):
                                     'unpaired videos keep their activity.' % (
                                         pair_ratio * 100, self.LOW_PAIR_RATIO * 100))
 
-            # only paired videos whose activity changes are written; unpaired
-            # videos are never touched
+            # write only changed activity of paired videos; unpaired ones are never touched
             for activity, aids in sorted(changes.items()):
                 for i in range(0, len(aids), self.UPDATE_CHUNK_SIZE):
                     session.execute('update tdd_video set activity = %d where aid in (%s)' % (

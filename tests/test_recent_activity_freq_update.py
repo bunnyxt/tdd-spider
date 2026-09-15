@@ -1,15 +1,5 @@
-"""
-51's daily full-scan snapshots and RecentActivityFreqUpdateRunner.
-
-* snapshot helpers -- write (atomic), streaming read, prune;
-* RecentActivityFreqUpdateRunner -- weekly view growth against the snapshot from 7 days
-  earlier, written back through a fake session: missing snapshot, partial
-  scan, row order, unchanged rows, chunking, DB failures;
-* RecordsSaveToFileRunner writing the 04:00 snapshot, and the runner's JobStat
-  landing in the run record.
-
-The script imports ``db`` (SQLAlchemy); where that is absent the module skips.
-"""
+"""51's full-scan snapshots and RecentActivityFreqUpdateRunner, driven through a fake session.
+Skips where ``db`` (SQLAlchemy) is unavailable."""
 
 import gzip
 import importlib.util
@@ -306,9 +296,9 @@ class PipelineTest(unittest.TestCase):
         finally:
             conn.close()
         self.assertEqual(sorted(rows), [
-            ('activity-freq-update', 'freq_update_fail', 1.0),
-            ('activity-freq-update', 'recent_update_fail', 0.0),
-            ('activity-freq-update', 'total_count', 0.0),
+            ('recent-activity-freq-update', 'freq_update_fail', 1.0),
+            ('recent-activity-freq-update', 'recent_update_fail', 0.0),
+            ('recent-activity-freq-update', 'total_count', 0.0),
         ])
 
 
