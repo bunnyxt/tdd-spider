@@ -1,11 +1,11 @@
 """
-51's daily full-scan snapshots and ActivityFreqUpdateJob.
+51's daily full-scan snapshots and RecentActivityFreqUpdateRunner.
 
 * snapshot helpers -- write (atomic), streaming read, prune;
-* ActivityFreqUpdateJob -- weekly view growth against the snapshot from 7 days
+* RecentActivityFreqUpdateRunner -- weekly view growth against the snapshot from 7 days
   earlier, written back through a fake session: missing snapshot, partial
   scan, row order, unchanged rows, chunking, DB failures;
-* RecordsSaveToFileRunner writing the 04:00 snapshot, and the job's JobStat
+* RecordsSaveToFileRunner writing the 04:00 snapshot, and the runner's JobStat
   landing in the run record.
 
 The script imports ``db`` (SQLAlchemy); where that is absent the module skips.
@@ -141,40 +141,38 @@ class SnapshotTest(unittest.TestCase):
 
 
 @unittest.skipUnless(_DEPS, 'db dependencies unavailable')
-class ActivityFreqUpdateJobTest(unittest.TestCase):
+class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
 
     def _last_week(self, records):
         s51.write_full_scan_snapshot(records, s51.full_scan_snapshot_path(self.dir, '2026-09-06 04:00'))
 
-    def _job(self, records, session, task=TASK):
-        with mock.patch.object(s51, 'Session', return_value=session):
-            return s51.ActivityFreqUpdateJob(task, records, snapshot_folder=self.dir)
+    def _runner(self, records, task=TASK):
+        return s51.RecentActivityFreqUpdateRunner(task, records, snapshot_folder=self.dir)
 
     def test_thresholds_on_weekly_growth(self):
         self._last_week([_rec(aid, 100) for aid in range(1, 6)])
         session = FakeSession()
-        job = self._job([_rec(1, 1099), _rec(2, 1100), _rec(3, 5099), _rec(4, 5100), _rec(5, 100)],
-                        session)
-        job._update_activity()
+        runner = self._runner([_rec(1, 1099), _rec(2, 1100), _rec(3, 5099), _rec(4, 5100), _rec(5, 100)])
+        runner._update_activity(session)
         self.assertEqual(session.activity_updates(), [
             'update tdd_video set activity = 1 where aid in (2,3)',
             'update tdd_video set activity = 2 where aid in (4)',
         ])
-        self.assertEqual(job.stat.total_count, 5)
-        self.assertEqual((job.stat.condition['activity_hot'], job.stat.condition['activity_active']), (1, 2))
+        self.assertEqual(runner.stat.total_count, 5)
+        self.assertEqual((runner.stat.condition['activity_hot'], runner.stat.condition['activity_active']), (1, 2))
 
     def test_missing_last_week_scan_warns_and_writes_nothing(self):
         # a snapshot from 6 days ago does not stand in for 7
         s51.write_full_scan_snapshot([_rec(1, 0)], s51.full_scan_snapshot_path(self.dir, '2026-09-07 04:00'))
         session = FakeSession(current={2: 2})
-        job = self._job([_rec(1, 99999)], session)
-        with self.assertLogs('ActivityFreqUpdateJob', level='WARNING') as logs:
-            job._update_activity()
+        runner = self._runner([_rec(1, 99999)])
+        with self.assertLogs('RecentActivityFreqUpdateRunner', level='WARNING') as logs:
+            runner._update_activity(session)
         self.assertIn('not found', '\n'.join(logs.output))
         self.assertEqual((session.statements, session.commits), ([], 0))
-        self.assertEqual(dict(job.stat.condition),
+        self.assertEqual(dict(runner.stat.condition),
                          {'activity_skipped_no_last_scan': 1, 'activity_update_fail': 0})
 
     def test_partial_last_week_scan_updates_paired_videos_only(self):
@@ -184,69 +182,70 @@ class ActivityFreqUpdateJobTest(unittest.TestCase):
         this = [_rec(1, 150), _rec(2, 900_000), _rec(3, 6100), _rec(4, 10), _rec(5, 9000), _rec(6, -1)]
         # 1 was hot, 2 and 7 were hot (unpaired, must stay), 3 was 0
         session = FakeSession(current={1: 2, 2: 2, 7: 2})
-        job = self._job(this, session)
-        with self.assertLogs('ActivityFreqUpdateJob', level='WARNING') as logs:
-            job._update_activity()
+        runner = self._runner(this)
+        with self.assertLogs('RecentActivityFreqUpdateRunner', level='WARNING') as logs:
+            runner._update_activity(session)
         self.assertIn('paired with last week scan', '\n'.join(logs.output))
         self.assertEqual(session.activity_updates(), [
             'update tdd_video set activity = 0 where aid in (1)',
             'update tdd_video set activity = 2 where aid in (3)',
         ])
         self.assertEqual(session.commits, 1)
-        self.assertEqual(job.stat.total_count, 2)
-        self.assertEqual(dict(job.stat.condition), {
+        self.assertEqual(runner.stat.total_count, 2)
+        self.assertEqual(dict(runner.stat.condition), {
             'activity_skipped_no_last_scan': 0, 'activity_hot': 1, 'activity_active': 0,
             'activity_changed': 2, 'activity_low_pair_ratio': 1, 'activity_update_fail': 0})
 
     def test_unchanged_activity_writes_nothing_and_large_changes_are_chunked(self):
         self._last_week([_rec(aid, 0) for aid in range(1, 8)])
         session = FakeSession(current={1: 1})
-        job = self._job([_rec(1, 2000)] + [_rec(aid, 9000) for aid in range(2, 8)], session)
-        job.UPDATE_CHUNK_SIZE = 4
-        job._update_activity()
+        runner = self._runner([_rec(1, 2000)] + [_rec(aid, 9000) for aid in range(2, 8)])
+        runner.UPDATE_CHUNK_SIZE = 4
+        runner._update_activity(session)
         self.assertEqual(session.activity_updates(), [
             'update tdd_video set activity = 2 where aid in (2,3,4,5)',
             'update tdd_video set activity = 2 where aid in (6,7)',
         ])
-        self.assertEqual(job.stat.condition['activity_low_pair_ratio'], 0)
-        self.assertEqual(job.stat.condition['activity_changed'], 6)
+        self.assertEqual(runner.stat.condition['activity_low_pair_ratio'], 0)
+        self.assertEqual(runner.stat.condition['activity_changed'], 6)
 
     def test_row_order_and_duplicates_do_not_matter(self):
         # neither side is sorted; a repeated snapshot row pairs only once
         self._last_week([_rec(3, 0), _rec(1, 0), _rec(2, 0), _rec(1, 0)])
         session = FakeSession()
-        job = self._job([_rec(2, 6000), _rec(3, 1500), _rec(1, 6000)], session)
-        job._update_activity()
+        runner = self._runner([_rec(2, 6000), _rec(3, 1500), _rec(1, 6000)])
+        runner._update_activity(session)
         self.assertEqual(session.activity_updates(), [
             'update tdd_video set activity = 1 where aid in (3)',
             'update tdd_video set activity = 2 where aid in (1,2)',
         ])
-        self.assertEqual((job.stat.total_count, job.stat.condition['activity_hot']), (3, 2))
+        self.assertEqual((runner.stat.total_count, runner.stat.condition['activity_hot']), (3, 2))
 
     def test_db_failure_rolls_back_and_is_counted(self):
         self._last_week([_rec(1, 0)])
         session = FakeSession(fail_on='update tdd_video set activity')
-        job = self._job([_rec(1, 7000)], session)
-        with self.assertLogs('ActivityFreqUpdateJob', level='ERROR'):
-            job._update_activity()
+        runner = self._runner([_rec(1, 7000)])
+        with self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
+            runner._update_activity(session)
         self.assertEqual((session.commits, session.rollbacks), (0, 1))
-        self.assertEqual(job.stat.condition['activity_update_fail'], 1)
+        self.assertEqual(runner.stat.condition['activity_update_fail'], 1)
 
     def test_recent_and_freq_failures_are_errors(self):
         session = FakeSession(fail_on='update tdd_video set')
-        job = self._job([], session, task='2026-09-13 05:00')
-        with self.assertLogs('ActivityFreqUpdateJob', level='ERROR') as logs:
-            job._update_recent()
-            job._update_freq()
+        runner = self._runner([], task='2026-09-13 05:00')
+        with self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR') as logs:
+            runner._update_recent(session)
+            runner._update_freq(session)
         self.assertEqual(len(logs.records), 2)
-        self.assertEqual(dict(job.stat.condition), {'recent_update_fail': 1, 'freq_update_fail': 1})
+        self.assertEqual(dict(runner.stat.condition), {'recent_update_fail': 1, 'freq_update_fail': 1})
 
     def test_run_skips_activity_outside_0400_and_closes_session(self):
         session = FakeSession()
-        job = self._job([_rec(1, 1)], session, task='2026-09-13 05:00')
-        with self.assertLogs('ActivityFreqUpdateJob', level='INFO'):
-            job.run()
-        self.assertNotIn('activity_update_fail', job.stat.condition)
+        runner = self._runner([_rec(1, 1)], task='2026-09-13 05:00')
+        with mock.patch.object(s51, 'Session', return_value=session), \
+                self.assertLogs('RecentActivityFreqUpdateRunner', level='INFO'):
+            runner.run()
+        self.assertNotIn('activity_update_fail', runner.stat.condition)
         self.assertEqual(session.activity_updates(), [])
         self.assertTrue(session.closed)
 
@@ -270,7 +269,7 @@ class PipelineTest(unittest.TestCase):
                                     data_folder=self.data, snapshot_folder=self.snap).run()
         self.assertEqual(os.listdir(self.snap), ['2026-09-13 04:00.csv.gz'])
 
-    def test_job_stat_lands_in_run_record(self):
+    def test_runner_stat_lands_in_run_record(self):
         class FakeAcquisition:
             api_stats = None
 

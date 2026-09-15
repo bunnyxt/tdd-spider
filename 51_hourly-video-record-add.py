@@ -15,7 +15,7 @@ from collections import namedtuple, defaultdict, Counter
 from typing import Optional
 from core import RecordNew
 from service import Service
-from job import FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool
+from job import FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool, JobStat
 from runrecord import RunRecorder
 from timer import Timer
 import logging
@@ -253,7 +253,7 @@ class VideoRecordAcquisitionJob(Job):
 # FULL_SCAN_SNAPSHOT_RETENTION_DAYS days. The 23:00 packing, its
 # 3-day csv removal and the manual clean-up scripts only glob top-level,
 # date-prefixed files in data/, so they never reach this sub-directory.
-# ActivityFreqUpdateJob reads the snapshot from 7 days earlier back.
+# RecentActivityFreqUpdateRunner reads the snapshot from 7 days earlier back.
 FULL_SCAN_SNAPSHOT_DIR = 'data/0400'
 FULL_SCAN_SNAPSHOT_RETENTION_DAYS = 30
 _FULL_SCAN_SNAPSHOT_NAME = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}\.csv\.gz$')
@@ -688,11 +688,11 @@ class RecentRecordsAnalystRunner(Thread):
                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
 
 
-class ActivityFreqUpdateJob(Job):
+class RecentActivityFreqUpdateRunner(Thread):
     """
     Refresh the recent / activity / freq fields of tdd_video from this run's
-    records. The three steps run in order in one job: freq is derived from the
-    activity and recent values written just before it.
+    records. The three steps run in order in one runner: freq is derived from
+    the activity and recent values written just before it.
 
     activity (04:00 only) is the weekly view growth between this full scan and
     the snapshot saved by the full scan 7 days earlier: >= HOT_THRESHOLD -> 2
@@ -706,7 +706,7 @@ class ActivityFreqUpdateJob(Job):
     it line by line. Neither side depends on row order.
 
     Every step catches its own failure, logs it at ERROR and counts it in
-    `stat`, which the caller persists into the run record.
+    `stat` (a JobStat), which the caller persists into the run record.
     """
 
     LABEL = 'activity-freq-update'
@@ -716,43 +716,35 @@ class ActivityFreqUpdateJob(Job):
     UPDATE_CHUNK_SIZE = 1000
 
     def __init__(self, time_task: str, records: list, snapshot_folder: str = FULL_SCAN_SNAPSHOT_DIR):
-        super().__init__(self.LABEL)
+        super().__init__()
         self.time_task = time_task
         self.time_label = time_task[-5:]
         self.records = records
         self.snapshot_folder = snapshot_folder
-        self.session = Session()
+        self.stat = JobStat()
+        self.logger = logging.getLogger('RecentActivityFreqUpdateRunner')
 
-    def process(self):
-        self._update_recent()
-        if self.time_label == '04:00':
-            self._update_activity()
-        self._update_freq()
-
-    def cleanup(self):
-        self.session.close()
-
-    def _update_recent(self):
+    def _update_recent(self, session):
         self.logger.info('Now start update recent field...')
         try:
             now_ts = get_ts_s()
             last_1d_ts = now_ts - 1 * 24 * 60 * 60
             last_7d_ts = now_ts - 7 * 24 * 60 * 60
-            self.session.execute(
+            session.execute(
                 'update tdd_video set recent = 0 where added < %d' % last_7d_ts)
-            self.session.execute('update tdd_video set recent = 1 where added >= %d && added < %d' % (
+            session.execute('update tdd_video set recent = 1 where added >= %d && added < %d' % (
                 last_7d_ts, last_1d_ts))
-            self.session.execute(
+            session.execute(
                 'update tdd_video set recent = 2 where added >= %d' % last_1d_ts)
-            self.session.commit()
+            session.commit()
             self.stat.condition['recent_update_fail'] = 0
             self.logger.info('Finish update recent field!')
         except Exception as e:
             self.stat.condition['recent_update_fail'] = 1
             self.logger.error('Fail to update recent field. Exception caught. Detail: %s' % e)
-            self.session.rollback()
+            session.rollback()
 
-    def _update_activity(self):
+    def _update_activity(self, session):
         self.logger.info('Now start update activity field...')
         condition = self.stat.condition
         try:
@@ -765,7 +757,7 @@ class ActivityFreqUpdateJob(Job):
                 return
             condition['activity_skipped_no_last_scan'] = 0
 
-            current = {aid: activity for aid, activity in self.session.execute(
+            current = {aid: activity for aid, activity in session.execute(
                 'select aid, activity from tdd_video where activity != 0')}
 
             # a view of -1 stands for '--' from the api: treat it as missing
@@ -804,9 +796,9 @@ class ActivityFreqUpdateJob(Job):
             # videos are never touched
             for activity, aids in sorted(changes.items()):
                 for i in range(0, len(aids), self.UPDATE_CHUNK_SIZE):
-                    self.session.execute('update tdd_video set activity = %d where aid in (%s)' % (
+                    session.execute('update tdd_video set activity = %d where aid in (%s)' % (
                         activity, ','.join('%d' % aid for aid in aids[i:i + self.UPDATE_CHUNK_SIZE])))
-            self.session.commit()
+            session.commit()
 
             changed = sum(len(aids) for aids in changes.values())
             self.stat.total_count = paired
@@ -820,22 +812,36 @@ class ActivityFreqUpdateJob(Job):
         except Exception as e:
             condition['activity_update_fail'] = 1
             self.logger.error('Fail to update activity field. Exception caught. Detail: %s' % e)
-            self.session.rollback()
+            session.rollback()
 
-    def _update_freq(self):
+    def _update_freq(self, session):
         self.logger.info('Now start update freq field...')
         try:
-            self.session.execute('update tdd_video set freq = 0')
-            self.session.execute('update tdd_video set freq = 1 where activity = 1')
-            self.session.execute(
+            session.execute('update tdd_video set freq = 0')
+            session.execute('update tdd_video set freq = 1 where activity = 1')
+            session.execute(
                 'update tdd_video set freq = 2 where activity = 2 || recent = 1')
-            self.session.commit()
+            session.commit()
             self.stat.condition['freq_update_fail'] = 0
             self.logger.info('Finish update freq field!')
         except Exception as e:
             self.stat.condition['freq_update_fail'] = 1
             self.logger.error('Fail to update freq field. Exception caught. Detail: %s' % e)
-            self.session.rollback()
+            session.rollback()
+
+    def run(self):
+        self.logger.info(
+            'Now start updating recent, activity, freq fields of video...')
+        session = Session()
+        try:
+            self._update_recent(session)
+            if self.time_label == '04:00':
+                self._update_activity(session)
+            self._update_freq(session)
+        finally:
+            session.close()
+        self.logger.info(
+            'Finish update recent, activity, freq fields of video!')
 
 
 def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = None):
@@ -893,20 +899,20 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
 
     # downstream data analysis pipeline
     logger.info('Now start downstream data analysis pipelines...')
-    activity_freq_job = ActivityFreqUpdateJob(time_task, records)
+    activity_freq_runner = RecentActivityFreqUpdateRunner(time_task, records)
     data_analysis_pipeline_runner_list = [
         RecordsSaveToFileRunner(records, time_task),
         RecentRecordsAnalystRunner(records, time_task),
-        activity_freq_job,
+        activity_freq_runner,
     ]
     for runner in data_analysis_pipeline_runner_list:
         runner.start()
     for runner in data_analysis_pipeline_runner_list:
         runner.join()
 
-    logger.info(activity_freq_job.stat.get_summary(ActivityFreqUpdateJob.LABEL))
+    logger.info(activity_freq_runner.stat.get_summary(RecentActivityFreqUpdateRunner.LABEL))
     if recorder is not None:
-        recorder.add_job_stat_metrics(ActivityFreqUpdateJob.LABEL, activity_freq_job.stat)
+        recorder.add_job_stat_metrics(RecentActivityFreqUpdateRunner.LABEL, activity_freq_runner.stat)
 
     logger.info('Finish downstream data analysis pipelines!')
     del data_analysis_pipeline_runner_list  # release memory
