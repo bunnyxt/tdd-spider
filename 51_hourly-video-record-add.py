@@ -12,7 +12,6 @@ import re
 import sys
 from serverchan import sc_send_critical
 from collections import namedtuple, defaultdict, Counter
-from operator import attrgetter
 from typing import Optional
 from core import RecordNew
 from service import Service
@@ -250,8 +249,8 @@ class VideoRecordAcquisitionJob(Job):
 
 # ---- daily full-scan snapshots ----------------------------------------------
 # The 04:00 run keeps its records as data/0400/<time task>.csv.gz -- the name of
-# its hourly csv plus .gz, e.g. '2026-09-13 04:00.csv.gz' -- in ascending aid
-# order, for FULL_SCAN_SNAPSHOT_RETENTION_DAYS days. The 23:00 packing, its
+# its hourly csv plus .gz, e.g. '2026-09-13 04:00.csv.gz' -- for
+# FULL_SCAN_SNAPSHOT_RETENTION_DAYS days. The 23:00 packing, its
 # 3-day csv removal and the manual clean-up scripts only glob top-level,
 # date-prefixed files in data/, so they never reach this sub-directory.
 # ActivityFreqUpdateJob reads the snapshot from 7 days earlier back.
@@ -307,22 +306,13 @@ def prune_full_scan_snapshots(folder: str, time_task: str,
 
 
 def iter_full_scan_snapshot_views(path: str):
-    """
-    Stream (aid, view) from a snapshot, in file order, without loading it.
-    Raises ValueError if aids are not ascending -- the merge in
-    ActivityFreqUpdateJob depends on it and must fail loudly, not mis-pair.
-    """
+    """Stream (aid, view) from a snapshot, line by line, without loading it."""
     with gzip.open(path, 'rt') as f:
         header = f.readline().rstrip('\n').split(',')
         aid_idx, view_idx = header.index('aid'), header.index('view')
-        last_aid = None
         for line in f:
             fields = line.split(',')
-            aid = int(fields[aid_idx])
-            if last_aid is not None and aid < last_aid:
-                raise ValueError(f'full scan snapshot {path} is not sorted by aid')
-            last_aid = aid
-            yield aid, int(fields[view_idx])
+            yield int(fields[aid_idx]), int(fields[view_idx])
 
 
 # TODO: change to record new
@@ -711,9 +701,9 @@ class ActivityFreqUpdateJob(Job):
     keeps its activity, so a partial scan updates the videos it did reach. A
     missing snapshot skips the step entirely.
 
-    Memory: records arrive sorted by aid (see run_hourly_video_record_add) and
-    the snapshot is stored in the same order, so the two are merged while the
-    snapshot is streamed -- no per-aid index of ~1M entries is built.
+    Memory: the only per-video index is aid -> view over this run's records,
+    whose int objects already exist; last week's snapshot is streamed against
+    it line by line. Neither side depends on row order.
 
     Every step catches its own failure, logs it at ERROR and counts it in
     `stat`, which the caller persists into the run record.
@@ -778,37 +768,28 @@ class ActivityFreqUpdateJob(Job):
             current = {aid: activity for aid, activity in self.session.execute(
                 'select aid, activity from tdd_video where activity != 0')}
 
+            # a view of -1 stands for '--' from the api: treat it as missing
+            this_views = {record.aid: record.view for record in self.records if record.view >= 0}
+            this_count = len(this_views)
+
             changes = defaultdict(list)  # new activity -> aids whose activity changes
-            this_count = paired = hot = active = 0
-            last_views = iter_full_scan_snapshot_views(last_path)
-            last_aid, last_view = next(last_views, (None, None))
-            prev_aid = None
-            for record in self.records:
-                if prev_aid is not None and record.aid < prev_aid:
-                    raise ValueError('records are not sorted by aid')
-                prev_aid = record.aid
-                while last_aid is not None and last_aid < record.aid:
-                    last_aid, last_view = next(last_views, (None, None))
-                if record.view < 0:  # '--' from the api
-                    continue
-                this_count += 1
-                if last_aid != record.aid or last_view < 0:
+            paired = hot = active = 0
+            for aid, last_view in iter_full_scan_snapshot_views(last_path):
+                # pop: each video pairs at most once, and the index shrinks as it goes
+                view = this_views.pop(aid, None)
+                if view is None or last_view < 0:
                     continue
                 paired += 1
-                growth = record.view - last_view
+                growth = view - last_view
                 if growth >= self.HOT_THRESHOLD:
                     activity, hot = 2, hot + 1
                 elif growth >= self.ACTIVE_THRESHOLD:
                     activity, active = 1, active + 1
                 else:
                     activity = 0
-                if current.get(record.aid, 0) != activity:
-                    changes[activity].append(record.aid)
-            # drain the rest so the ascending-aid check covers the whole snapshot:
-            # a disorder past the last record would otherwise mis-pair silently
-            for _ in last_views:
-                pass
-            del current
+                if current.get(aid, 0) != activity:
+                    changes[activity].append(aid)
+            del this_views, current
 
             pair_ratio = paired / this_count if this_count else 0.0
             self.logger.info('%d videos in this scan, %d paired with %s (%.1f%%): %d hot, %d active.' % (
@@ -909,10 +890,6 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
 
     logger.info(
         f'Finish upstream data acquisition pipelines! {len(records)} records received')
-
-    # sort in place by aid (no copy of the list): the 04:00 snapshot is written
-    # in this order and ActivityFreqUpdateJob merges it with last week's
-    records.sort(key=attrgetter('aid'))
 
     # downstream data analysis pipeline
     logger.info('Now start downstream data analysis pipelines...')

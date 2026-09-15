@@ -1,10 +1,10 @@
 """
 51's daily full-scan snapshots and ActivityFreqUpdateJob.
 
-* snapshot helpers -- write (atomic, ascending aid), streaming read, prune;
-* ActivityFreqUpdateJob -- weekly view growth merged against the snapshot from
-  7 days earlier and written back through a fake session: missing snapshot,
-  partial scan, unchanged rows, chunking, ordering guards, DB failures;
+* snapshot helpers -- write (atomic), streaming read, prune;
+* ActivityFreqUpdateJob -- weekly view growth against the snapshot from 7 days
+  earlier, written back through a fake session: missing snapshot, partial
+  scan, row order, unchanged rows, chunking, DB failures;
 * RecordsSaveToFileRunner writing the 04:00 snapshot, and the job's JobStat
   landing in the run record.
 
@@ -113,11 +113,6 @@ class SnapshotTest(unittest.TestCase):
             self.assertEqual(f.readline(), s51.RECORD_CSV_HEADER)
         self.assertEqual(os.listdir(self.dir), ['2026-09-13 04:00.csv.gz'])
 
-    def test_unsorted_snapshot_raises(self):
-        path = s51.write_full_scan_snapshot([_rec(5, 1), _rec(3, 1)], s51.full_scan_snapshot_path(self.dir, TASK))
-        with self.assertRaises(ValueError):
-            list(s51.iter_full_scan_snapshot_views(path))
-
     def test_failed_write_keeps_previous_snapshot(self):
         path = s51.full_scan_snapshot_path(self.dir, TASK)
         s51.write_full_scan_snapshot([_rec(1, 10)], path)
@@ -183,11 +178,12 @@ class ActivityFreqUpdateJobTest(unittest.TestCase):
                          {'activity_skipped_no_last_scan': 1, 'activity_update_fail': 0})
 
     def test_partial_last_week_scan_updates_paired_videos_only(self):
-        # last week's scan only reached aids 1 and 3 (and 5 with an invalid view)
-        self._last_week([_rec(1, 100), _rec(3, 100), _rec(5, -1)])
+        # last week's scan only reached aids 1 and 3 (and 5 with an invalid view);
+        # 7 is in last week's scan but missing from this one
+        self._last_week([_rec(1, 100), _rec(3, 100), _rec(5, -1), _rec(7, 0)])
         this = [_rec(1, 150), _rec(2, 900_000), _rec(3, 6100), _rec(4, 10), _rec(5, 9000), _rec(6, -1)]
-        # 1 was hot, 2 was hot (unpaired, must stay), 3 was 0
-        session = FakeSession(current={1: 2, 2: 2})
+        # 1 was hot, 2 and 7 were hot (unpaired, must stay), 3 was 0
+        session = FakeSession(current={1: 2, 2: 2, 7: 2})
         job = self._job(this, session)
         with self.assertLogs('ActivityFreqUpdateJob', level='WARNING') as logs:
             job._update_activity()
@@ -215,18 +211,17 @@ class ActivityFreqUpdateJobTest(unittest.TestCase):
         self.assertEqual(job.stat.condition['activity_low_pair_ratio'], 0)
         self.assertEqual(job.stat.condition['activity_changed'], 6)
 
-    def test_unsorted_input_fails_without_writing(self):
-        self._last_week([_rec(1, 0), _rec(2, 0)])
-        for records, snapshot in (([_rec(2, 9000), _rec(1, 9000)], None),
-                                  ([_rec(1, 9000), _rec(2, 9000)], [_rec(2, 0), _rec(1, 0)])):
-            if snapshot is not None:
-                self._last_week(snapshot)
-            session = FakeSession()
-            job = self._job(records, session)
-            with self.assertLogs('ActivityFreqUpdateJob', level='ERROR'):
-                job._update_activity()
-            self.assertEqual((session.activity_updates(), session.commits, session.rollbacks), ([], 0, 1))
-            self.assertEqual(job.stat.condition['activity_update_fail'], 1)
+    def test_row_order_and_duplicates_do_not_matter(self):
+        # neither side is sorted; a repeated snapshot row pairs only once
+        self._last_week([_rec(3, 0), _rec(1, 0), _rec(2, 0), _rec(1, 0)])
+        session = FakeSession()
+        job = self._job([_rec(2, 6000), _rec(3, 1500), _rec(1, 6000)], session)
+        job._update_activity()
+        self.assertEqual(session.activity_updates(), [
+            'update tdd_video set activity = 1 where aid in (3)',
+            'update tdd_video set activity = 2 where aid in (1,2)',
+        ])
+        self.assertEqual((job.stat.total_count, job.stat.condition['activity_hot']), (3, 2))
 
     def test_db_failure_rolls_back_and_is_counted(self):
         self._last_week([_rec(1, 0)])
@@ -275,13 +270,12 @@ class PipelineTest(unittest.TestCase):
                                     data_folder=self.data, snapshot_folder=self.snap).run()
         self.assertEqual(os.listdir(self.snap), ['2026-09-13 04:00.csv.gz'])
 
-    def test_records_sorted_and_job_stat_lands_in_run_record(self):
+    def test_job_stat_lands_in_run_record(self):
         class FakeAcquisition:
             api_stats = None
 
             def __init__(self, time_task, record_queue):
-                for aid in (3, 1, 2):
-                    record_queue.put(_rec(aid, 1))
+                pass
 
             def start(self):
                 pass
@@ -292,24 +286,20 @@ class PipelineTest(unittest.TestCase):
             def stats(self):
                 return {}
 
-        seen = {}
-
-        class SpyRunner(threading.Thread):
-            def __init__(self, records, *args, **kwargs):
+        class NoopRunner(threading.Thread):
+            def __init__(self, *args, **kwargs):
                 super().__init__()
-                seen['aids'] = [r.aid for r in records]
 
         db_path = os.path.join(tempfile.mkdtemp(), 'run-records.sqlite3')
         recorder = s51.RunRecorder.start('51_hourly-video-record-add', db_path=db_path)
         with mock.patch.object(s51, 'VideoRecordAcquisitionJob', FakeAcquisition), \
-                mock.patch.object(s51, 'RecordsSaveToFileRunner', SpyRunner), \
-                mock.patch.object(s51, 'RecentRecordsAnalystRunner', SpyRunner), \
+                mock.patch.object(s51, 'RecordsSaveToFileRunner', NoopRunner), \
+                mock.patch.object(s51, 'RecentRecordsAnalystRunner', NoopRunner), \
                 mock.patch.object(s51, 'Session', return_value=FakeSession(fail_on='set freq')):
             s51.run_hourly_video_record_add('2026-09-13 05:00', recorder)
         run_id = recorder.run_id
         recorder.finish('succeeded')
 
-        self.assertEqual(seen['aids'], [1, 2, 3])
         conn = sqlite3.connect(db_path)
         try:
             rows = conn.execute('SELECT scope, name, value FROM run_metric WHERE run_id = ?',
