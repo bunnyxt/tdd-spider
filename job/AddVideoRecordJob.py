@@ -1,6 +1,6 @@
+import time
 from .Job import Job
 from service import Service, CodeError
-from timer import Timer
 from queue import Queue
 from db import Session
 from core import RecordNew
@@ -35,8 +35,7 @@ class AddVideoRecordJob(Job):
 
             aid = self.aid_queue.get()
             self.logger.debug(f'Now start add video record. aid: {aid}')
-            timer = Timer()
-            timer.start()
+            item_start = time.perf_counter()
 
             stage_stat = {}  # per-stage durations, filled by the task (http_ms, db_ms)
             try:
@@ -80,7 +79,7 @@ class AddVideoRecordJob(Job):
                 self.logger.debug(f'New video record {new_video_record} added. aid: {aid}')
                 self.stat.condition['success'] += 1
 
-            timer.stop()
+            duration_ms = int((time.perf_counter() - item_start) * 1000)
             # accumulate per-stage durations into the pool stats (JobPool's
             # heartbeat turns *_ms keys into live per-aid stage averages) and
             # emit a greppable per-aid line for offline analysis (--debug file)
@@ -89,9 +88,9 @@ class AddVideoRecordJob(Job):
             self.logger.debug(
                 f'TIMING aid={aid} '
                 + ' '.join(f'{k[:-3]}={v}ms' for k, v in stage_stat.items())
-                + f' total={timer.get_duration_ms()}ms')
+                + f' total={duration_ms}ms')
             self.stat.total_count += 1
-            self.stat.total_duration_ms += timer.get_duration_ms()
+            self.stat.total_duration_ms += duration_ms
 
     def cleanup(self):
         self.session.close()

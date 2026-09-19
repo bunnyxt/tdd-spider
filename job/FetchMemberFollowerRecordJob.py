@@ -1,6 +1,6 @@
+import time
 from .Job import Job
 from service import RateLimitError, Service, ServiceError
-from timer import Timer
 from queue import Queue, Empty, Full
 from core import MemberFollowerRecordNew
 from util import get_ts_s, ts_s_to_str
@@ -58,8 +58,7 @@ class FetchMemberFollowerRecordJob(Job):
             except Empty:
                 break
             self.logger.debug(f'Now start fetch member follower record. mid: {mid}')
-            timer = Timer()
-            timer.start()
+            item_start = time.perf_counter()
 
             stage_stat = {}
             try:
@@ -91,8 +90,8 @@ class FetchMemberFollowerRecordJob(Job):
                         f'Still waiting. mid: {mid}')
                 self.stat.condition['success'] += 1
 
-            timer.stop()
+            duration_ms = int((time.perf_counter() - item_start) * 1000)
             for stage_key, stage_ms in stage_stat.items():
                 self.stat.condition[stage_key] += stage_ms
             self.stat.total_count += 1
-            self.stat.total_duration_ms += timer.get_duration_ms()
+            self.stat.total_duration_ms += duration_ms
