@@ -39,44 +39,32 @@
 
 ## 运行
 
-本全自动定时数据采集系统由一系列脚本组成，基本运行方法为：
+本项目的生产任务由 cron 调度。编号脚本每次启动后完成一轮工作并退出，不需要由仓库内的脚本长期守护。
+手工排查时优先使用项目虚拟环境在前台运行，以便保留输出并用 `Ctrl-C` 停止：
 
 ```shell
-python <script-name.py>
+venv-3.11/bin/python <script-name.py>
 ```
 
-由于绝大多数脚本为定时脚本，即会每隔一段时间（或者在某个预设的时间点）运行，因此脚本需要常驻后台一直运行。`Linux`下建议使用`nohup + &`实现后台运行，即：
+手工启动前，应先确认 cron 或其他操作者没有运行同一个任务。检查进程时先列出 Python 进程，再核对目标 PID 的完整命令：
 
 ```shell
-nohup python -u <script-name.py> >/dev/null 2>&1 &
+ps -eo pid,comm,args --no-headers | awk '$2 ~ /^python/ {print}'
+ps -o pid,comm,args --no-headers -p <pid>
 ```
 
-说明：
+停止已核实的进程时先发送普通 `SIGTERM`，随后再次检查；不要默认使用 `kill -9`：
 
-- `python -u`表示强制脚本的标准输出也同标准错误一样不通过缓存直接打印到屏幕，此处建议设置`-u`以防止有时候出现日志没有及时输出的情况。
-- 本系统绝大多数脚本使用配置过的`logging`输出日志，默认会将日志保存到`log`文件夹下，因此后台运行时，输出到控制台的日志完全可以直接丢弃，即`>/dev/null 2>&1`。
-
-使用`nohup + &`将脚本后台运行后，需要使用`ps -aux | grep 'python -u <script-name.py>'`来查看运行状况，并通过`kill`结束进程的方式结束执行。
-
-由于启动后台运行、查看运行情况、结束后台脚本运行等操作的执行频率很高，但指令很长容易打错，因此可以使用以下三个脚本简化操作：
-
-启动后台运行
-
-```shell script
-./run_start.sh <script-name.py>
+```shell
+kill -TERM <pid>
+ps -o pid,comm,args --no-headers -p <pid>
 ```
 
-查看后台运行情况
+运行状态优先通过下文的 run-record CLI / Web 页面查看；详细诊断再读取 `log/` 中对应的 INFO、WARNING 或单次运行日志。不要把 stdout/stderr 静默丢弃。
 
-```shell script
-./run_ps.sh
-```
+部署不由仓库内 helper 执行。目标环境可能无法访问 Git 托管服务；应从一个明确、已审查的 release tree 按该环境的运维流程部署，并在完成后校验完整 runtime 内容，不要假设服务器可以直接 `git pull`。
 
-结束后台脚本运行
-
-```shell script
-./run_kill.sh <pid>
-```
+需要让长任务在 SSH 断开后继续运行时，请遵循目标环境的运维流程，并明确保存输出、核实真实 Python PID 和安排停止/恢复步骤；不要依赖模糊的进程名匹配。
 
 ## 查看运行记录
 
