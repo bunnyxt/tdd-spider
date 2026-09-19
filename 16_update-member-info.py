@@ -1,10 +1,9 @@
 from db import DBOperation, Session
-from util import logging_init, get_week_day, fullname
+from util import logging_init, get_week_day, fullname, get_ts_ms, format_duration_summary
 from queue import Queue
 from service import Service
 from serverchan import sc_send_summary
 from runrecord import track
-from timer import Timer
 from job import UpdateMemberJob, JobPool
 import logging
 
@@ -16,8 +15,7 @@ logger = logging.getLogger(script_id)
 
 def update_member_info():
     logger.info(f'Now start {script_fullname}...')
-    timer = Timer()
-    timer.start()
+    start_ts_ms = get_ts_ms()
 
     with track(script_fullname) as recorder:
         session = Session()
@@ -73,7 +71,7 @@ def update_member_info():
 
         session.close()
 
-        timer.stop()
+        end_ts_ms = get_ts_ms()
 
         # run-record metrics, keyed by the same label the summary log uses
         # (best-effort; a disabled recorder is a no-op)
@@ -82,10 +80,10 @@ def update_member_info():
 
         # summary
         logger.info(f'Finish {script_fullname}!')
-        logger.info(timer.get_summary())
+        logger.info(format_duration_summary(start_ts_ms, end_ts_ms))
         logger.info(job_stat_merged.get_summary('member-update'))
         service.stats.log_summary(logger)
-        sc_send_summary(script_fullname, timer, job_stat_merged)
+        sc_send_summary(script_fullname, start_ts_ms, end_ts_ms, job_stat_merged)
 
 
 def main():

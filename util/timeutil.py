@@ -2,7 +2,7 @@ import datetime
 import time
 
 __all__ = ['get_ts_s', 'ts_s_to_str', 'get_ts_s_str', 'str_to_ts_s', 'format_ts_s',
-           'get_ts_ms', 'ts_ms_to_str', 'format_ts_ms',
+           'get_ts_ms', 'ts_ms_to_str', 'format_ts_ms', 'format_duration_summary',
            'get_week_day']
 
 
@@ -93,6 +93,18 @@ def format_ts_ms(ts_ms: int) -> str:
     formatted_ts_ms += f'{remaining_ms}ms'
 
     return formatted_ts_ms
+
+
+def format_duration_summary(start_ts_ms: int, end_ts_ms: int) -> str:
+    """
+    Format a wall-clock span as one human-readable summary line.
+    :param start_ts_ms: span start timestamp (milliseconds)
+    :param end_ts_ms: span end timestamp (milliseconds)
+    :return: summary string, format: "start: ..., end: ..., duration: ..."
+    """
+    return f'start: {ts_ms_to_str(start_ts_ms)}, ' \
+           f'end: {ts_ms_to_str(end_ts_ms)}, ' \
+           f'duration: {format_ts_ms(end_ts_ms - start_ts_ms)}'
 
 
 def get_week_day() -> int:

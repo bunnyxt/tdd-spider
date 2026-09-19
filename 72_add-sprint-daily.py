@@ -1,10 +1,10 @@
 import time
 from db import Session
 import datetime
-from timer import Timer
 from serverchan import sc_send, sc_send_critical
 from runrecord import track
-from util import logging_init, get_ts_s, ts_s_to_str, get_current_line_no, fullname
+from util import logging_init, get_ts_s, ts_s_to_str, get_current_line_no, \
+    fullname, get_ts_ms, format_duration_summary
 import math
 import logging
 
@@ -16,8 +16,7 @@ logger = logging.getLogger(script_id)
 
 def add_sprint_daily():
     logger.info(f'Now start {script_fullname}...')
-    timer = Timer()
-    timer.start()
+    start_ts_ms = get_ts_ms()
 
     with track(script_fullname) as recorder:
         session = Session()
@@ -130,7 +129,7 @@ def add_sprint_daily():
 
         session.close()
 
-        timer.stop()
+        end_ts_ms = get_ts_ms()
 
         # run-record metrics (best-effort; a disabled recorder is a no-op).
         # Only the numbers this script already computes -- no fabricated JobStat,
@@ -146,7 +145,7 @@ def add_sprint_daily():
         # make summary
         summary = \
             '# add sprint daily done!\n\n' \
-            f'{timer.get_summary()}\n\n' \
+            f'{format_duration_summary(start_ts_ms, end_ts_ms)}\n\n' \
             f'date: {date}, video_total: {video_total}\n\n' \
             f'newvids_str: {newvids_str}, millvids_str: {millvids_str}\n\n' \
             f'view_incr_total: {view_incr_total}, view_incr_incr: {view_incr_incr}\n\n' \

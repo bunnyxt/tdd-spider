@@ -1,6 +1,5 @@
 from threading import Thread
 from .JobStat import JobStat
-from util import get_ts_ms
 import logging
 
 logger = logging.getLogger('Job')
@@ -17,11 +16,9 @@ class Job(Thread):
 
     def run(self):
         self.logger.info('Job start.')
-        self.stat.start_ts_ms = get_ts_ms()
 
         self.process()
 
-        self.stat.end_ts_ms = get_ts_ms()
         self.logger.info('Job end.')
 
         self.cleanup()

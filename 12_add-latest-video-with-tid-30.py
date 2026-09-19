@@ -1,10 +1,9 @@
 from service import Service, NewlistArchive
 from serverchan import sc_send_summary
-from timer import Timer
 from queue import Queue
 from job import JobStat, GetNewlistArchiveJob, AddVideoFromArchiveJob
 from runrecord import track
-from util import logging_init, fullname
+from util import logging_init, fullname, get_ts_ms, format_duration_summary
 import logging
 
 script_id = '12'
@@ -15,8 +14,7 @@ logger = logging.getLogger(script_id)
 
 def add_latest_video_with_tid_30():
     logger.info(f'Now start {script_fullname}...')
-    timer = Timer()
-    timer.start()
+    start_ts_ms = get_ts_ms()
 
     with track(script_fullname) as recorder:
         tid = 30
@@ -90,18 +88,16 @@ def add_latest_video_with_tid_30():
         concatenated_stat.condition = get_newlist_archive_job_stat.condition + \
             add_video_from_archive_job_stat_merged.condition
 
-        timer.stop()
-        concatenated_stat.start_ts_ms = timer.start_ts_ms
-        concatenated_stat.end_ts_ms = timer.end_ts_ms
+        end_ts_ms = get_ts_ms()
 
         # summary
         logger.info(f'Finish {script_fullname}!')
-        logger.info(timer.get_summary())
+        logger.info(format_duration_summary(start_ts_ms, end_ts_ms))
         logger.info(concatenated_stat.get_summary())
         if concatenated_stat.condition['get_newlist_exception'] > 0 \
                 or concatenated_stat.condition['add_video_exception'] > 0 \
                 or concatenated_stat.condition['commit_video_record_exception'] > 0:
-            sc_send_summary(script_fullname, timer, concatenated_stat)
+            sc_send_summary(script_fullname, start_ts_ms, end_ts_ms, concatenated_stat)
 
 
 def main():
