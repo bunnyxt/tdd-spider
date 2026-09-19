@@ -1,9 +1,9 @@
+import time
 from .Job import Job
 from db import Session
 from service import Service
 from queue import Queue
 from task import add_sprint_video_record_via_video_view
-from timer import Timer
 from util import format_ts_ms
 
 __all__ = ['AddSprintVideoRecordJob']
@@ -20,8 +20,7 @@ class AddSprintVideoRecordJob(Job):
         while not self.aid_queue.empty():
             aid = self.aid_queue.get()
             self.logger.debug(f'Now start add sprint video record. aid: {aid}')
-            timer = Timer()
-            timer.start()
+            item_start = time.perf_counter()
 
             try:
                 new_sprint_video_record = add_sprint_video_record_via_video_view(aid, self.service, self.session)
@@ -47,11 +46,11 @@ class AddSprintVideoRecordJob(Job):
                         self.logger.info(f'Sprint video status changed to finished. aid: {aid}')
                         self.stat.condition['million_success'] += 1
 
-            timer.stop()
+            duration_ms = int((time.perf_counter() - item_start) * 1000)
             self.logger.debug(f'Finish add sprint video record. '
-                              f'aid: {aid}, duration: {format_ts_ms(timer.get_duration_ms())}')
+                              f'aid: {aid}, duration: {format_ts_ms(duration_ms)}')
             self.stat.total_count += 1
-            self.stat.total_duration_ms += timer.get_duration_ms()
+            self.stat.total_duration_ms += duration_ms
 
     def cleanup(self):
         self.session.close()

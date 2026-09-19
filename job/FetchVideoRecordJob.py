@@ -1,6 +1,6 @@
+import time
 from .Job import Job
 from service import Service, CodeError, RateLimitError
-from timer import Timer
 from queue import Queue, Empty, Full
 from core import RecordNew
 from util import format_ts_ms, get_ts_s, ts_s_to_str
@@ -80,8 +80,7 @@ class FetchVideoRecordJob(Job):
             except Empty:
                 break
             self.logger.debug(f'Now start fetch video record. aid: {aid}')
-            timer = Timer()
-            timer.start()
+            item_start = time.perf_counter()
 
             stage_stat = {}  # per-stage durations, filled by the task (http_ms)
             try:
@@ -130,7 +129,7 @@ class FetchVideoRecordJob(Job):
                         f'Still waiting. aid: {aid}')
                 self.stat.condition['success'] += 1
 
-            timer.stop()
+            duration_ms = int((time.perf_counter() - item_start) * 1000)
             # accumulate per-stage durations into the pool stats (JobPool's
             # heartbeat turns *_ms keys into live per-aid stage averages) and
             # emit a greppable per-aid line for offline analysis (--debug file)
@@ -139,6 +138,6 @@ class FetchVideoRecordJob(Job):
             self.logger.debug(
                 f'TIMING aid={aid} '
                 + ' '.join(f'{k[:-3]}={v}ms' for k, v in stage_stat.items())
-                + f' total={timer.get_duration_ms()}ms')
+                + f' total={duration_ms}ms')
             self.stat.total_count += 1
-            self.stat.total_duration_ms += timer.get_duration_ms()
+            self.stat.total_duration_ms += duration_ms

@@ -3,7 +3,6 @@ from db import Session
 from service import RateLimitError, Service
 from queue import Queue, Empty
 from task import update_member
-from timer import Timer
 from util import format_ts_ms
 from typing import Optional
 import time
@@ -42,8 +41,7 @@ class UpdateMemberJob(Job):
                 break
 
             self.logger.debug(f'Now start update member info. mid: {mid}')
-            timer = Timer()
-            timer.start()
+            item_start = time.perf_counter()
 
             try:
                 tdd_member_logs = update_member(mid, self.service, self.session)
@@ -69,11 +67,11 @@ class UpdateMemberJob(Job):
                 self.logger.debug(f'{len(tdd_member_logs)} log(s) found. mid: {mid}')
                 self.stat.condition[f'{len(tdd_member_logs)}_update'] += 1
 
-            timer.stop()
+            duration_ms = int((time.perf_counter() - item_start) * 1000)
             self.logger.debug(f'Finish update member info. '
-                              f'mid: {mid}, duration: {format_ts_ms(timer.get_duration_ms())}')
+                              f'mid: {mid}, duration: {format_ts_ms(duration_ms)}')
             self.stat.total_count += 1
-            self.stat.total_duration_ms += timer.get_duration_ms()
+            self.stat.total_duration_ms += duration_ms
 
     def cleanup(self):
         self.session.close()

@@ -1,9 +1,9 @@
+import time
 from .Job import Job
 from db import Session
 from service import Service
 from queue import Queue, Empty
 from task import update_video
-from timer import Timer
 from util import format_ts_ms, get_ts_s, ts_s_to_str
 from typing import Optional
 
@@ -69,8 +69,7 @@ class UpdateVideoJob(Job):
                 break
 
             self.logger.debug(f'Now start update video info. aid: {aid}')
-            timer = Timer()
-            timer.start()
+            item_start = time.perf_counter()
 
             try:
                 tdd_video_logs = update_video(aid, self.service, self.session)
@@ -90,11 +89,11 @@ class UpdateVideoJob(Job):
                 self.logger.debug(f'{len(tdd_video_logs)} log(s) found. aid: {aid}')
                 self.stat.condition[f'{len(tdd_video_logs)}_update'] += 1
 
-            timer.stop()
+            duration_ms = int((time.perf_counter() - item_start) * 1000)
             self.logger.debug(f'Finish update video info. '
-                              f'aid: {aid}, duration: {format_ts_ms(timer.get_duration_ms())}')
+                              f'aid: {aid}, duration: {format_ts_ms(duration_ms)}')
             self.stat.total_count += 1
-            self.stat.total_duration_ms += timer.get_duration_ms()
+            self.stat.total_duration_ms += duration_ms
 
     def cleanup(self):
         self.session.close()

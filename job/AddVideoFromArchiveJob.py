@@ -1,8 +1,8 @@
+import time
 from .Job import Job
 from db import Session
 from service import Service, NewlistArchive
 from task import add_video, commit_video_record_via_newlist_archive_stat, AlreadyExistError
-from timer import Timer
 from util import format_ts_ms
 from queue import Queue
 
@@ -22,8 +22,7 @@ class AddVideoFromArchiveJob(Job):
             added, archive = self.archive_video_queue.get()
             self.logger.debug(
                 f'Now start add video from archive. archive: {archive}')
-            timer = Timer()
-            timer.start()
+            item_start = time.perf_counter()
 
             try:
                 new_video = add_video(
@@ -54,11 +53,11 @@ class AddVideoFromArchiveJob(Job):
                                      f'video record: {new_video_record}')
                 self.stat.condition['new_video_record'] += 1
 
-            timer.stop()
+            duration_ms = int((time.perf_counter() - item_start) * 1000)
             self.logger.debug(f'Finish add video from archive. '
-                              f'archive: {archive}, duration: {format_ts_ms(timer.get_duration_ms())}')
+                              f'archive: {archive}, duration: {format_ts_ms(duration_ms)}')
             self.stat.total_count += 1
-            self.stat.total_duration_ms += timer.get_duration_ms()
+            self.stat.total_duration_ms += duration_ms
 
     def cleanup(self):
         self.session.close()

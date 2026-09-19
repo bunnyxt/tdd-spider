@@ -1,9 +1,9 @@
+import time
 from .Job import Job
 from db import Session
 from service import Service
 from queue import Queue, Empty
 from task import add_member_follower_record
-from timer import Timer
 from util import format_ts_ms
 from typing import Optional
 
@@ -39,8 +39,7 @@ class AddMemberFollowerRecordJob(Job):
                 break
 
             self.logger.debug(f'Now start add member follower record. mid: {mid}')
-            timer = Timer()
-            timer.start()
+            item_start = time.perf_counter()
 
             try:
                 new_follower_record = add_member_follower_record(mid, self.service, self.session)
@@ -57,11 +56,11 @@ class AddMemberFollowerRecordJob(Job):
                 self.logger.debug(f'New member follower record {new_follower_record} added. mid: {mid}')
                 self.stat.condition['success'] += 1
 
-            timer.stop()
+            duration_ms = int((time.perf_counter() - item_start) * 1000)
             self.logger.debug(f'Finish add member follower record. '
-                              f'mid: {mid}, duration: {format_ts_ms(timer.get_duration_ms())}')
+                              f'mid: {mid}, duration: {format_ts_ms(duration_ms)}')
             self.stat.total_count += 1
-            self.stat.total_duration_ms += timer.get_duration_ms()
+            self.stat.total_duration_ms += duration_ms
 
     def cleanup(self):
         self.session.close()
