@@ -2,7 +2,7 @@
 Per-entry-point verification that the two remaining production scripts that do
 *not* call ``sc_send_summary`` -- ``18_member-total-stat-update.py`` and
 ``72_add-sprint-daily.py`` -- now open, populate and close a run record without
-changing their Timer / logging / ServerChan behaviour.
+changing their duration / logging / ServerChan behaviour.
 
 Same approach as ``test_summary_script_run_records.py``: each script is imported
 by file path, its DB session / ServerChan calls are replaced with inert fakes or

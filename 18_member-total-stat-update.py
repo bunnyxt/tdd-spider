@@ -1,6 +1,6 @@
 from db import Session, TddMemberTotalStatRecord
-from util import logging_init, get_ts_s, get_current_line_no, fullname
-from timer import Timer
+from util import logging_init, get_ts_s, get_current_line_no, fullname, \
+    get_ts_ms, format_duration_summary
 from serverchan import sc_send_critical
 from runrecord import track
 import logging
@@ -13,8 +13,7 @@ logger = logging.getLogger(script_id)
 
 def member_total_stat_update():
     logger.info(f'Now start {script_fullname}...')
-    timer = Timer()
-    timer.start()
+    start_ts_ms = get_ts_ms()
 
     with track(script_fullname) as recorder:
         session = Session()
@@ -73,7 +72,7 @@ def member_total_stat_update():
 
         session.close()
 
-        timer.stop()
+        end_ts_ms = get_ts_ms()
 
         # run-record metrics (best-effort; a disabled recorder is a no-op).
         # Only the counts this script already computes -- no fabricated JobStat.
@@ -83,7 +82,7 @@ def member_total_stat_update():
 
         # summary
         logger.info(f'Finish {script_fullname}!')
-        logger.info(timer.get_summary())
+        logger.info(format_duration_summary(start_ts_ms, end_ts_ms))
 
 
 def main():

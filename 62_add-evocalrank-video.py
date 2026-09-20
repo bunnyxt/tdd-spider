@@ -4,9 +4,8 @@ import logging
 import re
 from db import Session
 from service import Service
-from util import logging_init, fullname
+from util import logging_init, fullname, get_ts_ms
 import requests
-from timer import Timer
 from queue import Queue
 from job import AddVideoJob, JobStat
 from serverchan import sc_send_summary
@@ -46,8 +45,7 @@ def calculate_ranknum_from_date() -> int:
 
 def add_evocalrank_video(ranknum: int):
     logger.info(f'Now start {script_fullname}...')
-    timer = Timer()
-    timer.start()
+    start_ts_ms = get_ts_ms()
 
     with track(script_fullname) as recorder:
         service = Service(mode="worker")
@@ -154,7 +152,7 @@ def add_evocalrank_video(ranknum: int):
         # merge statistics counters
         job_stat_merged = sum(job_stat_list, JobStat())
 
-        timer.stop()
+        end_ts_ms = get_ts_ms()
 
         # run-record metrics (best-effort; a disabled recorder is a no-op).
         # The run record keys the canonical script_fullname; the ServerChan
@@ -166,7 +164,7 @@ def add_evocalrank_video(ranknum: int):
 
         # send sc
         sc_send_summary(
-            f'{script_fullname}.add_evocalrank_video', timer, job_stat_merged)
+            f'{script_fullname}.add_evocalrank_video', start_ts_ms, end_ts_ms, job_stat_merged)
 
 
 def main():

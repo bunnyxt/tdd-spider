@@ -1,7 +1,7 @@
 """
 Per-entry-point verification that the six ``sc_send_summary`` production
 scripts (12_/15_/16_/17_/62_/71_) now open, populate and close a run record
-without changing their Timer / JobStat summary or ServerChan behaviour.
+without changing their duration / JobStat summary or ServerChan behaviour.
 
 Each script is imported by file path; its collaborators (Service, Session, the
 Job classes / JobPool, ``requests``) are replaced with inert fakes and its
@@ -250,11 +250,11 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         self.assertEqual(
             metrics['api:test_target:test_worker']['t1:http_412'], 10.0)
         self.assertEqual(service.stats.log_calls, [m.logger])
-        # 15_ sends unconditionally; same (name, timer, merged stat) as before
+        # 15_ sends unconditionally; same (name, span, merged stat) as before
         sc.assert_called_once()
         args = sc.call_args.args
         self.assertEqual(args[0], '15_update-video-info')
-        self.assertIs(args[2], merged)
+        self.assertIs(args[3], merged)
 
     # ----------------------------------------------------------------- 16_ ---
     def test_16_update_member_info(self):
@@ -284,7 +284,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         sc.assert_called_once()
         args = sc.call_args.args
         self.assertEqual(args[0], '16_update-member-info')
-        self.assertIs(args[2], merged)
+        self.assertIs(args[3], merged)
 
     def test_16_failure_is_recorded(self):
         m = _load('16_update-member-info.py')
@@ -325,7 +325,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         self.assertEqual(metrics['follower-db-writer']['batch_insert'], 1.0)
         # 17_ still passes the FETCH stat (not the writer stat) to ServerChan
         sc.assert_called_once()
-        self.assertIs(sc.call_args.args[2], fetch)
+        self.assertIs(sc.call_args.args[3], fetch)
 
     # ----------------------------------------------------------------- 62_ ---
     def test_62_add_evocalrank_video(self):
@@ -385,7 +385,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         self.assertEqual(self._metrics(run_id)['sprint-video-record']['exception'], 1.0)
         # conditional rule unchanged: exception > 0 -> SC is sent
         sc.assert_called_once()
-        self.assertIs(sc.call_args.args[2], stat)
+        self.assertIs(sc.call_args.args[3], stat)
 
     def test_71_no_exceptions_skips_serverchan(self):
         m = _load('71_add-sprint-video-record.py')

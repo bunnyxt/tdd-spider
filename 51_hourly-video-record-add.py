@@ -3,7 +3,7 @@ from threading import Thread
 from queue import Queue
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, \
     str_to_ts_s, ts_s_to_str, logging_init, fullname, get_current_line_no, \
-    SysStatLogger
+    SysStatLogger, get_ts_ms, format_duration_summary
 import time
 import datetime
 import gzip
@@ -18,7 +18,6 @@ from core import RecordNew
 from service import Service
 from job import FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool
 from runrecord import RunRecorder
-from timer import Timer
 import logging
 
 script_id = '51'
@@ -813,8 +812,7 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
 
 def hourly_video_record_add():
     logger.info(f'Now start {script_fullname}...')
-    timer = Timer()
-    timer.start()
+    start_ts_ms = get_ts_ms()
 
     # current time task, ex: 2013-01-31 19:00
     time_task = f'{get_ts_s_str()[:13]}:00'
@@ -837,12 +835,12 @@ def hourly_video_record_add():
 
     recorder.finish('succeeded')
 
-    timer.stop()
+    end_ts_ms = get_ts_ms()
 
     # summary
     logger.info(f'Finish {script_fullname}!')
     logger.info(f'Time task: {time_task}')
-    logger.info(timer.get_summary())
+    logger.info(format_duration_summary(start_ts_ms, end_ts_ms))
 
 
 def main():

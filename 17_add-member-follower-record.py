@@ -1,10 +1,9 @@
 from db import DBOperation, Session
 from service import Service
-from util import logging_init, fullname
+from util import logging_init, fullname, get_ts_ms, format_duration_summary
 from serverchan import sc_send_summary
 from runrecord import track
 from queue import Queue
-from timer import Timer
 from job import FetchMemberFollowerRecordJob, BatchInsertMemberFollowerRecordJob, JobPool
 import logging
 
@@ -16,8 +15,7 @@ logger = logging.getLogger(script_id)
 
 def add_member_follower_record():
     logger.info(f'Now start {script_fullname}...')
-    timer = Timer()
-    timer.start()
+    start_ts_ms = get_ts_ms()
 
     with track(script_fullname) as recorder:
         # fetch/write split (mirrors 51_): many fetch-only workers (HTTP, no DB) ->
@@ -69,7 +67,7 @@ def add_member_follower_record():
         record_queue.put(None)
         writer_stat = writer_pool.join()
 
-        timer.stop()
+        end_ts_ms = get_ts_ms()
 
         # run-record metrics: both pipeline stages, keyed by the same labels the
         # summary log uses (best-effort; a disabled recorder is a no-op)
@@ -79,12 +77,12 @@ def add_member_follower_record():
 
         # summary
         logger.info(f'Finish {script_fullname}!')
-        logger.info(timer.get_summary())
+        logger.info(format_duration_summary(start_ts_ms, end_ts_ms))
         logger.info(fetch_stat.get_summary('follower-fetch'))
         logger.info(writer_stat.get_summary('follower-db-writer'))
         service.stats.log_summary(logger)
         logger.info(f'{writer_stat.total_count} follower record(s) fetched and inserted.')
-        sc_send_summary(script_fullname, timer, fetch_stat)
+        sc_send_summary(script_fullname, start_ts_ms, end_ts_ms, fetch_stat)
 
 
 def main():
