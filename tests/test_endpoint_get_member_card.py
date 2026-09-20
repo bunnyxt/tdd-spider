@@ -1,7 +1,8 @@
 import unittest
 from unittest import mock
 
-from service import CodeError, FormatError, MemberCard, Service
+from service import (CodeError, ContentError, FormatError, MemberCard,
+                     Service)
 from service.endpoints import get_member_card
 
 
@@ -57,6 +58,37 @@ class GetMemberCardEndpointTest(unittest.TestCase):
 
         self.assertEqual(raised.exception.endpoint, 'get_member_card')
         self.assertIs(raised.exception.result_type, MemberCard)
+
+    def test_a_blank_card_is_rejected_instead_of_adapted(self):
+        response = valid_response()
+        response['data']['card'] = {
+            'mid': '', 'name': '', 'sex': '', 'face': '', 'sign': ''}
+
+        with self.assertRaises(ContentError) as raised:
+            get_member_card.get(lambda *args, **kwargs: response,
+                                params={'mid': 7})
+
+        self.assertEqual((raised.exception.endpoint, raised.exception.result_type),
+                         ('get_member_card', MemberCard))
+        self.assertEqual(raised.exception.response, response)
+
+    def test_an_empty_name_alone_is_rejected(self):
+        response = valid_response()
+        response['data']['card']['name'] = ''
+
+        with self.assertRaises(ContentError):
+            get_member_card.get(lambda *args, **kwargs: response,
+                                params={'mid': 7})
+
+    def test_a_member_who_cleared_optional_fields_is_still_adapted(self):
+        response = valid_response()
+        response['data']['card']['sign'] = ''
+        response['data']['card']['face'] = ''
+
+        result = get_member_card.get(lambda *args, **kwargs: response,
+                                     params={'mid': 7})
+
+        self.assertEqual(result, MemberCard(7, 'name', '保密', '', ''))
 
     def test_service_public_method_delegates_to_the_adapter(self):
         service = Service(mode='direct', endpoints={})

@@ -1,6 +1,6 @@
 from typing import Callable, Optional
 
-from ..error import CodeError, FormatError
+from ..error import CodeError, ContentError, FormatError
 from ..response import MemberCard
 
 ENDPOINT = 'get_member_card'
@@ -33,6 +33,11 @@ def get(request: Callable[..., dict], params: Optional[dict] = None,
         if key not in response['data']['card']:
             raise FormatError(ENDPOINT, RESULT_TYPE, params, response,
                               f'Response data card should contain key {key}.')
+    # A nickname is never blank upstream; a deleted member answers -404 instead.
+    # sex, face and sign are not gated -- clearing a sign is legitimate.
+    if response['data']['card']['name'] == '':
+        raise ContentError(ENDPOINT, RESULT_TYPE, params, response,
+                           'Response data card name should not be empty.')
     return MemberCard(
         mid=response['data']['card']['mid'],
         name=response['data']['card']['name'],

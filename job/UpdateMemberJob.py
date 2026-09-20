@@ -1,6 +1,6 @@
 from .Job import Job
 from db import Session
-from service import RateLimitError, Service
+from service import ContentError, RateLimitError, Service
 from queue import Queue, Empty
 from task import update_member
 from util import format_ts_ms
@@ -51,6 +51,11 @@ class UpdateMemberJob(Job):
                     f'mid: {mid}, endpoint: {e.endpoint}, reason: {e.reason}')
                 self.stat.condition['rate_limited'] += 1
                 time.sleep(RATE_LIMIT_SLEEP_S)
+            except ContentError as e:
+                self.logger.warning(
+                    f'Member card content rejected; member left unchanged. '
+                    f'mid: {mid}, error: {e}')
+                self.stat.condition['empty_card'] += 1
             except Exception as e:
                 # roll back, else the failed transaction poisons this session
                 # and every subsequent mid on this worker fails too
