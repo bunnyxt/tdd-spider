@@ -3,7 +3,7 @@ from typing import Optional
 from core import TddError
 
 __all__ = ['ServiceError', 'ResponseError', 'RateLimitError',
-           'ValidationError', 'FormatError', 'CodeError']
+           'ValidationError', 'FormatError', 'ContentError', 'CodeError']
 
 
 class ServiceError(TddError):
@@ -61,6 +61,21 @@ class FormatError(ValidationError):
 
     def __str__(self):
         return (f'<FormatError(endpoint={self.endpoint},'
+                f'result_type={self.result_type.__name__},params={self.params},'
+                f'response={self.response},message={self.message})>')
+
+
+class ContentError(ValidationError):
+    """Shape and code are valid, but a field holds a value the endpoint can
+    never really mean, so the response describes no usable result."""
+
+    def __init__(self, endpoint: str, result_type: type, params: dict,
+                 response: dict, message: str):
+        super().__init__(endpoint, result_type, params, response)
+        self.message = message
+
+    def __str__(self):
+        return (f'<ContentError(endpoint={self.endpoint},'
                 f'result_type={self.result_type.__name__},params={self.params},'
                 f'response={self.response},message={self.message})>')
 
