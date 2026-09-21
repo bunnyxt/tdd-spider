@@ -1,7 +1,6 @@
 from db import Session, TddMemberTotalStatRecord
-from util import logging_init, get_ts_s, get_current_line_no, fullname, \
+from util import logging_init, get_ts_s, fullname, \
     get_ts_ms, format_duration_summary
-from serverchan import sc_send_critical
 from runrecord import track
 import logging
 
@@ -65,7 +64,6 @@ def member_total_stat_update():
         except Exception as e:
             message = f'Exception occurred when updating member total stat! error: {e}'
             logger.critical(message)
-            sc_send_critical(script_fullname, message, __file__, get_current_line_no())
             session.rollback()
             session.close()
             raise SystemExit(1)

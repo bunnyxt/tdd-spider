@@ -1,5 +1,4 @@
 from service import Service, NewlistArchive
-from serverchan import sc_send_summary
 from queue import Queue
 from job import JobStat, GetNewlistArchiveJob, AddVideoFromArchiveJob
 from runrecord import track
@@ -94,10 +93,6 @@ def add_latest_video_with_tid_30():
         logger.info(f'Finish {script_fullname}!')
         logger.info(format_duration_summary(start_ts_ms, end_ts_ms))
         logger.info(concatenated_stat.get_summary())
-        if concatenated_stat.condition['get_newlist_exception'] > 0 \
-                or concatenated_stat.condition['add_video_exception'] > 0 \
-                or concatenated_stat.condition['commit_video_record_exception'] > 0:
-            sc_send_summary(script_fullname, start_ts_ms, end_ts_ms, concatenated_stat)
 
 
 def main():

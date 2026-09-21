@@ -4,11 +4,10 @@ import logging
 import re
 from db import Session
 from service import Service
-from util import logging_init, fullname, get_ts_ms
+from util import logging_init, fullname, get_ts_ms, format_duration_summary
 import requests
 from queue import Queue
 from job import AddVideoJob, JobStat
-from serverchan import sc_send_summary
 from runrecord import track
 
 script_id = '62'
@@ -155,16 +154,11 @@ def add_evocalrank_video(ranknum: int):
         end_ts_ms = get_ts_ms()
 
         # run-record metrics (best-effort; a disabled recorder is a no-op).
-        # The run record keys the canonical script_fullname; the ServerChan
-        # summary below keeps its historical '.add_evocalrank_video' suffix.
         recorder.add_job_stat_metrics('add-evocalrank-video', job_stat_merged)
 
         logger.info('Finish add evocalrank video!')
+        logger.info(format_duration_summary(start_ts_ms, end_ts_ms))
         logger.info(job_stat_merged.get_summary())
-
-        # send sc
-        sc_send_summary(
-            f'{script_fullname}.add_evocalrank_video', start_ts_ms, end_ts_ms, job_stat_merged)
 
 
 def main():

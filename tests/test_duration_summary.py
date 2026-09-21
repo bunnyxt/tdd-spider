@@ -1,7 +1,7 @@
 """
-`format_duration_summary` renders the one run-span line an entry point logs
-and `sc_send_summary` puts in its message body. These pin that content, so
-the line keeps reporting a start, an end and a duration.
+`format_duration_summary` renders the one run-span line an entry point logs.
+These pin that content, so the line keeps reporting a start, an end and a
+duration.
 """
 import unittest
 

@@ -4,6 +4,3 @@ password = passwd
 host = localhost
 port = 3306
 dbname = tdd
-
-[serverchan]
-sckey = your sckey
