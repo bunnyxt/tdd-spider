@@ -1,7 +1,6 @@
 import argparse
-from serverchan import sc_send_summary
 from job import AddVideoJob
-from util import logging_init, fullname, get_ts_ms
+from util import logging_init, fullname, get_ts_ms, format_duration_summary
 from service import Service
 from job import JobStat
 from queue import Queue
@@ -68,11 +67,8 @@ def add_video_from_file(file_path: str):
     end_ts_ms = get_ts_ms()
 
     logger.info('Finish add video from file!')
+    logger.info(format_duration_summary(start_ts_ms, end_ts_ms))
     logger.info(job_stat_merged.get_summary())
-
-    # send sc
-    sc_send_summary(
-        f'{script_fullname}.add_video_from_file', start_ts_ms, end_ts_ms, job_stat_merged)
 
 
 def main():

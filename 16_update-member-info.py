@@ -2,7 +2,6 @@ from db import DBOperation, Session
 from util import logging_init, get_week_day, fullname, get_ts_ms, format_duration_summary
 from queue import Queue
 from service import Service
-from serverchan import sc_send_summary
 from runrecord import track
 from job import UpdateMemberJob, JobPool
 import logging
@@ -83,7 +82,6 @@ def update_member_info():
         logger.info(format_duration_summary(start_ts_ms, end_ts_ms))
         logger.info(job_stat_merged.get_summary('member-update'))
         service.stats.log_summary(logger)
-        sc_send_summary(script_fullname, start_ts_ms, end_ts_ms, job_stat_merged)
 
 
 def main():

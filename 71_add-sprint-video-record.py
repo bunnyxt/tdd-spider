@@ -1,7 +1,6 @@
 from db import Session
 from job import AddSprintVideoRecordJob
 from service import Service
-from serverchan import sc_send_summary
 from runrecord import track
 from util import logging_init, fullname, get_ts_ms, format_duration_summary
 from queue import Queue
@@ -55,10 +54,6 @@ def add_sprint_video_record():
         logger.info(f'Finish {script_fullname}!')
         logger.info(format_duration_summary(start_ts_ms, end_ts_ms))
         logger.info(job_stat.get_summary())
-        if job_stat.condition['exception'] > 0 \
-                or job_stat.condition['million_exception'] > 0 \
-                or job_stat.condition['million_success'] > 0:
-            sc_send_summary(script_fullname, start_ts_ms, end_ts_ms, job_stat)
 
 
 def main():

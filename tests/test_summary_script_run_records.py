@@ -1,17 +1,16 @@
 """
-Per-entry-point verification that the six ``sc_send_summary`` production
-scripts (12_/15_/16_/17_/62_/71_) now open, populate and close a run record
-without changing their duration / JobStat summary or ServerChan behaviour.
+Per-entry-point verification that the six summary-reporting production
+scripts (12_/15_/16_/17_/62_/71_) open, populate and close a run record
+without changing their duration / JobStat summary behaviour.
 
-Each script is imported by file path; its collaborators (Service, Session, the
-Job classes / JobPool, ``requests``) are replaced with inert fakes and its
-``sc_send_summary`` with a spy, then the top-level work function is driven once
-for a normal run and once for a failing run. The assertions are:
+Each script is imported by file path and its collaborators (Service, Session,
+the Job classes / JobPool, ``requests``) are replaced with inert fakes, then
+the top-level work function is driven once for a normal run and once for a
+failing run. The assertions are:
 
 * a ``run`` row is written, keyed by the canonical ``script_id_script_name``;
 * it ends ``succeeded`` on a normal run and ``failed`` when the body raises;
-* the JobStat counters land in ``run_metric`` under the expected scopes;
-* ``sc_send_summary`` is still called with exactly the arguments it always got.
+* the JobStat counters land in ``run_metric`` under the expected scopes.
 
 These scripts import ``db`` / ``service`` (SQLAlchemy, requests). Where those
 are absent the whole module skips, matching ``test_run_record.py``'s handling of
@@ -53,8 +52,7 @@ def _install_stub_conf():
     stub.get_db_args = lambda: {
         'user': 'stub', 'password': 'stub', 'host': '127.0.0.1',
         'port': '3306', 'dbname': 'stub'}
-    stub.get_sckey = lambda: 'stub'
-    stub.__all__ = ['CONFIG_PATH', 'CONFIG', 'get_db_args', 'get_sckey']
+    stub.__all__ = ['CONFIG_PATH', 'CONFIG', 'get_db_args']
     sys.modules['conf'] = stub
     sys.modules['conf.conf'] = stub
 
@@ -64,7 +62,6 @@ try:
     from job import JobStat
     import db  # noqa: F401
     import service  # noqa: F401
-    import serverchan  # noqa: F401
     _DEPS = True
 except Exception as _e:  # pragma: no cover - depends on the environment
     _DEPS = False
@@ -197,8 +194,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
              mock.patch.object(m, 'GetNewlistArchiveJob',
                                lambda *a, **kw: _FakeJob(newlist_stat)), \
              mock.patch.object(m, 'AddVideoFromArchiveJob',
-                               lambda *a, **kw: _FakeJob(add_stat)), \
-             mock.patch.object(m, 'sc_send_summary') as sc:
+                               lambda *a, **kw: _FakeJob(add_stat)):
             m.add_latest_video_with_tid_30()
 
         (run_id, script_name, status, finished_at), = self._runs()
@@ -211,15 +207,12 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         # 10 AddVideoFromArchiveJob stats merged (fake returns the same stat)
         self.assertEqual(metrics['add-video-from-archive']['total_count'], 70.0)
         self.assertEqual(metrics['add-video-from-archive']['new_video'], 20.0)
-        # conditional SC: no exception keys tripped -> not sent (unchanged rule)
-        sc.assert_not_called()
 
     def test_12_failure_is_recorded(self):
         m = _load('12_add-latest-video-with-tid-30.py')
         with mock.patch.object(m, 'Service', _FakeService), \
              mock.patch.object(m, 'GetNewlistArchiveJob',
-                               side_effect=RuntimeError('boom')), \
-             mock.patch.object(m, 'sc_send_summary'):
+                               side_effect=RuntimeError('boom')):
             with self.assertRaises(RuntimeError):
                 m.add_latest_video_with_tid_30()
         (_, _, status, _), = self._runs()
@@ -236,8 +229,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
              mock.patch.object(m.DBOperation, 'query_all_video_bvids',
                                staticmethod(lambda s: [])), \
              mock.patch.object(m, 'JobPool', lambda *a, **kw: _FakePool(merged)), \
-             mock.patch.object(m, 'b2a', lambda bv: 1), \
-             mock.patch.object(m, 'sc_send_summary') as sc:
+             mock.patch.object(m, 'b2a', lambda bv: 1):
             m.update_video_info()
 
         (run_id, script_name, status, _), = self._runs()
@@ -250,11 +242,6 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         self.assertEqual(
             metrics['api:test_target:test_worker']['t1:http_412'], 10.0)
         self.assertEqual(service.stats.log_calls, [m.logger])
-        # 15_ sends unconditionally; same (name, span, merged stat) as before
-        sc.assert_called_once()
-        args = sc.call_args.args
-        self.assertEqual(args[0], '15_update-video-info')
-        self.assertIs(args[3], merged)
 
     # ----------------------------------------------------------------- 16_ ---
     def test_16_update_member_info(self):
@@ -266,8 +253,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
              mock.patch.object(m, 'Session', _FakeSession), \
              mock.patch.object(m.DBOperation, 'query_all_member_mids',
                                staticmethod(lambda s: [])), \
-             mock.patch.object(m, 'JobPool', lambda *a, **kw: _FakePool(merged)), \
-             mock.patch.object(m, 'sc_send_summary') as sc:
+             mock.patch.object(m, 'JobPool', lambda *a, **kw: _FakePool(merged)):
             m.update_member_info()
 
         (run_id, script_name, status, finished_at), = self._runs()
@@ -281,10 +267,6 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         self.assertEqual(
             metrics['api:test_target:test_worker']['t1:http_412'], 10.0)
         self.assertEqual(service.stats.log_calls, [m.logger])
-        sc.assert_called_once()
-        args = sc.call_args.args
-        self.assertEqual(args[0], '16_update-member-info')
-        self.assertIs(args[3], merged)
 
     def test_16_failure_is_recorded(self):
         m = _load('16_update-member-info.py')
@@ -292,8 +274,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         with mock.patch.object(m, 'Service', _FakeService), \
              mock.patch.object(m, 'Session', _FakeSession), \
              mock.patch.object(m.DBOperation, 'query_all_member_mids',
-                               side_effect=RuntimeError('boom')), \
-             mock.patch.object(m, 'sc_send_summary'):
+                               side_effect=RuntimeError('boom')):
             with self.assertRaises(RuntimeError):
                 m.update_member_info()
 
@@ -313,8 +294,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
              mock.patch.object(m, 'Session', _FakeSession), \
              mock.patch.object(m.DBOperation, 'query_all_member_mids',
                                staticmethod(lambda session: [])), \
-             mock.patch.object(m, 'JobPool', lambda *a, **kw: next(pools)), \
-             mock.patch.object(m, 'sc_send_summary') as sc:
+             mock.patch.object(m, 'JobPool', lambda *a, **kw: next(pools)):
             m.add_member_follower_record()
 
         (run_id, script_name, status, _), = self._runs()
@@ -323,9 +303,6 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         metrics = self._metrics(run_id)
         self.assertEqual(metrics['follower-fetch']['success'], 100.0)
         self.assertEqual(metrics['follower-db-writer']['batch_insert'], 1.0)
-        # 17_ still passes the FETCH stat (not the writer stat) to ServerChan
-        sc.assert_called_once()
-        self.assertIs(sc.call_args.args[3], fetch)
 
     # ----------------------------------------------------------------- 62_ ---
     def test_62_add_evocalrank_video(self):
@@ -337,8 +314,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         with mock.patch.object(m, 'Service', _FakeService), \
              mock.patch.object(m.requests, 'get', return_value=resp), \
              mock.patch.object(m, 'AddVideoJob',
-                               lambda *a, **kw: _FakeJob(merged)), \
-             mock.patch.object(m, 'sc_send_summary') as sc:
+                               lambda *a, **kw: _FakeJob(merged)):
             m.add_evocalrank_video(700)
 
         (run_id, script_name, status, _), = self._runs()
@@ -346,10 +322,6 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         self.assertEqual(status, 'succeeded')
         # merged over 50 fake jobs: total_count 5 * 50, condition scaled too
         self.assertEqual(self._metrics(run_id)['add-evocalrank-video']['total_count'], 250.0)
-        # SC keeps its historical suffixed name
-        sc.assert_called_once()
-        self.assertEqual(sc.call_args.args[0],
-                         '62_add-evocalrank-video.add_evocalrank_video')
 
     def test_62_fetch_failure_exits_and_records_failed(self):
         m = _load('62_add-evocalrank-video.py')
@@ -357,8 +329,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         resp.raise_for_status.side_effect = RuntimeError('503')
 
         with mock.patch.object(m, 'Service', _FakeService), \
-             mock.patch.object(m.requests, 'get', return_value=resp), \
-             mock.patch.object(m, 'sc_send_summary'):
+             mock.patch.object(m.requests, 'get', return_value=resp):
             with self.assertRaises(SystemExit) as ctx:
                 m.add_evocalrank_video(700)
 
@@ -375,31 +346,13 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         with mock.patch.object(m, 'Service', _FakeService), \
              mock.patch.object(m, 'Session', _FakeSession), \
              mock.patch.object(m, 'AddSprintVideoRecordJob',
-                               lambda *a, **kw: _FakeJob(stat)), \
-             mock.patch.object(m, 'sc_send_summary') as sc:
+                               lambda *a, **kw: _FakeJob(stat)):
             m.add_sprint_video_record()
 
         (run_id, script_name, status, _), = self._runs()
         self.assertEqual(script_name, '71_add-sprint-video-record')
         self.assertEqual(status, 'succeeded')
         self.assertEqual(self._metrics(run_id)['sprint-video-record']['exception'], 1.0)
-        # conditional rule unchanged: exception > 0 -> SC is sent
-        sc.assert_called_once()
-        self.assertIs(sc.call_args.args[3], stat)
-
-    def test_71_no_exceptions_skips_serverchan(self):
-        m = _load('71_add-sprint-video-record.py')
-        stat = _stat(13, success=13)
-
-        with mock.patch.object(m, 'Service', _FakeService), \
-             mock.patch.object(m, 'Session', _FakeSession), \
-             mock.patch.object(m, 'AddSprintVideoRecordJob',
-                               lambda *a, **kw: _FakeJob(stat)), \
-             mock.patch.object(m, 'sc_send_summary') as sc:
-            m.add_sprint_video_record()
-
-        self.assertEqual(self._runs()[0][2], 'succeeded')
-        sc.assert_not_called()
 
 
 if __name__ == '__main__':

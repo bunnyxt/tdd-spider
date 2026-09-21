@@ -1,20 +1,19 @@
 """
-Per-entry-point verification that the two remaining production scripts that do
-*not* call ``sc_send_summary`` -- ``18_member-total-stat-update.py`` and
-``72_add-sprint-daily.py`` -- now open, populate and close a run record without
-changing their duration / logging / ServerChan behaviour.
+Per-entry-point verification that the two production scripts without a JobStat
+summary -- ``18_member-total-stat-update.py`` and ``72_add-sprint-daily.py`` --
+open, populate and close a run record without changing their duration or
+logging behaviour.
 
 Same approach as ``test_summary_script_run_records.py``: each script is imported
-by file path, its DB session / ServerChan calls are replaced with inert fakes or
-spies, and its top-level work function is driven once for a normal run and once
-for a failing run. The assertions are:
+by file path, its DB session is replaced with an inert fake, and its top-level
+work function is driven once for a normal run and once for a failing run. The
+assertions are:
 
 * a ``run`` row is written, keyed by the canonical ``script_id_script_name``;
 * it ends ``succeeded`` on a normal run and ``failed`` when the body raises and
   the script's own ``except`` raises ``SystemExit(1)``;
 * only the plain counts each script already computes land in ``run_metric``
-  (no fabricated JobStat, no message text);
-* ``sc_send`` / ``sc_send_critical`` are still called exactly as before.
+  (no fabricated JobStat, no message text).
 
 These scripts import ``db`` (SQLAlchemy). Where that is absent the whole module
 skips, matching ``test_run_record.py``'s handling of a bare checkout.
@@ -54,8 +53,7 @@ def _install_stub_conf():
     stub.get_db_args = lambda: {
         'user': 'stub', 'password': 'stub', 'host': '127.0.0.1',
         'port': '3306', 'dbname': 'stub'}
-    stub.get_sckey = lambda: 'stub'
-    stub.__all__ = ['CONFIG_PATH', 'CONFIG', 'get_db_args', 'get_sckey']
+    stub.__all__ = ['CONFIG_PATH', 'CONFIG', 'get_db_args']
     sys.modules['conf'] = stub
     sys.modules['conf.conf'] = stub
 
@@ -63,7 +61,6 @@ def _install_stub_conf():
 try:
     _install_stub_conf()
     import db  # noqa: F401
-    import serverchan  # noqa: F401
     _DEPS = True
 except Exception as _e:  # pragma: no cover - depends on the environment
     _DEPS = False
@@ -140,7 +137,7 @@ class _MemberStatSession:
         self.closed = True
 
 
-@unittest.skipUnless(_DEPS, 'db/serverchan deps not importable in this environment')
+@unittest.skipUnless(_DEPS, 'db deps not importable in this environment')
 class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
     def test_normal_run_records_succeeded_with_counts(self):
         m = _load('18_member-total-stat-update.py')
@@ -152,15 +149,13 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
         ]
         session = _MemberStatSession(rows)
 
-        with mock.patch.object(m, 'Session', lambda: session), \
-             mock.patch.object(m, 'sc_send_critical') as sc_crit:
+        with mock.patch.object(m, 'Session', lambda: session):
             m.member_total_stat_update()
 
         (run_id, script_name, status, finished_at), = self._runs()
         self.assertEqual(script_name, '18_member-total-stat-update')
         self.assertEqual(status, 'succeeded')
         self.assertTrue(finished_at)
-        sc_crit.assert_not_called()
 
         metrics = self._metrics(run_id)['member-total-stat']
         self.assertEqual(metrics['result_rows'], (3.0, 'count'))
@@ -175,8 +170,7 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
         m = _load('18_member-total-stat-update.py')
         session = _MemberStatSession([])
 
-        with mock.patch.object(m, 'Session', lambda: session), \
-             mock.patch.object(m, 'sc_send_critical'):
+        with mock.patch.object(m, 'Session', lambda: session):
             m.member_total_stat_update()
 
         (run_id, _, status, _), = self._runs()
@@ -185,7 +179,7 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
         self.assertEqual(metrics['result_rows'], (0.0, 'count'))
         self.assertEqual(metrics['records_added'], (0.0, 'count'))
 
-    def test_failure_is_recorded_and_critical_still_sent(self):
+    def test_failure_is_recorded(self):
         m = _load('18_member-total-stat-update.py')
 
         class _Boom(_MemberStatSession):
@@ -193,8 +187,7 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
                 raise RuntimeError('db lost connection')
 
         session = _Boom([])
-        with mock.patch.object(m, 'Session', lambda: session), \
-             mock.patch.object(m, 'sc_send_critical') as sc_crit:
+        with mock.patch.object(m, 'Session', lambda: session):
             with self.assertRaises(SystemExit) as ctx:
                 m.member_total_stat_update()
 
@@ -202,8 +195,6 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
         (_, _, status, finished_at), = self._runs()
         self.assertEqual(status, 'failed')
         self.assertTrue(finished_at)
-        # existing critical/notification path is unchanged
-        sc_crit.assert_called_once()
         self.assertEqual(session.rollbacks, 1)
 
 
@@ -249,22 +240,19 @@ def _sprint_responder(now_s):
     return responder
 
 
-@unittest.skipUnless(_DEPS, 'db/serverchan deps not importable in this environment')
+@unittest.skipUnless(_DEPS, 'db deps not importable in this environment')
 class AddSprintDailyRunRecordTest(_RunRecordTestBase):
     def test_normal_run_records_succeeded_with_metrics(self):
         m = _load('72_add-sprint-daily.py')
         session = _SprintSession(_sprint_responder(m.get_ts_s()))
 
-        with mock.patch.object(m, 'Session', lambda: session), \
-             mock.patch.object(m, 'sc_send') as sc, \
-             mock.patch.object(m, 'sc_send_critical') as sc_crit:
+        with mock.patch.object(m, 'Session', lambda: session):
             m.add_sprint_daily()
 
         (run_id, script_name, status, finished_at), = self._runs()
         self.assertEqual(script_name, '72_add-sprint-daily')
         self.assertEqual(status, 'succeeded')
         self.assertTrue(finished_at)
-        sc_crit.assert_not_called()
 
         metrics = self._metrics(run_id)['sprint-daily']
         self.assertEqual(metrics['start_videos'], (2.0, 'count'))
@@ -275,26 +263,21 @@ class AddSprintDailyRunRecordTest(_RunRecordTestBase):
         self.assertEqual(metrics['view_incr_total'], (0.0, 'views'))
         self.assertEqual(metrics['view_incr_incr'], (-1000.0, 'views'))
 
-        # unchanged behaviour: still a plain sc_send with the same title, and the
-        # summary body (which carries an aid list) never reaches the database
-        sc.assert_called_once()
-        self.assertEqual(sc.call_args.args[0], 'Finish add sprint daily!')
-        # only numeric metrics are stored -- no aid lists / summary text
+        # the summary body (which carries an aid list) never reaches the
+        # database: only numeric metrics are stored
         for _run_id, _scope, name, value in _db(
                 self.db_path, 'SELECT run_id, scope, name, value FROM run_metric'):
             self.assertNotIn(';', name)
             self.assertIsInstance(value, float)
 
-    def test_failure_is_recorded_and_critical_still_sent(self):
+    def test_failure_is_recorded(self):
         m = _load('72_add-sprint-daily.py')
 
         def _boom(_sql):
             raise RuntimeError('db lost connection')
 
         session = _SprintSession(_boom)
-        with mock.patch.object(m, 'Session', lambda: session), \
-             mock.patch.object(m, 'sc_send') as sc, \
-             mock.patch.object(m, 'sc_send_critical') as sc_crit:
+        with mock.patch.object(m, 'Session', lambda: session):
             with self.assertRaises(SystemExit) as ctx:
                 m.add_sprint_daily()
 
@@ -302,8 +285,6 @@ class AddSprintDailyRunRecordTest(_RunRecordTestBase):
         (_, _, status, finished_at), = self._runs()
         self.assertEqual(status, 'failed')
         self.assertTrue(finished_at)
-        sc_crit.assert_called_once()
-        sc.assert_not_called()
         self.assertEqual(session.rollbacks, 1)
 
 

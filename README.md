@@ -9,7 +9,7 @@ CAUTION: This program is related to VOCALOID CHINA, so the most of the documenta
 </h1>
 
 <div align="center">
-Data acquisition program of TianDian Daily (<a href="https://tdd.bunnyxt.com">https://tdd.bunnyxt.com</a>) based on Python, integrated with <a href="http://sc.ftqq.com/3.version"> ServerChan </a> message pushing. Feel free to contact us via QQ group: <a href="https://jq.qq.com/?_wv=1027&k=588s7nw">537793686</a>！
+Data acquisition program of TianDian Daily (<a href="https://tdd.bunnyxt.com">https://tdd.bunnyxt.com</a>) based on Python. Feel free to contact us via QQ group: <a href="https://jq.qq.com/?_wv=1027&k=588s7nw">537793686</a>！
 </div>
 
 ## Introduction

@@ -2,7 +2,7 @@ from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from threading import Thread
 from queue import Queue
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, \
-    str_to_ts_s, ts_s_to_str, logging_init, fullname, get_current_line_no, \
+    str_to_ts_s, ts_s_to_str, logging_init, fullname, \
     SysStatLogger, get_ts_ms, format_duration_summary
 import time
 import datetime
@@ -11,7 +11,6 @@ import os
 import re
 import shutil
 import sys
-from serverchan import sc_send_critical
 from collections import namedtuple, defaultdict, Counter
 from typing import Optional
 from core import RecordNew
@@ -829,8 +828,6 @@ def hourly_video_record_add():
         message = f'Exception occurred when running hourly video record add! time task: {time_task}, error: {e}'
         logger.critical(message)
         recorder.finish('failed')
-        sc_send_critical(script_fullname, message,
-                         __file__, get_current_line_no())
         raise SystemExit(1)
 
     recorder.finish('succeeded')

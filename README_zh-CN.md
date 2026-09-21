@@ -5,7 +5,7 @@
 </h1>
 
 <div align="center">
-天钿Daily（<a href="https://tdd.bunnyxt.com">https://tdd.bunnyxt.com</a>）的数据获取程序，基于Python，整合<a href="http://sc.ftqq.com/3.version">Server酱</a>消息推送。QQ群：<a href="https://jq.qq.com/?_wv=1027&k=588s7nw">537793686</a>，欢迎加入！
+天钿Daily（<a href="https://tdd.bunnyxt.com">https://tdd.bunnyxt.com</a>）的数据获取程序，基于Python。QQ群：<a href="https://jq.qq.com/?_wv=1027&k=588s7nw">537793686</a>，欢迎加入！
 </div>
 
 ## 简介
@@ -35,7 +35,7 @@
    TEST_BATCH: 100
    ```
    PS：推荐使用`docker`方式使用，并在`docker-compose.yml`文件底部`environment`之后粘贴以上环境变量配置，配置完成后使用`nohup docker-compose up &`在后台启动 ProxyPool 服务。
-4. 打开`conf/conf.ini`文件，填写配置，包括数据库连接（`MySQL 5.7.30`）、Server 酱 SCKEY（获取方式见[Server 酱首页](http://sc.ftqq.com/3.version)）、ProxyPool 地址（默认[http://localhost:5555/random](http://localhost:5555/random)）等。
+4. 打开`conf/conf.ini`文件，填写配置，包括数据库连接（`MySQL 5.7.30`）、ProxyPool 地址（默认[http://localhost:5555/random](http://localhost:5555/random)）等。
 
 ## 运行
 
@@ -131,8 +131,6 @@ PTY 使前台 Web 进程跟随 SSH session 的生命周期，keepalive 则会及
 ### db
 
 ### pybiliapi
-
-### serverchan
 
 ### spider
 
