@@ -1,4 +1,4 @@
-const baseUrl = new URL("http://api.bilibili.com/x/web-interface/newlist");
+const baseUrl = new URL("http://api.bilibili.com/x/web-interface/card");
 
 export const handler = async (event) => {
   const queryParams = event.queryStringParameters || {};
