@@ -79,7 +79,7 @@ the keepalive options detect a dead connection instead of leaving it unnoticed.
 page above stay read-only.
 
 ```shell
-# consistent gzipped snapshot + .sha256 into data/runrecord-snapshot/
+# consistent gzipped snapshot + .sha256 into data/runrecord/
 python3 -m runrecord.maintain backup
 
 # delete runs (with their metrics and log paths) older than N days; default 365

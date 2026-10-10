@@ -108,7 +108,7 @@ PTY 使前台 Web 进程跟随 SSH session 的生命周期，keepalive 则会及
 `runrecord.maintain` 提供写侧的维护命令；上面的 CLI 和 Web 页面保持只读。
 
 ```shell
-# 生成一致的 gzip 快照和 .sha256，放到 data/runrecord-snapshot/
+# 生成一致的 gzip 快照和 .sha256，放到 data/runrecord/
 python3 -m runrecord.maintain backup
 
 # 删除早于 N 天的 run（连同其 metrics 和日志路径），默认 365

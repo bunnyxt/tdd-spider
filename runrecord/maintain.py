@@ -55,7 +55,7 @@ from .recorder import DEFAULT_DB_PATH, _resolve_db_path
 
 __all__ = ['backup', 'prune', 'main', 'DEFAULT_SNAPSHOT_DIR', 'DEFAULT_KEEP_DAYS']
 
-DEFAULT_SNAPSHOT_DIR = os.path.join(os.path.dirname(DEFAULT_DB_PATH), 'runrecord-snapshot')
+DEFAULT_SNAPSHOT_DIR = os.path.join(os.path.dirname(DEFAULT_DB_PATH), 'runrecord')
 
 # deliberately generous: the store only dates back to 2026-08-30 and grows by
 # well under 1 MB a day, so the default should not delete anything for months.
@@ -229,7 +229,7 @@ def _parse_args(argv):
     p_backup = sub.add_parser('backup', help='write a consistent gzipped snapshot')
     p_backup.add_argument(
         '--out-dir', metavar='DIR', default=None,
-        help='where to publish snapshots (default: data/runrecord-snapshot)')
+        help='where to publish snapshots (default: data/runrecord)')
 
     p_prune = sub.add_parser('prune', help='delete runs older than --keep-days')
     p_prune.add_argument(
