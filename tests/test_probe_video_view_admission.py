@@ -11,8 +11,7 @@ import json
 import unittest
 from argparse import Namespace
 
-from service.apistat import ApiStatTracker
-from tools.probe_video_view_admission import main, run_probe, sample_aids
+from tools.probe_video_view_admission import ProbeTracker, main, run_probe, sample_aids
 
 
 class ViewHandler(BaseHTTPRequestHandler):
@@ -87,6 +86,7 @@ class AdmissionProbeTest(unittest.TestCase):
                     self.assertEqual(result['arms'][arm]['n1'], 5)
                     self.assertEqual(result['arms'][arm]['p'], 0)
                     self.assertEqual(result['arms'][arm]['calls'], {'ok': 5})
+                    self.assertEqual(result['trial1_windows'][0]['arms'][arm]['n1'], 5)
                 self.assertNotIn(url, output.getvalue())
                 self.assertNotIn('probe-test-agent', output.getvalue())
         finally:
@@ -95,7 +95,7 @@ class AdmissionProbeTest(unittest.TestCase):
             thread.join()
 
     def test_probe_stops_when_candidate_has_high_rejection(self):
-        tracker = ApiStatTracker()
+        tracker = ProbeTracker({'baseline': 'aws', 'candidate': 'gcp'})
 
         class FakeService:
             def __init__(self, worker, fails):

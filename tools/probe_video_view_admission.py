@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import random
 import sys
+import threading
 import time
 from urllib.parse import urlparse
 
@@ -22,6 +23,59 @@ from service.apistat import ApiStatTracker
 
 ENDPOINT = 'get_video_view_trimmed'
 ARMS = ('baseline', 'candidate')
+WINDOW_S = 5
+
+
+class ProbeTracker(ApiStatTracker):
+    """Keep bounded, low-cardinality trial-1 time windows for rate checks."""
+
+    def __init__(self, worker_ids: dict[str, str]):
+        super().__init__(window_s=WINDOW_S)
+        self._probe_start = time.monotonic()
+        self._probe_lock = threading.Lock()
+        self._id_to_arm = {value: key for key, value in worker_ids.items()}
+        self._trial1_windows = defaultdict(Counter)
+
+    def record(self, endpoint, worker, trial, outcome, now=None):
+        super().record(endpoint, worker, trial, outcome, now=now)
+        arm = self._id_to_arm.get(worker)
+        if endpoint != ENDPOINT or arm is None or trial != 1:
+            return
+        clock_now = time.monotonic() if now is None else now
+        index = max(0, int((clock_now - self._probe_start) // WINDOW_S))
+        with self._probe_lock:
+            self._trial1_windows[(index, arm)][outcome] += 1
+
+    def windows(self) -> list[dict]:
+        with self._probe_lock:
+            counts = {key: dict(value)
+                      for key, value in self._trial1_windows.items()}
+        result = []
+        for index in sorted({key[0] for key in counts}):
+            arms = {}
+            for arm in ARMS:
+                outcomes = counts.get((index, arm), {})
+                n = sum(outcomes.values())
+                arms[arm] = {'n1': n,
+                             'p': (n - outcomes.get('ok', 0)) / n if n else None}
+            result.append({'start_s': index * WINDOW_S, 'arms': arms})
+        return result
+
+    def recent(self, seconds=30) -> dict:
+        windows = self.windows()
+        if not windows:
+            return {arm: {'n1': 0, 'p': None} for arm in ARMS}
+        latest = windows[-1]['start_s']
+        selected = [window for window in windows
+                    if window['start_s'] > latest - seconds]
+        result = {}
+        for arm in ARMS:
+            n = sum(window['arms'][arm]['n1'] for window in selected)
+            failed = sum(window['arms'][arm]['n1'] * window['arms'][arm]['p']
+                         for window in selected
+                         if window['arms'][arm]['p'] is not None)
+            result[arm] = {'n1': n, 'p': failed / n if n else None}
+        return result
 
 
 def sample_aids(path: Path, count: int, seed: int) -> list[int]:
@@ -129,7 +183,8 @@ def run_probe(args, services: dict[str, Service], aids: list[int],
             if len(pending) >= args.concurrency * 2:
                 done, pending = wait(pending, return_when=FIRST_COMPLETED)
                 collect(done)
-            # An early stop protects the candidate from an Azure-like result.
+            # Check a recent window too: a long clean opening can hide a
+            # later steep rise in the cumulative p.
             if index % 100 == 99:
                 done = {future for future in pending if future.done()}
                 pending -= done
@@ -137,12 +192,23 @@ def run_probe(args, services: dict[str, Service], aids: list[int],
                 trial = summarize_trials(tracker, worker_ids)
                 candidate = trial['candidate']
                 baseline = trial['baseline']
+                recent = tracker.recent() if isinstance(tracker, ProbeTracker) else None
                 if candidate['n1'] >= args.stop_after:
                     if candidate['p'] >= args.stop_p:
                         stop_reason = 'candidate_p_stop'
                     elif (baseline['n1'] >= args.stop_after
                           and candidate['p'] - baseline['p'] >= args.stop_gap):
                         stop_reason = 'candidate_gap_stop'
+                if stop_reason is None and recent is not None:
+                    cand_recent = recent['candidate']
+                    base_recent = recent['baseline']
+                    if cand_recent['n1'] >= args.stop_after:
+                        if cand_recent['p'] >= args.stop_p:
+                            stop_reason = 'candidate_recent_p_stop'
+                        elif (base_recent['n1'] >= args.stop_after
+                              and cand_recent['p'] - base_recent['p']
+                              >= args.stop_gap):
+                            stop_reason = 'candidate_recent_gap_stop'
         if pending:
             done, _ = wait(pending)
             collect(done)
@@ -165,6 +231,8 @@ def run_probe(args, services: dict[str, Service], aids: list[int],
         'target_calls_per_s': args.rate,
         'rate_ratio': round(scheduled / elapsed_s / args.rate, 3),
         'stop_reason': stop_reason,
+        'trial1_windows': (tracker.windows()
+                           if isinstance(tracker, ProbeTracker) else []),
         'arms': trials,
     }
 
@@ -207,10 +275,11 @@ def main(argv=None):
         raise ValueError('candidate URL must be HTTPS (or loopback HTTP for tests)')
     worker_ids = {'baseline': args.baseline_id,
                   'candidate': 'probe-candidate'}
-    tracker = ApiStatTracker()
     ua_pool = endpoint.get('user_agents') or []
     if not ua_pool:
         raise ValueError('endpoint must provide the production User-Agent pool')
+    aids = sample_aids(args.aid_csv, args.per_arm * 2, args.seed)
+    tracker = ProbeTracker(worker_ids)
     services = {}
     for arm, url in [('baseline', matches[0]['url']),
                      ('candidate', candidate_url)]:
@@ -220,7 +289,6 @@ def main(argv=None):
             mode='worker', pool_maxsize=args.concurrency,
             endpoints={ENDPOINT: {'workers': [worker], 'user_agents': ua_pool}},
             stats=tracker)
-    aids = sample_aids(args.aid_csv, args.per_arm * 2, args.seed)
     result = run_probe(args, services, aids, worker_ids, tracker)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result['stop_reason'] is None else 2
