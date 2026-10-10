@@ -103,6 +103,26 @@ ssh -t \
 
 PTY 使前台 Web 进程跟随 SSH session 的生命周期，keepalive 则会及时发现已经失效的连接。
 
+### 快照与保留
+
+`runrecord.maintain` 提供写侧的维护命令；上面的 CLI 和 Web 页面保持只读。
+
+```shell
+# 生成一致的 gzip 快照和 .sha256，放到 data/runrecord/
+python3 -m runrecord.maintain backup
+
+# 删除早于 N 天的 run（连同其 metrics 和日志路径），默认 365
+python3 -m runrecord.maintain prune --keep-days 365 --dry-run
+```
+
+`backup` 使用 SQLite 的 online backup API，而不是直接复制正在写入的数据库文件，并在发布前用 `PRAGMA integrity_check` 校验副本。快照会一直累积，直到被拉取离开主机。恢复时先校验并解压，用 CLI 读取确认后再替换任何文件：
+
+```shell
+sha256sum -c run-records_<stamp>.sqlite3.gz.sha256   # macOS：shasum -a 256 -c
+gunzip -c run-records_<stamp>.sqlite3.gz > restored.sqlite3
+python3 -m runrecord --db restored.sqlite3 overview
+```
+
 ## 脚本列表
 
 本系统内置了一些定时数据获取或处理脚本，位于根目录下，文件名满足`数字+下划线+由短横线连接的一组英文单词+.py`格式，例如`16_daily-update-member-info.py`。这里对这些内置的脚本做一个简单的介绍。

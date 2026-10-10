@@ -26,12 +26,14 @@ data/
 /test-*.ipynb
 /test.py
 
-# run-record SQLite db + its derived files (the default path lives under data/
-# and is already ignored; this also covers a db pointed elsewhere)
+# run-record SQLite db, its derived files and snapshots (the default paths live under data/
+# which is already ignored; this also covers files pointed elsewhere)
 *.sqlite3
 *.sqlite3-journal
 *.sqlite3-wal
 *.sqlite3-shm
+*.sqlite3.gz
+*.sqlite3.gz.sha256
 
 # config
 conf/conf.ini
