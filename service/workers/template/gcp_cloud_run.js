@@ -1,6 +1,6 @@
 const functions = require("@google-cloud/functions-framework");
 
-const baseUrl = new URL("http://api.bilibili.com/x/web-interface/newlist");
+const baseUrl = new URL("http://api.bilibili.com/x/web-interface/card");
 
 functions.http("proxyRequest", async (req, res) => {
   const queryParams = req.query || {};
