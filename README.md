@@ -73,23 +73,22 @@ ssh -t \
 The PTY makes the foreground server follow the SSH session lifecycle, while
 the keepalive options detect a dead connection instead of leaving it unnoticed.
 
-### Snapshots and retention
+### Snapshots
 
-`runrecord.maintain` holds the write-side maintenance commands; the CLI and web
+`runrecord.maintain` holds the snapshot command; the CLI and web
 page above stay read-only.
 
 ```shell
 # consistent gzipped snapshot + .sha256 into data/runrecord/
 python3 -m runrecord.maintain backup
 
-# delete runs (with their metrics and log paths) older than N days; default 365
-python3 -m runrecord.maintain prune --keep-days 365 --dry-run
 ```
 
 `backup` uses SQLite's online backup API rather than copying the live file, and
 checks the copy with `PRAGMA integrity_check` before publishing it. Snapshots
-accumulate until they are pulled off the host. To restore one, verify and
-unpack it, then point the CLI at the result before replacing anything:
+accumulate until they are pulled off the host. The live run-record database has
+no automatic age-based deletion. To restore a snapshot, verify and unpack it,
+then point the CLI at the result before replacing anything:
 
 ```shell
 sha256sum -c run-records_<stamp>.sqlite3.gz.sha256   # macOS: shasum -a 256 -c

@@ -1,5 +1,5 @@
 """
-Tests for the run-record maintenance commands (snapshot + retention).
+Tests for run-record snapshots.
 
 Run from the repo root:
 
@@ -136,83 +136,26 @@ class BackupTest(unittest.TestCase):
         self.assertEqual(ctx.exception.exit_code, 3)
 
 
-class PruneTest(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.db = os.path.join(self._tmp.name, 'run-records.sqlite3')
-        _make_db(self.db, [
-            ('old', NOW - timedelta(days=31)),
-            ('edge', NOW - timedelta(days=30)),
-            ('new', NOW - timedelta(days=1)),
-        ])
-
-    def tearDown(self):
-        self._tmp.cleanup()
-
-    def _run_ids(self):
-        return [row[0] for row in _rows(self.db)['run']]
-
-    def test_deletes_only_older_runs_with_their_metrics_and_logs(self):
-        result = maintain.prune(self.db, keep_days=30, now=NOW)
-
-        self.assertEqual((result['runs'], result['metrics'], result['logs']), (1, 1, 1))
-        rows = _rows(self.db)
-        self.assertEqual([r[0] for r in rows['run']], ['edge', 'new'])
-        self.assertEqual(sorted({r[0] for r in rows['run_metric']}), ['edge', 'new'])
-        self.assertEqual(sorted({r[0] for r in rows['run_log']}), ['edge', 'new'])
-
-    def test_dry_run_deletes_nothing(self):
-        before = _rows(self.db)
-        result = maintain.prune(self.db, keep_days=30, dry_run=True, now=NOW)
-        self.assertEqual(result['runs'], 1)
-        self.assertTrue(result['dry_run'])
-        self.assertEqual(_rows(self.db), before)
-
-    def test_default_keeps_recent_history(self):
-        result = maintain.prune(self.db, now=NOW)
-        self.assertEqual(result['runs'], 0)
-        self.assertEqual(self._run_ids(), ['edge', 'new', 'old'])
-
-    def test_rejects_non_positive_keep_days(self):
-        with self.assertRaises(ValueError):
-            maintain.prune(self.db, keep_days=0, now=NOW)
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            maintain.main(['--db', self.db, 'prune', '--keep-days', '0'])
-        self.assertEqual(len(self._run_ids()), 3)
-
-    def test_missing_database_is_refused_and_not_created(self):
-        missing = os.path.join(self._tmp.name, 'nope.sqlite3')
-        with self.assertRaises(QueryError) as ctx:
-            maintain.prune(missing, keep_days=30, now=NOW)
-        self.assertEqual(ctx.exception.exit_code, 5)
-        self.assertFalse(os.path.exists(missing))
-
-    def test_newer_schema_is_refused_without_deleting(self):
-        conn = sqlite3.connect(self.db)
-        conn.execute(f'PRAGMA user_version = {schema.SCHEMA_VERSION + 1}')
-        conn.commit()
-        conn.close()
-        with self.assertRaises(QueryError) as ctx:
-            maintain.prune(self.db, keep_days=30, now=NOW)
-        self.assertEqual(ctx.exception.exit_code, 3)
-        self.assertEqual(len(self._run_ids()), 3)
-
-
 class MainTest(unittest.TestCase):
-    def test_backup_then_prune_via_cli(self):
+    def test_backup_via_cli_keeps_live_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = os.path.join(tmp, 'run-records.sqlite3')
             out = os.path.join(tmp, 'snapshots')
-            _make_db(db, [('a', datetime.now(timezone.utc))])
+            _make_db(db, [('old', NOW - timedelta(days=400)),
+                          ('new', datetime.now(timezone.utc))])
+            before = _rows(db)
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
                 self.assertEqual(maintain.main(['--db', db, 'backup', '--out-dir', out]), 0)
-                self.assertEqual(maintain.main(['--db', db, 'prune', '--dry-run']), 0)
             output = stdout.getvalue()
             self.assertIn('backup ok:', output)
-            self.assertIn('runs=1', output)
-            self.assertIn('prune ok:', output)
-            self.assertIn('would delete runs=0', output)
+            self.assertIn('runs=2', output)
+            self.assertEqual(_rows(db), before)
+
+    def test_prune_command_is_unavailable(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as ctx:
+            maintain.main(['prune'])
+        self.assertEqual(ctx.exception.code, 2)
 
     def test_missing_database_exit_code(self):
         with tempfile.TemporaryDirectory() as tmp:

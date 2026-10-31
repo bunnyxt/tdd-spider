@@ -1,12 +1,10 @@
 """
-Maintenance commands for the run-record store: consistent snapshots and retention.
+Maintenance command for the run-record store: consistent snapshots.
 
 The query CLI (``python -m runrecord``) is read-only by contract; anything that
 writes files or deletes rows lives here instead::
 
     python -m runrecord.maintain backup
-    python -m runrecord.maintain prune --keep-days 365
-    python -m runrecord.maintain prune --keep-days 365 --dry-run
 
 ``backup`` never copies the database file directly -- a copy taken while a
 script is writing can be torn. It opens the database read-only and uses SQLite's
@@ -18,9 +16,7 @@ failed run never leaves a half-written snapshot behind. Snapshots accumulate in
 the output directory until they are pulled off the host; this module does not
 delete them.
 
-``prune`` deletes runs whose ``started_at`` is older than ``--keep-days`` days,
-together with their ``run_metric`` and ``run_log`` rows, in one transaction. It
-never creates or migrates a database. ``--dry-run`` only reports what would go.
+This command never deletes rows from the live run-record database.
 
 Exit codes follow the query CLI:
 
@@ -37,10 +33,9 @@ import argparse
 import gzip
 import hashlib
 import os
-import pathlib
 import shutil
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from ._sqlite import sqlite3
 from .query import (
@@ -49,17 +44,12 @@ from .query import (
     _connect_ro,
     EXIT_OK,
     EXIT_DB_ERROR,
-    EXIT_NO_DB,
 )
 from .recorder import DEFAULT_DB_PATH, _resolve_db_path
 
-__all__ = ['backup', 'prune', 'main', 'DEFAULT_SNAPSHOT_DIR', 'DEFAULT_KEEP_DAYS']
+__all__ = ['backup', 'main', 'DEFAULT_SNAPSHOT_DIR']
 
 DEFAULT_SNAPSHOT_DIR = os.path.join(os.path.dirname(DEFAULT_DB_PATH), 'runrecord')
-
-# deliberately generous: the store only dates back to 2026-08-30 and grows by
-# well under 1 MB a day, so the default should not delete anything for months.
-DEFAULT_KEEP_DAYS = 365
 
 _SNAPSHOT_PREFIX = 'run-records_'
 _SNAPSHOT_SUFFIX = '.sqlite3.gz'
@@ -151,75 +141,10 @@ def backup(db_path=None, out_dir=None, now=None):
     }
 
 
-def _connect_rw(path):
-    """Open an existing database for writing. Never creates one."""
-    if sqlite3 is None:
-        raise QueryError(
-            'no SQLite driver available (stdlib sqlite3 missing, pysqlite3 not '
-            'installed)', EXIT_DB_ERROR)
-    if not os.path.exists(path):
-        raise QueryError(f'run-records database not found: {path}', EXIT_NO_DB)
-    uri = pathlib.Path(os.path.abspath(path)).as_uri() + '?mode=rw'
-    try:
-        return sqlite3.connect(uri, uri=True, timeout=30)
-    except sqlite3.Error as e:
-        raise QueryError(f'could not open database {path}: {e}', EXIT_DB_ERROR)
-
-
-def prune(db_path=None, keep_days=DEFAULT_KEEP_DAYS, dry_run=False, now=None):
-    """
-    Delete runs that started more than ``keep_days`` days ago, with their
-    metrics and log locations. Returns the cutoff and the per-table counts.
-    """
-    if keep_days < 1:
-        raise ValueError('keep_days must be at least 1')
-    db_path = _resolve_db_path(db_path)
-    now = now or datetime.now(timezone.utc)
-    # started_at is always ISO 8601 UTC with a +00:00 offset, so plain string
-    # comparison against a cutoff in the same format orders chronologically
-    cutoff = (now - timedelta(days=keep_days)).astimezone(timezone.utc).isoformat()
-    old_runs = 'SELECT run_id FROM run WHERE started_at < ?'
-
-    conn = _connect_rw(db_path)
-    try:
-        _check_schema(conn)
-        counts = {
-            'runs': conn.execute(
-                f'SELECT COUNT(*) FROM ({old_runs})', (cutoff,)).fetchone()[0],
-            'metrics': conn.execute(
-                f'SELECT COUNT(*) FROM run_metric WHERE run_id IN ({old_runs})',
-                (cutoff,)).fetchone()[0],
-            'logs': conn.execute(
-                f'SELECT COUNT(*) FROM run_log WHERE run_id IN ({old_runs})',
-                (cutoff,)).fetchone()[0],
-        }
-        if not dry_run and counts['runs']:
-            try:
-                with conn:
-                    conn.execute(
-                        f'DELETE FROM run_metric WHERE run_id IN ({old_runs})', (cutoff,))
-                    conn.execute(
-                        f'DELETE FROM run_log WHERE run_id IN ({old_runs})', (cutoff,))
-                    conn.execute('DELETE FROM run WHERE started_at < ?', (cutoff,))
-            except sqlite3.Error as e:
-                raise QueryError(f'prune failed and was rolled back: {e}', EXIT_DB_ERROR)
-    finally:
-        conn.close()
-
-    return {'cutoff': cutoff, 'dry_run': dry_run, **counts}
-
-
-def _positive_int(value):
-    number = int(value)
-    if number < 1:
-        raise argparse.ArgumentTypeError('must be at least 1')
-    return number
-
-
 def _parse_args(argv):
     parser = argparse.ArgumentParser(
         prog='python -m runrecord.maintain',
-        description='Snapshot and retention commands for the run-record store.')
+        description='Write a consistent snapshot of the run-record store.')
     parser.add_argument(
         '--db', metavar='PATH', default=None,
         help='path to the run-records SQLite file (default: $TDD_RUN_RECORD_DB '
@@ -231,12 +156,6 @@ def _parse_args(argv):
         '--out-dir', metavar='DIR', default=None,
         help='where to publish snapshots (default: data/runrecord)')
 
-    p_prune = sub.add_parser('prune', help='delete runs older than --keep-days')
-    p_prune.add_argument(
-        '--keep-days', type=_positive_int, default=DEFAULT_KEEP_DAYS,
-        help=f'keep runs that started within this many days (default: {DEFAULT_KEEP_DAYS})')
-    p_prune.add_argument(
-        '--dry-run', action='store_true', help='report what would be deleted, delete nothing')
     return parser.parse_args(argv)
 
 
@@ -244,17 +163,10 @@ def main(argv=None):
     args = _parse_args(sys.argv[1:] if argv is None else list(argv))
     stamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
     try:
-        if args.command == 'backup':
-            result = backup(args.db, args.out_dir)
-            print(f'{stamp} backup ok: {result["path"]} bytes={result["bytes"]} '
-                  f'runs={result["runs"]} latest={result["latest_started_at"]} '
-                  f'schema=v{result["schema_version"]} sha256={result["sha256"]}')
-        else:
-            result = prune(args.db, args.keep_days, args.dry_run)
-            verb = 'would delete' if result['dry_run'] else 'deleted'
-            print(f'{stamp} prune ok: cutoff={result["cutoff"]} {verb} '
-                  f'runs={result["runs"]} metrics={result["metrics"]} '
-                  f'logs={result["logs"]}')
+        result = backup(args.db, args.out_dir)
+        print(f'{stamp} backup ok: {result["path"]} bytes={result["bytes"]} '
+              f'runs={result["runs"]} latest={result["latest_started_at"]} '
+              f'schema=v{result["schema_version"]} sha256={result["sha256"]}')
     except QueryError as e:
         print(f'{stamp} {args.command} error: {e}', file=sys.stderr)
         return e.exit_code
