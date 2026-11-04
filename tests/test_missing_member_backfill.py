@@ -187,6 +187,17 @@ class MissingMemberApplyTest(unittest.TestCase):
         self.assertEqual(self.service.get_member_card.call_count, 1)
         self.assertEqual(result['unresolved_mids'], [10, 20])
 
+    def test_blank_profiles_do_not_prevent_later_valid_backfills(self):
+        for mid in (10, 20, 30, 40):
+            self.aggregate(mid, mid)
+        self.service.get_member_card.side_effect = [
+            ContentError('get_member_card', MemberCard, {'mid': mid}, {}, 'Blank name')
+            for mid in (10, 20, 30)] + [MemberCard(40, 'real profile', '', '', '')]
+        result = backfill.backfill_members([10, 20, 30, 40], self.session, self.service, delay=0)
+        self.assertEqual(result['counts'], {'rejected_profile': 3, 'created': 1})
+        self.assertNotIn('stop_reason', result)
+        self.assertEqual(result['unresolved_mids'], [10, 20, 30])
+
     def test_checkpoints_preserve_completed_ids_and_pending_work(self):
         self.aggregate(10, 1)
         self.aggregate(20, 2)

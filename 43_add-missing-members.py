@@ -182,7 +182,8 @@ def backfill_members(mids, session, service, limit=100, offset=0,
         except ContentError as error:
             session.rollback()
             result.update(error_detail(error), status='rejected_profile')
-            consecutive_errors += 1
+            # A rejected individual profile does not show a transport outage.
+            consecutive_errors = 0
         except RateLimitError as error:
             session.rollback()
             result.update(error_detail(error), status='rate_limited')
