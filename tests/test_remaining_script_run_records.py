@@ -112,7 +112,7 @@ class _RunRecordTestBase(unittest.TestCase):
 # --------------------------------------------------------------------- 18_ ---
 
 class _MemberStatSession:
-    """Fake SQLAlchemy session for 18_: execute() returns preset rows."""
+    """Fake DBAPI connection/cursor for 18_."""
 
     def __init__(self, rows):
         self._rows = rows
@@ -120,11 +120,21 @@ class _MemberStatSession:
         self.commits = 0
         self.rollbacks = 0
         self.closed = False
+        self._result = []
+
+    def cursor(self):
+        return self
 
     def execute(self, *a, **kw):
         if 'from tdd_member where' in str(a[0]):
-            return [(mid, None) for mid in {row[1] for row in self._rows}]
-        return list(self._rows)
+            self._result = [(mid, None) for mid in {row[1] for row in self._rows}]
+        elif str(a[0]).startswith('INSERT INTO'):
+            self.added.extend([tuple(a[1][i:i+10]) for i in range(0, len(a[1]), 10)])
+        else:
+            self._result = list(self._rows)
+
+    def fetchall(self):
+        return self._result
 
     def add(self, obj):
         self.added.append(obj)
@@ -151,7 +161,7 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
         ]
         session = _MemberStatSession(rows)
 
-        with mock.patch.object(m, 'Session', lambda: session):
+        with mock.patch.object(m.engine, 'raw_connection', lambda: session):
             m.member_total_stat_update()
 
         (run_id, script_name, status, finished_at), = self._runs()
@@ -165,14 +175,14 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
         self.assertEqual(metrics['records_added'], (2.0, 'count'))
         # every recorded name is a plain count -- nothing error-like fabricated
         self.assertEqual(set(metrics), {'result_rows', 'member_count', 'records_added'})
-        # completeness signal: one ORM row per distinct member was staged
+        # completeness signal: one bound row per distinct member was staged
         self.assertEqual(len(session.added), 2)
 
     def test_no_data_still_records_succeeded(self):
         m = _load('18_member-total-stat-update.py')
         session = _MemberStatSession([])
 
-        with mock.patch.object(m, 'Session', lambda: session):
+        with mock.patch.object(m.engine, 'raw_connection', lambda: session):
             m.member_total_stat_update()
 
         (run_id, _, status, _), = self._runs()
@@ -189,7 +199,7 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
                 raise RuntimeError('db lost connection')
 
         session = _Boom([])
-        with mock.patch.object(m, 'Session', lambda: session):
+        with mock.patch.object(m.engine, 'raw_connection', lambda: session):
             with self.assertRaises(SystemExit) as ctx:
                 m.member_total_stat_update()
 
@@ -203,7 +213,7 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
         m = _load('18_member-total-stat-update.py')
         rows = [[1, 100, None, 1, 1, 1, 1, 1, 1, None, 0, 0, 11]]
         session = _MemberStatSession(rows)
-        with mock.patch.object(m, 'Session', lambda: session), self.assertRaises(SystemExit):
+        with mock.patch.object(m.engine, 'raw_connection', lambda: session), self.assertRaises(SystemExit):
             m.member_total_stat_update()
         self.assertEqual(session.added, [])
         self.assertEqual(session.commits, 0)
@@ -218,9 +228,9 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
                 if self.commits == 2:
                     raise RuntimeError('second batch failed')
 
-        rows = [[i, i, 1, 1, 1, 1, 1, 1, 1, None, 0, 0, i] for i in range(1, 102)]
+        rows = [[i, i, 1, 1, 1, 1, 1, 1, 1, None, 0, 0, i] for i in range(1, 1002)]
         session = FailSecondBatch(rows)
-        with mock.patch.object(m, 'Session', lambda: session), self.assertRaises(SystemExit):
+        with mock.patch.object(m.engine, 'raw_connection', lambda: session), self.assertRaises(SystemExit):
             m.member_total_stat_update()
         self.assertEqual(session.commits, 2)
         self.assertEqual(session.rollbacks, 1)
