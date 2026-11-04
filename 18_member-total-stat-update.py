@@ -3,6 +3,8 @@ from util import logging_init, get_ts_s, fullname, \
     get_ts_ms, format_duration_summary
 from runrecord import track
 import logging
+import time
+from util.member_total_stat import aggregate_member_stats
 
 script_id = '18'
 script_name = 'member-total-stat-update'
@@ -16,14 +18,20 @@ def member_total_stat_update():
 
     with track(script_fullname) as recorder:
         session = Session()
+        cnt = 0
+        batch_size = 100
+        batch_start = 1
 
         try:
             added = get_ts_s()
+            read_start = time.perf_counter()
+            members = dict(session.execute(
+                'select mid, last_total_stat from tdd_member where mid > 0'))
 
             sql = 'select ' \
                   'v.aid, v.mid as v_mid, ' \
                   'r.view, r.danmaku, r.reply, r.favorite, r.coin, r.share, r.like, ' \
-                  's.mid as s_mid ' \
+                  's.mid as s_mid, v.code, v.state, r.id ' \
                   'from ' \
                   'tdd_video v ' \
                   'left join tdd_video_record r on v.laststat = r.id ' \
@@ -31,39 +39,41 @@ def member_total_stat_update():
                   'where ' \
                   'v.mid is not null && v.laststat is not null;'
             result = session.execute(sql)
-            result = [[r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]] for r in result]
+            result = list(result)
             result_len = len(result)
             logger.info(f'Total {result_len} result got.')
+            logger.info('Aggregate read duration: %.3fs', time.perf_counter() - read_start)
 
-            mid_dict = {}
-            for r in result:
-                mid = r[1] if r[9] is None else r[9]  # if has staff, use staff mid instead
-                if mid not in mid_dict.keys():
-                    mid_dict[mid] = TddMemberTotalStatRecord(added, mid)  # init mid in dict
-                mid_dict[mid].video_count += 1
-                mid_dict[mid].view += r[2]
-                mid_dict[mid].danmaku += r[3]
-                mid_dict[mid].reply += r[4]
-                mid_dict[mid].favorite += r[5]
-                mid_dict[mid].coin += r[6]
-                mid_dict[mid].share += r[7]
-                mid_dict[mid].like += r[8]
+            aggregate_start = time.perf_counter()
+            mid_dict = aggregate_member_stats(result, members, added, logger)
+            logger.info('Aggregate calculation duration: %.3fs',
+                        time.perf_counter() - aggregate_start)
+            del result, members
             mid_dict_len = len(mid_dict)
             logger.info(f'Total {mid_dict_len} items in mid_dict created.')
 
-            cnt = 0
-            for v in mid_dict.values():
-                session.add(v)
-                cnt += 1
-                if cnt % 100 == 0:
+            write_start = time.perf_counter()
+            for index, values in enumerate(mid_dict.values(), 1):
+                session.add(TddMemberTotalStatRecord(**values))
+                if index % batch_size == 0:
                     session.commit()
+                    cnt = index
                     logger.info(f'{cnt} / {mid_dict_len} added')
-            if cnt % 100 != 0:
+                    batch_start = cnt + 1
+            if cnt < mid_dict_len:
                 session.commit()
+                cnt = mid_dict_len
                 logger.info(f'{cnt} / {mid_dict_len} added')
+            logger.info('Aggregate write duration: %.3fs, committed_rows=%d, batch_size=%d',
+                        time.perf_counter() - write_start, cnt, batch_size)
         except Exception as e:
             message = f'Exception occurred when updating member total stat! error: {e}'
             logger.critical(message)
+            logger.critical('Incomplete aggregate: added=%s, confirmed_committed_rows=%d, '
+                            'next_batch_start=%d. Earlier batches remain; a failed commit '
+                            'may have an unknown outcome. Do not rerun blindly: '
+                            'there is no (mid, added) uniqueness constraint.',
+                            locals().get('added'), cnt, batch_start)
             session.rollback()
             session.close()
             raise SystemExit(1)
