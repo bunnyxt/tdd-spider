@@ -122,6 +122,8 @@ class _MemberStatSession:
         self.closed = False
 
     def execute(self, *a, **kw):
+        if 'from tdd_member where' in str(a[0]):
+            return [(mid, None) for mid in {row[1] for row in self._rows}]
         return list(self._rows)
 
     def add(self, obj):
@@ -141,11 +143,11 @@ class _MemberStatSession:
 class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
     def test_normal_run_records_succeeded_with_counts(self):
         m = _load('18_member-total-stat-update.py')
-        # [aid, v_mid, view, danmaku, reply, favorite, coin, share, like, s_mid]
+        # aid, owner, seven stats, staff, code, state, latest record id
         rows = [
-            [1, 100, 10, 1, 1, 1, 1, 1, 1, None],
-            [2, 100, 20, 2, 2, 2, 2, 2, 2, None],
-            [3, 200, 30, 3, 3, 3, 3, 3, 3, None],
+            [1, 100, 10, 1, 1, 1, 1, 1, 1, None, 0, 0, 11],
+            [2, 100, 20, 2, 2, 2, 2, 2, 2, None, 0, 0, 12],
+            [3, 200, 30, 3, 3, 3, 3, 3, 3, None, 0, 0, 13],
         ]
         session = _MemberStatSession(rows)
 
@@ -196,6 +198,34 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
         self.assertEqual(status, 'failed')
         self.assertTrue(finished_at)
         self.assertEqual(session.rollbacks, 1)
+
+    def test_bad_input_fails_before_any_snapshot_is_written(self):
+        m = _load('18_member-total-stat-update.py')
+        rows = [[1, 100, None, 1, 1, 1, 1, 1, 1, None, 0, 0, 11]]
+        session = _MemberStatSession(rows)
+        with mock.patch.object(m, 'Session', lambda: session), self.assertRaises(SystemExit):
+            m.member_total_stat_update()
+        self.assertEqual(session.added, [])
+        self.assertEqual(session.commits, 0)
+        self.assertEqual(self._runs()[0][2], 'failed')
+
+    def test_partial_write_does_not_emit_success(self):
+        m = _load('18_member-total-stat-update.py')
+
+        class FailSecondBatch(_MemberStatSession):
+            def commit(self):
+                self.commits += 1
+                if self.commits == 2:
+                    raise RuntimeError('second batch failed')
+
+        rows = [[i, i, 1, 1, 1, 1, 1, 1, 1, None, 0, 0, i] for i in range(1, 102)]
+        session = FailSecondBatch(rows)
+        with mock.patch.object(m, 'Session', lambda: session), self.assertRaises(SystemExit):
+            m.member_total_stat_update()
+        self.assertEqual(session.commits, 2)
+        self.assertEqual(session.rollbacks, 1)
+        self.assertTrue(session.closed)
+        self.assertEqual(self._runs()[0][2], 'failed')
 
 
 # --------------------------------------------------------------------- 72_ ---

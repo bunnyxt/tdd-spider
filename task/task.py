@@ -369,6 +369,14 @@ def update_video(aid: int, service: Service, session: Session, out_context: dict
     except ServiceError as e:
         raise e
     else:
+        # Retry missing profiles even when owner/staff relationships have not
+        # changed. A prior card failure must not leave them missing forever.
+        profile_mids = {video_view.owner.mid}
+        if video_view.staff is not None:
+            profile_mids.update(item.mid for item in video_view.staff)
+        for profile_mid in profile_mids:
+            ensure_video_member(aid, profile_mid, service, session)
+
         # check attributes
         added = get_ts_s()
         # code
@@ -480,15 +488,7 @@ def update_video(aid: int, service: Service, session: Session, out_context: dict
                         curr_staff_item_found.title = staff_item.title
                 else:
                     # staff not exist, add it
-                    # add member if not exists
-                    try:
-                        add_member(staff_item.mid, service, session)
-                    except AlreadyExistError:
-                        logger.debug(f'Staff member of video already exist! '
-                                     f'mid: {staff_item.mid}')
-                    except TddError as e:
-                        logger.warning(f'Fail to add new member before add new staff! '
-                                       f'aid: {aid}, mid: {staff_item.mid}, error: {e}')
+                    # The profile was checked above, including unchanged staff.
                     # add staff
                     try:
                         new_staff = commit_staff(
@@ -546,10 +546,25 @@ def update_video(aid: int, service: Service, session: Session, out_context: dict
     return video_update_logs
 
 
+def ensure_video_member(aid: int, mid: int, service: Service, session: Session):
+    if type(mid) is not int or mid <= 0:
+        logger.warning('Skip invalid video member: aid=%s, mid=%r', aid, mid)
+        return
+    if session.query(TddMember.mid).filter(TddMember.mid == mid).first() is not None:
+        return
+    try:
+        add_member(mid, service, session, test_exist=False)
+    except ServiceError as e:
+        logger.warning('Missing video member; retry on metadata refresh: aid=%s, mid=%s, error=%s',
+                       aid, mid, e)
+
+
 def add_member(mid: int, service: Service, session: Session, test_exist=True):
+    if type(mid) is not int or mid <= 0:
+        raise ValueError(f'Member mid must be a positive integer: {mid!r}')
     # test exist
     if test_exist:
-        member = DBOperation.query_member_via_mid(mid, session)
+        member = session.query(TddMember).filter(TddMember.mid == mid).first()
         if member is not None:
             # member already exist
             raise AlreadyExistError(table='member', params={'mid': mid})
@@ -573,9 +588,13 @@ def add_member(mid: int, service: Service, session: Session, test_exist=True):
         code=0
     )
 
-    # add to db
-    # TODO: use new db operation which can raise exception
-    DBOperation.add(new_member, session)
+    # Let the caller observe a failed profile insert and retry it later.
+    try:
+        session.add(new_member)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
 
     return new_member
 
