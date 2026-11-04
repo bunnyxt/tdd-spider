@@ -31,7 +31,14 @@ def error_detail(error):
     code = getattr(error, 'code', None)
     if code is None and error.args and type(error.args[0]) is int:
         code = error.args[0]
-    return {'error_type': type(error).__name__, 'error_code': code}
+    detail = {'error_type': type(error).__name__, 'error_code': code}
+    reason = getattr(error, 'reason', None)
+    if reason in ('request_exception', 'body_exception', 'deadline_exceeded',
+                  'json_error', 'parse_error') or (
+            isinstance(reason, str) and reason.startswith('http_')
+            and len(reason) == 8 and reason[5:].isdigit()):
+        detail['reason'] = reason
+    return detail
 
 
 def audit_missing_members(connection, page_size=1000, max_seconds=90):
@@ -175,7 +182,8 @@ def backfill_members(mids, session, service, limit=100, offset=0,
         except ContentError as error:
             session.rollback()
             result.update(error_detail(error), status='rejected_profile')
-            consecutive_errors += 1
+            # A rejected individual profile does not show a transport outage.
+            consecutive_errors = 0
         except RateLimitError as error:
             session.rollback()
             result.update(error_detail(error), status='rate_limited')
@@ -247,7 +255,7 @@ def main(argv=None):
         from service import Service
         session = Session()
         try:
-            report = backfill_members(mids, session, Service(mode='worker', retry=1, pool_maxsize=1),
+            report = backfill_members(mids, session, Service(mode='worker', retry=3, pool_maxsize=1),
                                       args.limit, args.offset, args.max_seconds, args.delay,
                                       progress=save_report)
         finally:
