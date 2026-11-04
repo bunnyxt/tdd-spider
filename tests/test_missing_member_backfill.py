@@ -106,6 +106,15 @@ class MissingMemberAuditTest(unittest.TestCase):
             with self.subTest(mid=mid), self.assertRaises(ValueError):
                 backfill.inventory_mids(dict(report, missing_positive_mids=[mid]))
 
+    def test_failure_reason_excludes_arbitrary_exception_text(self):
+        error = RuntimeError('private response')
+        error.reason = 'request_exception'
+        self.assertEqual(backfill.error_detail(error)['reason'], 'request_exception')
+        error.reason = 'http_503'
+        self.assertEqual(backfill.error_detail(error)['reason'], 'http_503')
+        error.reason = 'https://private.invalid/secret'
+        self.assertNotIn('reason', backfill.error_detail(error))
+
 
 @unittest.skipUnless(_DEPS, 'database dependencies unavailable')
 class MissingMemberApplyTest(unittest.TestCase):
