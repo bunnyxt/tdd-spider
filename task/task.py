@@ -410,7 +410,7 @@ def update_video(aid: int, service: Service, session: Session, out_context: dict
                             'copyright', curr_video.copyright, video_view.copyright))
             curr_video.copyright = video_view.copyright
         # pic
-        if not same_pic_url(video_view.pic, curr_video.pic):
+        if curr_video.pic is None or not same_pic_url(video_view.pic, curr_video.pic):
             video_update_logs.append(
                 TddVideoLog(added, aid, bvid,
                             'pic', curr_video.pic, video_view.pic))
@@ -522,7 +522,7 @@ def update_video(aid: int, service: Service, session: Session, out_context: dict
                 f'Skip tags update (view changes kept). aid: {aid}, error: {e}')
         else:
             new_tags_sorted = ';'.join(sorted(new_tags.split(';')))
-            curr_tags_sorted = ';'.join(sorted(curr_video.tags.split(';')))
+            curr_tags_sorted = ';'.join(sorted((curr_video.tags or '').split(';')))
             if new_tags_sorted != curr_tags_sorted:
                 video_update_logs.append(
                     TddVideoLog(added, aid, bvid,

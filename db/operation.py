@@ -200,6 +200,26 @@ class DBOperation:
             return None
 
     @classmethod
+    def query_video_pubdates_for_aids(cls, aids, session, batch_size=1000):
+        """Read only requested metadata; propagate failures to the caller."""
+        if batch_size <= 0:
+            raise ValueError('batch_size must be positive')
+        aids = sorted(set(aids))
+        if any(type(aid) is not int or aid <= 0 for aid in aids):
+            raise ValueError('aids must be positive integers')
+        result = {}
+        for start in range(0, len(aids), batch_size):
+            batch = aids[start:start + batch_size]
+            params = {f'aid_{index}': aid for index, aid in enumerate(batch)}
+            placeholders = ','.join(':' + name for name in params)
+            rows = session.execute(
+                'SELECT aid, pubdate FROM tdd_video WHERE aid IN (' + placeholders + ')',
+                params)
+            for aid, pubdate in rows:
+                result[aid] = pubdate
+        return result
+
+    @classmethod
     def query_video_records_of_given_aid_added_before_given_ts(cls, aid, ts, session):
         try:
             result = session.query(TddVideo.aid).filter(
