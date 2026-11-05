@@ -2,6 +2,21 @@
 
 Guidance for AI agents (Claude Code and others) working in this repository.
 
+## Required human review and merge approval
+
+Read this section before starting any task, including scheduled work.
+
+Every pull request requires human review. Agents may prepare changes, run checks,
+commit, push a feature branch, and open a pull request. Merge only when a human
+has explicitly approved the pull request or the specific changes for merging, or
+has explicitly delegated agent merging within a clearly stated scope. Otherwise,
+leave the pull request for a human to review and merge.
+
+Passing tests, an agent review, silence, and a general instruction to implement,
+commit, or sync do not count as human merge approval. Do not enable auto-merge or
+push directly to the default/shared branch to bypass this requirement. If the
+changes materially change after approval, obtain approval for the revised scope.
+
 ## Work summaries
 
 Dated work summaries and incident write-ups are **not kept in this repo.** They
