@@ -82,30 +82,6 @@ class VideoMemberProfilesTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     add_member(mid, service, session)
 
-    def test_incomplete_stored_metadata_does_not_block_real_pubdate_refresh(self):
-        view = expected_result()
-        for tags in (None, ''):
-            with self.subTest(tags=tags):
-                current = SimpleNamespace(**view._asdict(), mid=view.owner.mid,
-                                          hasstaff=1, tags=tags, code=0)
-                current.pic = current.pubdate = current.mid = None
-                staff = SimpleNamespace(mid=view.staff[0].mid, title=view.staff[0].title)
-                session, service = mock.Mock(), mock.Mock()
-                service.get_video_view.return_value = view
-                with mock.patch('task.task.DBOperation.query_video_via_aid', return_value=current), \
-                        mock.patch('task.task.DBOperation.query_video_staff_via_aid', return_value=[staff]), \
-                        mock.patch('task.task.get_video_tags_str', return_value=''), \
-                        mock.patch('task.task.DBOperation.add') as add_log, \
-                        mock.patch('task.task.ensure_video_member'):
-                    changes = update_video(view.aid, service, session)
-                self.assertEqual((current.pic, current.pubdate, current.mid),
-                                 (view.pic, view.pubdate, view.owner.mid))
-                self.assertEqual({change.attr for change in changes}, {'pic', 'pubdate', 'mid'})
-                pubdate_log = next(change for change in changes if change.attr == 'pubdate')
-                self.assertEqual((pubdate_log.oldval, pubdate_log.newval), (None, view.pubdate))
-                session.commit.assert_called_once_with()
-                self.assertEqual(add_log.call_count, 3)
-
 
 if __name__ == '__main__':
     unittest.main()

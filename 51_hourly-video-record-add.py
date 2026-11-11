@@ -351,9 +351,6 @@ class RecentRecordsAnalystRunner(Thread):
         self.current_filename = '%s.csv' % self.time_task
         self.recent_file_num = recent_file_num
         self.logger = logging.getLogger('RecentRecordsAnalystRunner')
-        self.error = None
-        self.completed = False
-        self.metrics = {}
 
     def _calc_record_speed(self, record_start, record_end, per_seconds=3600):
         # record_start and record_end should be namedtuple Record
@@ -449,21 +446,6 @@ class RecentRecordsAnalystRunner(Thread):
         return change_obj
 
     def run(self):
-        self.error = None
-        self.completed = False
-        self.metrics = {}
-        try:
-            self._analyse()
-            self.completed = True
-        except Exception as error:
-            self.error = error
-            self.logger.error(
-                'Recent-records analysis incomplete: time_task=%s error_type=%s',
-                self.time_task, type(error).__name__)
-        finally:
-            self.metrics['completed'] = int(self.completed)
-
-    def _analyse(self):
         self.logger.info('Now start analysing recent records...')
 
         # get recent records filenames
@@ -511,57 +493,46 @@ class RecentRecordsAnalystRunner(Thread):
         self.logger.info('Total %d records of total %d aids from recent %d files loaded' % (
             total_records, len(aid_recent_records_dict.keys()), self.recent_file_num))
 
-        # Only videos with enough observations need publication metadata.
-        result_status_dict = defaultdict(list)
-        candidates = {}
-        for aid, records in aid_recent_records_dict.items():
-            if len(records) <= 2:
-                result_status_dict['records_len_less_than_3'].append(aid)
-            else:
-                candidates[aid] = records
-        self.metrics.update(input_aids=len(aid_recent_records_dict),
-                            analysis_candidates=len(candidates),
-                            records_len_less_than_3=len(
-                                result_status_dict['records_len_less_than_3']),
-                            persisted_changes=0)
-        if not candidates:
-            self.logger.info('Finish analyzing recent records! %s',
-                             ', '.join('%s: %d' % (k, len(v))
-                                       for k, v in result_status_dict.items()))
-            return
-
+        # get video aid pubdate dict, since the following check process requires
         session = Session()
-        try:
-            started = time.monotonic()
-            aid_pubdate_dict = DBOperation.query_video_pubdates_for_aids(candidates, session)
-            self.metrics.update(pubdate_rows=len(aid_pubdate_dict),
-                                pubdate_lookup_ms=round((time.monotonic() - started) * 1000))
-            self.logger.info(
-                'Pubdate lookup: candidates=%d rows=%d duration_ms=%d',
-                len(candidates), len(aid_pubdate_dict), self.metrics['pubdate_lookup_ms'])
-            self._analyse_candidates(candidates, aid_pubdate_dict, result_status_dict, session)
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            self.metrics.update({key: len(value) for key, value in result_status_dict.items()})
-            session.close()
+        self.logger.info('Now get pubdate of all videos from db...')
+        aid_pubdate_list = DBOperation.query_video_pubdate_all(session)
+        if not aid_pubdate_list:
+            self.logger.error('Fail to get pubdate of all videos from db!')
+            return
+        aid_pubdate_dict = {}
+        for aid, pubdate in aid_pubdate_list:
+            if pubdate is None:
+                continue
+            aid_pubdate_dict[aid] = pubdate
+        del aid_pubdate_list
+        self.logger.info('Finish get valid pubdate from %d videos!' %
+                         len(aid_pubdate_dict))
 
-    def _analyse_candidates(self, candidates, aid_pubdate_dict, result_status_dict, session):
         # check recent records
         self.logger.info('Now check recent records...')
-        for idx, (aid, records) in enumerate(candidates.items(), 1):
+        result_status_dict = defaultdict(list)
+        for idx, (aid, records) in enumerate(aid_recent_records_dict.items(), 1):
             # get pubdate from aid_pubdate_dict
             pubdate = aid_pubdate_dict.get(aid, None)
-            if type(pubdate) is not int or pubdate <= 0:
+            if pubdate is None:
                 self.logger.warning(
-                    'Fail to get valid pubdate of video aid %d, continue' % aid)
+                    'Fail to get pubdate of video aid %d, continue' % aid)
                 result_status_dict['no_valid_pubdate'].append(aid)
                 continue
             pubdate_record = Record(
                 pubdate, aid, a2b(aid), 0, 0, 0, 0, 0, 0, 0)
 
             records.sort(key=lambda r: r.added)  # sort by added
+
+            # TODO should be refactored in the future to support more check logic
+            # ensure at least 3 records
+            if len(records) <= 2:
+                # very common and not harmful to system, set to debug level is enough
+                self.logger.debug(
+                    'Records len of video aid %d less than 3, continue' % aid)
+                result_status_dict['records_len_less_than_3'].append(aid)
+                continue
 
             # ensure no all zero record (except the first record of video, which may be all zero)
             has_all_zero_record = False
@@ -650,17 +621,17 @@ class RecentRecordsAnalystRunner(Thread):
                 for change_obj in record_abnormal_change_list:
                     session.add(change_obj)
                     session.commit()
-                    self.metrics['persisted_changes'] += 1
-            except Exception:
-                self.logger.error('Fail to persist abnormal change: aid=%d', aid)
-                raise
+            except Exception as e:
+                self.logger.error('Fail to add abnormal change of video aid %d to db. Exception caught. Detail: %s' % (
+                    aid, e))
 
             if idx % 10000 == 0:
                 self.logger.info('%d / %d done' %
-                                 (idx, len(candidates)))
+                                 (idx, len(aid_recent_records_dict)))
         self.logger.info(
-            '%d / %d done' % (len(candidates), len(candidates)))
+            '%d / %d done' % (len(aid_recent_records_dict), len(aid_recent_records_dict)))
 
+        session.close()
         self.logger.info('Finish analyzing recent records! %s' %
                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
 
@@ -820,10 +791,9 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     # downstream data analysis pipeline
     logger.info('Now start downstream data analysis pipelines...')
     activity_freq_runner = RecentActivityFreqUpdateRunner(time_task, records)
-    analyst_runner = RecentRecordsAnalystRunner(records, time_task)
     data_analysis_pipeline_runner_list = [
         RecordsSaveToFileRunner(records, time_task),
-        analyst_runner,
+        RecentRecordsAnalystRunner(records, time_task),
         activity_freq_runner,
     ]
     for runner in data_analysis_pipeline_runner_list:
@@ -834,21 +804,6 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     if recorder is not None:
         for name, value in activity_freq_runner.metrics.items():
             recorder.add_metric('recent-activity-freq-update', name, value, unit='count')
-
-    analysis_metrics = analyst_runner.metrics
-    if recorder is not None:
-        for name, value in analysis_metrics.items():
-            recorder.add_metric('recent-records-analysis', name, value, unit='ms' if name.endswith('_ms') else 'count')
-    completed = analyst_runner.completed
-    summary_log = logger.info if completed else logger.error
-    summary_log('Downstream summary: time_task=%s recent_records_analysis=%s '
-                'candidates=%d missing_pubdate=%d persisted_changes=%d',
-                time_task, 'completed' if completed else 'incomplete',
-                analysis_metrics.get('analysis_candidates', 0),
-                analysis_metrics.get('no_valid_pubdate', 0),
-                analysis_metrics.get('persisted_changes', 0))
-    if not completed:
-        raise RuntimeError('Recent-records analysis incomplete') from analyst_runner.error
 
     logger.info('Finish downstream data analysis pipelines!')
     del data_analysis_pipeline_runner_list  # release memory

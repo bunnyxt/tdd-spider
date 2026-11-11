@@ -125,8 +125,6 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
         class NoopRunner(threading.Thread):
             def __init__(self, *args):
                 super().__init__()
-                self.completed = True
-                self.metrics = {}
 
         self._last_week([(1, 0)])
         recorder = s51.RunRecorder.start('51_hourly-video-record-add', db_path='run-records.sqlite3')
