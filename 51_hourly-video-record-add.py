@@ -854,6 +854,27 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     del data_analysis_pipeline_runner_list  # release memory
 
 
+def warn_full_scan_overlap(time_task: str, end_ts_ms: int):
+    """Report a daily full scan ending after the aggregate's scheduled start."""
+    if time_task[-5:] != '04:00':
+        return
+
+    cst = datetime.timezone(datetime.timedelta(hours=8))
+    task_at = datetime.datetime.strptime(time_task, '%Y-%m-%d %H:%M').replace(tzinfo=cst)
+    aggregate_start = task_at.replace(hour=4, minute=45)
+    overdue_ms = end_ts_ms - int(aggregate_start.timestamp()) * 1000
+    if overdue_ms <= 0:
+        return
+
+    ended_at = datetime.datetime.fromtimestamp(end_ts_ms / 1000, tz=cst)
+    logger.warning(
+        'Daily full scan ended after the scheduled aggregate start: '
+        'time_task=%s, end_time=%s, aggregate_start=%s, '
+        'overlap_seconds=%.3f, timezone=CST(UTC+08:00)',
+        time_task, ended_at.isoformat(timespec='milliseconds'),
+        aggregate_start.isoformat(), overdue_ms / 1000)
+
+
 def hourly_video_record_add():
     logger.info(f'Now start {script_fullname}...')
     start_ts_ms = get_ts_ms()
@@ -875,9 +896,11 @@ def hourly_video_record_add():
         recorder.finish('failed')
         raise SystemExit(1)
 
-    recorder.finish('succeeded')
-
-    end_ts_ms = get_ts_ms()
+    else:
+        recorder.finish('succeeded')
+    finally:
+        end_ts_ms = get_ts_ms()
+        warn_full_scan_overlap(time_task, end_ts_ms)
 
     # summary
     logger.info(f'Finish {script_fullname}!')
