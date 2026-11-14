@@ -205,8 +205,9 @@ def _apply_video_update(payload,session,batch_id):
                 continue
             change(field,new)
         change('mid',view.owner.mid)
+        # A successful full view response without staff means no staff flag.
+        change('hasstaff',1 if view.staff is not None else 0)
         if _present(view,'staff'):
-            change('hasstaff',1 if view.staff is not None else 0)
             existing = {item.mid:item for item in DBOperation.query_video_staff_via_aid(aid,session)}
             remaining,seen = set(existing),set()
             for item in view.staff or []:

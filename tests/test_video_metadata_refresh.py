@@ -2,8 +2,9 @@
 import unittest
 from unittest import mock
 from db import DBOperation,TddVideo,TddVideoStaff,TddMember
+from service.endpoints import get_video_view
 from task.task import update_video
-from test_endpoint_get_video_view import expected_result
+from test_endpoint_get_video_view import expected_result,valid_response
 from profile_support import ProfileSession
 
 
@@ -34,6 +35,11 @@ class VideoMetadataRefreshTest(unittest.TestCase):
             logs = update_video(self.view.aid,self.service,self.session)
         return {log.attr:(log.oldval,log.newval) for log in logs}
 
+    def use_api_response(self,response):
+        response['data'].update(bvid=self.view.bvid,pic=self.view.pic)
+        self.service.get_video_view.side_effect = lambda params: get_video_view.get(
+            lambda *args,**kwargs:response,params=params)
+
     def test_null_cover_pubdate_owner_and_sorted_tags(self):
         self.seed(pic=None,pubdate=None,mid=None,tags=None)
         changes = self.refresh('music;animation')
@@ -47,13 +53,56 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.assertEqual(self.refresh('music;animation'),{})
         self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_video_log')[0][0],0)
 
-    def test_missing_optional_fields_leave_staff_attribute_and_forward(self):
+    def test_missing_optional_fields_reset_hasstaff_but_keep_other_metadata(self):
         self.seed()
-        self.service.get_video_view.return_value = self.view._replace(
-            staff=None,attribute=None,forward=None,present_fields=frozenset(('videos','tid','tname','copyright','pic','title','pubdate','desc','state')))
+        response = valid_response()
+        for field in ('staff','attribute','forward'):
+            del response['data'][field]
+        self.use_api_response(response)
+        self.assertEqual(self.refresh(),{'hasstaff':('1','0')})
+        current = DBOperation.query_video_via_aid(7,self.session)
+        self.assertEqual((current.hasstaff,current.attribute,current.forward),(0,16,17))
+        # Existing relationship handling is separate from the response flag.
+        self.assertEqual(len(DBOperation.query_video_staff_via_aid(7,self.session)),1)
+
+    def test_missing_staff_resolves_unknown_flag_and_only_logs_actual_change(self):
+        self.seed(hasstaff=-1)
+        response = valid_response()
+        del response['data']['staff']
+        self.use_api_response(response)
+        self.assertEqual(self.refresh(),{'hasstaff':('-1','0')})
+        self.assertEqual(DBOperation.query_video_via_aid(7,self.session).hasstaff,0)
+        self.assertEqual(self.refresh(),{})
+        self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_video_log')[0][0],1)
+        self.assertEqual(len(DBOperation.query_video_staff_via_aid(7,self.session)),1)
+
+    def test_present_empty_staff_sets_flag_and_reconciles_relationships(self):
+        self.seed(hasstaff=0)
+        response = valid_response()
+        response['data']['staff'] = []
+        self.use_api_response(response)
+        self.assertEqual(self.refresh(),{'hasstaff':('0','1'),'staff':('mid: 10; title: producer',None)})
+        self.assertEqual(DBOperation.query_video_via_aid(7,self.session).hasstaff,1)
+        self.assertEqual(DBOperation.query_video_staff_via_aid(7,self.session),[])
+
+    def test_present_staff_sets_flag_and_preserves_unchanged_relationship(self):
+        self.seed(hasstaff=0)
+        self.use_api_response(valid_response())
+        self.assertEqual(self.refresh(),{'hasstaff':('0','1')})
+        self.assertEqual(DBOperation.query_video_via_aid(7,self.session).hasstaff,1)
+        self.assertEqual(len(DBOperation.query_video_staff_via_aid(7,self.session)),1)
+
+    def test_code_errors_do_not_derive_hasstaff_or_change_relationships(self):
+        self.seed()
+        response = valid_response()
+        del response['data']['staff']
+        response['code'] = 62002
+        self.use_api_response(response)
+        self.assertEqual(self.refresh(),{'code':('0','62002')})
+        response['code'] = -403
         self.assertEqual(self.refresh(),{})
         current = DBOperation.query_video_via_aid(7,self.session)
-        self.assertEqual((current.hasstaff,current.attribute,current.forward),(1,16,17))
+        self.assertEqual((current.hasstaff,current.code),(1,62002))
         self.assertEqual(len(DBOperation.query_video_staff_via_aid(7,self.session)),1)
 
     def test_explicit_null_and_literal_escape_are_logged_without_nul(self):
