@@ -109,9 +109,12 @@ class PostgresApplicationTest(unittest.TestCase):
         self.service.get_video_view.side_effect = None
         self.service.get_video_view.return_value = self.view()._replace(staff=None,attribute=None,
             present_fields=frozenset(('videos','tid','tname','copyright','pic','title','pubdate','desc','state')))
-        self.assertEqual(update_video(self.aid,self.service,self.session),[])
+        logs = update_video(self.aid,self.service,self.session)
+        self.assertEqual({row.attr:(row.oldval,row.newval) for row in logs},{'hasstaff':('1','0')})
+        current = DBOperation.query_video_via_aid(self.aid,self.session)
+        self.assertEqual((current.hasstaff,current.attribute),(0,0))
         self.assertEqual(len(DBOperation.query_video_staff_via_aid(self.aid,self.session)),1)
-        self.expected_manifest({'tdd_video_record':1})
+        self.expected_manifest({'tdd_video_record':1,'tdd_video_log':1})
 
     def test_member_null_empty_optional_missing_and_late_profile(self):
         with self.session.transaction():
