@@ -21,8 +21,11 @@ def add_sprint_video_record():
         service = Service(mode='worker')
 
         # load processing video aids from db
-        result = session.execute('select aid from tdd_sprint_video where status = "processing"')
-        aids = [r['aid'] for r in result]
+        try:
+            result = session.execute('select aid from tdd_sprint_video where status = %s', ('processing',))
+            aids = [r['aid'] for r in result]
+        finally:
+            session.close()
         logger.info(f'Total {len(aids)} videos got.')
 
         # put aid into queue
@@ -43,12 +46,13 @@ def add_sprint_video_record():
         # collect statistic
         job_stat = job.stat
 
-        session.close()
-
         end_ts_ms = get_ts_ms()
 
         # run-record metrics (best-effort; a disabled recorder is a no-op)
         recorder.add_job_stat_metrics('sprint-video-record', job_stat)
+        if (getattr(job, 'error', None) is not None or job_stat.condition['exception']
+                or job_stat.condition['persisted'] != job_stat.total_count):
+            raise RuntimeError('Sprint records were not all confirmed; resolve pending replay input')
 
         # summary
         logger.info(f'Finish {script_fullname}!')

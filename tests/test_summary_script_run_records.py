@@ -12,7 +12,7 @@ failing run. The assertions are:
 * it ends ``succeeded`` on a normal run and ``failed`` when the body raises;
 * the JobStat counters land in ``run_metric`` under the expected scopes.
 
-These scripts import ``db`` / ``service`` (SQLAlchemy, requests). Where those
+These scripts import ``db`` / ``service`` (requests). Where those
 are absent the whole module skips, matching ``test_run_record.py``'s handling of
 a bare checkout.
 """
@@ -32,33 +32,9 @@ sys.path.insert(0, ROOT)
 from runrecord._sqlite import sqlite3  # noqa: E402
 
 
-def _install_stub_conf():
-    """
-    ``conf/conf.ini`` is a git-ignored secret, so it is absent from a fresh
-    checkout and ``import db`` (which builds a SQLAlchemy engine at import
-    time) fails. Install an inert ``conf`` with dummy values: the engine
-    URL never has to be valid here -- every DB call is faked -- and this keeps
-    the test independent of real credentials.
-    """
-    if 'conf' in sys.modules and hasattr(sys.modules['conf'], 'get_db_args'):
-        try:
-            sys.modules['conf'].get_db_args()
-            return  # a real, populated conf is already importable
-        except Exception:
-            pass
-    stub = types.ModuleType('conf')
-    stub.CONFIG_PATH = ''
-    stub.CONFIG = None
-    stub.get_db_args = lambda: {
-        'user': 'stub', 'password': 'stub', 'host': '127.0.0.1',
-        'port': '3306', 'dbname': 'stub'}
-    stub.__all__ = ['CONFIG_PATH', 'CONFIG', 'get_db_args']
-    sys.modules['conf'] = stub
-    sys.modules['conf.conf'] = stub
 
 
 try:
-    _install_stub_conf()
     from job import JobStat
     import db  # noqa: F401
     import service  # noqa: F401
@@ -287,7 +263,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
     def test_17_add_member_follower_record(self):
         m = _load('17_add-member-follower-record.py')
         fetch = _stat(100, success=100, exception=0)
-        writer = _stat(100, batch_insert=1, batch_insert_fail=0)
+        writer = _stat(100, batch_insert=1, persisted=100, batch_insert_fail=0)
         pools = iter([_FakePool(fetch), _FakePool(writer)])
 
         with mock.patch.object(m, 'Service', _FakeService), \
@@ -341,7 +317,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
     # ----------------------------------------------------------------- 71_ ---
     def test_71_add_sprint_video_record(self):
         m = _load('71_add-sprint-video-record.py')
-        stat = _stat(13, success=12, exception=1)
+        stat = _stat(13, success=13, persisted=13)
 
         with mock.patch.object(m, 'Service', _FakeService), \
              mock.patch.object(m, 'Session', _FakeSession), \
@@ -352,7 +328,18 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         (run_id, script_name, status, _), = self._runs()
         self.assertEqual(script_name, '71_add-sprint-video-record')
         self.assertEqual(status, 'succeeded')
-        self.assertEqual(self._metrics(run_id)['sprint-video-record']['exception'], 1.0)
+        self.assertEqual(self._metrics(run_id)['sprint-video-record']['persisted'], 13.0)
+
+    def test_71_unconfirmed_record_fails_run(self):
+        m = _load('71_add-sprint-video-record.py')
+        stat = _stat(13, success=12, persisted=12, exception=1)
+        with mock.patch.object(m, 'Service', _FakeService), \
+             mock.patch.object(m, 'Session', _FakeSession), \
+             mock.patch.object(m, 'AddSprintVideoRecordJob', lambda *a, **kw: _FakeJob(stat)):
+            with self.assertRaisesRegex(RuntimeError, 'not all confirmed'):
+                m.add_sprint_video_record()
+        (_, _, status, _), = self._runs()
+        self.assertEqual(status, 'failed')
 
 
 if __name__ == '__main__':

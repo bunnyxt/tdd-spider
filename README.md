@@ -26,6 +26,11 @@ See the structure below.
 
 ![TianDian Daily structure](./tdd-structure.png "TianDian Daily structure")
 
+## Collector runtime
+
+The PostgreSQL collector uses Python 3.12 and parameterized SQL. See
+[setup, configuration and durable observation replay](docs/postgresql.md).
+
 ## Run records
 
 Some scripts persist one structured row per run into a SQLite store

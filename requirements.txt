@@ -1,6 +1,10 @@
-pymysql==0.9.3
-sqlalchemy==1.3.8
-configparser==4.0.2
+psycopg[binary]==3.3.8
+psycopg-pool==3.3.3
+certifi==2026.10.23
+charset-normalizer==3.5.2
+idna==3.20
+typing_extensions==4.16.0
+urllib3==2.8.0
 requests==2.32.3
 # bundled SQLite runtime for the run-record store: the prod venv-3.11 (Ubuntu
 # 16.04) was built without _sqlite3, so stdlib `import sqlite3` fails there.

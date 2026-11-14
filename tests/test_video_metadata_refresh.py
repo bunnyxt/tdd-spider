@@ -1,64 +1,102 @@
-"""Stored NULL cover and tags must not prevent metadata refresh."""
-
-from types import SimpleNamespace
+"""Profile refresh persists sanitized differences and logs in one transaction."""
 import unittest
 from unittest import mock
-
-from test_remaining_script_run_records import _DEPS
-
-if _DEPS:
-    from task.task import update_video
-    from test_endpoint_get_video_view import expected_result
+from db import DBOperation,TddVideo,TddVideoStaff,TddMember
+from task.task import update_video
+from test_endpoint_get_video_view import expected_result
+from profile_support import ProfileSession
 
 
-@unittest.skipUnless(_DEPS, 'database dependencies unavailable')
 class VideoMetadataRefreshTest(unittest.TestCase):
-    def refresh(self, current, view, tags):
-        staff = SimpleNamespace(mid=view.staff[0].mid, title=view.staff[0].title)
-        session, service = mock.Mock(), mock.Mock()
-        service.get_video_view.return_value = view
-        with mock.patch('task.task.DBOperation.query_video_via_aid', return_value=current), \
-                mock.patch('task.task.DBOperation.query_video_staff_via_aid', return_value=[staff]), \
-                mock.patch('task.task.get_video_tags_str', return_value=tags), \
-                mock.patch('task.task.DBOperation.add') as add_log, \
-                mock.patch('task.task.ensure_video_member'):
-            changes = update_video(view.aid, service, session)
-        session.commit.assert_called_once_with()
-        self.assertEqual(add_log.call_count, len(changes))
-        return {change.attr: (change.oldval, change.newval) for change in changes}
+    def setUp(self):
+        self.session = ProfileSession()
+        self.addCleanup(self.session.close)
+        self.view = expected_result()._replace(bvid='BV1234567890',pic='https://example.test/cover.jpg')
+        self.service = mock.Mock()
+        self.service.get_video_view.return_value = self.view
+        self.service.get_video_tags.return_value.tags = []
+        self.session.seed(TddMember(added=1,mid=8,name='owner',face='',code=0))
+        self.session.seed(TddMember(added=1,mid=10,name='staff',face='',code=0))
+        patcher = mock.patch('task.task.observe',side_effect=self.session.observe)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
-    def current(self, view, **overrides):
-        values = dict(view._asdict(), mid=view.owner.mid, hasstaff=1, tags='', code=0)
+    def seed(self,**overrides):
+        view = self.view
+        values = {field:getattr(view,field) for field in ('videos','tid','tname','copyright','pic','title','pubdate','desc','state','attribute','forward')}
+        values.update(added=1,aid=view.aid,bvid=view.bvid.removeprefix('BV'),mid=view.owner.mid,hasstaff=1,tags='',code=0)
         values.update(overrides)
-        return SimpleNamespace(**values)
+        self.session.seed(TddVideo(**values))
+        self.session.seed(TddVideoStaff(added=1,aid=view.aid,bvid='1234567890',mid=10,title='producer'))
 
-    def test_null_cover_allows_remaining_real_metadata_to_refresh(self):
-        view = expected_result()._replace(pic='https://i0.hdslb.com/bfs/archive/cover.jpg')
-        current = self.current(view, pic=None, pubdate=None, mid=None)
-        changes = self.refresh(current, view, '')
-        self.assertEqual(changes, {'pic': (None, view.pic),
-                                   'pubdate': (None, view.pubdate),
-                                   'mid': (None, view.owner.mid)})
-        self.assertEqual((current.pic, current.pubdate, current.mid),
-                         (view.pic, view.pubdate, view.owner.mid))
+    def refresh(self,tags=''):
+        with mock.patch('task.task.get_video_tags_str',return_value=tags):
+            logs = update_video(self.view.aid,self.service,self.session)
+        return {log.attr:(log.oldval,log.newval) for log in logs}
 
-    def test_null_or_empty_tags_accept_real_tags_without_changing_valid_pubdate(self):
-        view = expected_result()._replace(pic='https://i0.hdslb.com/bfs/archive/cover.jpg')
-        for tags in (None, ''):
-            with self.subTest(tags=tags):
-                current = self.current(view, tags=tags)
-                self.assertEqual(self.refresh(current, view, 'music;animation'),
-                                 {'tags': (tags, 'music;animation')})
-                self.assertEqual(current.tags, 'music;animation')
-                self.assertEqual(current.pubdate, view.pubdate)
+    def test_null_cover_pubdate_owner_and_sorted_tags(self):
+        self.seed(pic=None,pubdate=None,mid=None,tags=None)
+        changes = self.refresh('music;animation')
+        self.assertEqual(changes,{'pic':(None,self.view.pic),'pubdate':(None,'10'),'mid':(None,'8'),'tags':(None,'music;animation')})
+        current = DBOperation.query_video_via_aid(7,self.session)
+        self.assertEqual((current.pic,current.pubdate,current.mid),(self.view.pic,10,8))
+        self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_video_log')[0][0],4)
 
-    def test_existing_cover_and_equivalent_tags_do_not_generate_changes(self):
-        view = expected_result()._replace(pic='https://i0.hdslb.com/bfs/archive/cover.jpg')
-        current = self.current(view, tags='animation;music')
-        self.assertEqual(self.refresh(current, view, 'music;animation'), {})
-        self.assertEqual(current.pic, view.pic)
-        self.assertEqual(current.pubdate, view.pubdate)
+    def test_equivalent_tags_and_only_actual_nul_do_not_generate_changes(self):
+        self.seed(tags='animation;music',title='ti\x00tle',desc='de\x00sc')
+        self.assertEqual(self.refresh('music;animation'),{})
+        self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_video_log')[0][0],0)
 
+    def test_missing_optional_fields_leave_staff_attribute_and_forward(self):
+        self.seed()
+        self.service.get_video_view.return_value = self.view._replace(
+            staff=None,attribute=None,forward=None,present_fields=frozenset(('videos','tid','tname','copyright','pic','title','pubdate','desc','state')))
+        self.assertEqual(self.refresh(),{})
+        current = DBOperation.query_video_via_aid(7,self.session)
+        self.assertEqual((current.hasstaff,current.attribute,current.forward),(1,16,17))
+        self.assertEqual(len(DBOperation.query_video_staff_via_aid(7,self.session)),1)
 
-if __name__ == '__main__':
-    unittest.main()
+    def test_explicit_null_and_literal_escape_are_logged_without_nul(self):
+        self.seed(desc='old')
+        self.service.get_video_view.return_value = self.view._replace(desc='中\x00文\\u0000',attribute=None)
+        changes = self.refresh()
+        self.assertEqual(changes['desc'],('old','中文\\u0000'))
+        self.assertEqual(changes['attribute'],('16',None))
+        self.assertNotIn('\x00',str(self.session.execute('SELECT oldval,newval FROM tdd_video_log')))
+
+    def test_log_failure_rolls_back_profile_and_staff(self):
+        self.seed(title='old')
+        def fail(*args,**kwargs):
+            raise RuntimeError('log insert failed')
+        with mock.patch.object(self.session,'append',side_effect=fail), self.assertRaisesRegex(RuntimeError,'log insert'):
+            self.refresh()
+        self.assertEqual(DBOperation.query_video_via_aid(7,self.session).title,'old')
+
+    def test_new_video_repeated_staff_keeps_first_title_and_commits_video(self):
+        from task.task import add_video
+        from service import VideoViewStaffItem
+        self.service.get_video_view.return_value = self.view._replace(
+            staff=[VideoViewStaffItem(10,'first','',''),VideoViewStaffItem(10,'second','','')])
+        video = add_video(self.view.aid,self.service,self.session,commit_video_record=False)
+        self.assertIsNotNone(video.id)
+        self.assertEqual(DBOperation.query_video_via_aid(self.view.aid,self.session).title,self.view.title)
+        staff = DBOperation.query_video_staff_via_aid(self.view.aid,self.session)
+        self.assertEqual([(item.mid,item.title) for item in staff],[(10,'first')])
+
+    def test_refresh_repeated_existing_and_new_staff_preserves_first_logs_and_other_changes(self):
+        from service import VideoViewStaffItem
+        self.seed()
+        self.session.seed(TddMember(added=1,mid=11,name='staff',face='',code=0))
+        self.session.seed(TddVideoStaff(added=1,aid=self.view.aid,bvid='1234567890',mid=12,title='removed'))
+        self.service.get_video_view.return_value = self.view._replace(title='changed',staff=[
+            VideoViewStaffItem(10,'first-existing','',''),VideoViewStaffItem(10,'second-existing','',''),
+            VideoViewStaffItem(11,'first-new','',''),VideoViewStaffItem(11,'second-new','','')])
+        with mock.patch('task.task.get_video_tags_str',return_value=''),self.assertLogs('task',level='WARNING'):
+            logs = update_video(self.view.aid,self.service,self.session)
+        self.assertEqual(DBOperation.query_video_via_aid(self.view.aid,self.session).title,'changed')
+        staff = DBOperation.query_video_staff_via_aid(self.view.aid,self.session)
+        self.assertEqual({item.mid:item.title for item in staff},{10:'first-existing',11:'first-new'})
+        staff_logs = [(item.oldval,item.newval) for item in logs if item.attr == 'staff']
+        self.assertEqual(staff_logs,[('mid: 10; title: producer','mid: 10; title: first-existing'),
+                                    (None,'mid: 11; title: first-new'),('mid: 12; title: removed',None)])
+        self.assertEqual(len(logs),4)

@@ -15,6 +15,16 @@ class AddSprintVideoRecordJob(Job):
         self.aid_queue = aid_queue
         self.service = service
         self.session = Session()
+        self.error = None
+
+    def run(self):
+        try:
+            super().run()
+        except Exception as error:
+            self.error = error
+            self.logger.exception('Sprint record job failed')
+        finally:
+            self.session.close()
 
     def process(self):
         while not self.aid_queue.empty():
@@ -30,21 +40,13 @@ class AddSprintVideoRecordJob(Job):
             else:
                 self.logger.info(f'New sprint video record {new_sprint_video_record} added. aid: {aid}')
                 self.stat.condition['success'] += 1
+                self.stat.condition['persisted'] += 1
 
                 # check million
-                if new_sprint_video_record.view >= 1000000:
-                    self.logger.info(f'New sprint video record {new_sprint_video_record} has million views. '
-                                     f'Now start change sprint video status to finished. aid: {aid}')
-                    try:
-                        sql = f'update tdd_sprint_video set status = "finished" where aid = {aid}'
-                        self.session.execute(sql)
-                        self.session.commit()
-                    except Exception as e:
-                        self.logger.error(f'Fail to change sprint video status to finished. aid: {aid}, error: {e}')
-                        self.stat.condition['million_exception'] += 1
-                    else:
-                        self.logger.info(f'Sprint video status changed to finished. aid: {aid}')
-                        self.stat.condition['million_success'] += 1
+                if new_sprint_video_record.view is not None and new_sprint_video_record.view >= 1000000:
+                    # The task confirms the record and status in one transaction.
+                    self.logger.info(f'Sprint video status confirmed finished. aid: {aid}')
+                    self.stat.condition['million_success'] += 1
 
             duration_ms = int((time.perf_counter() - item_start) * 1000)
             self.logger.debug(f'Finish add sprint video record. '

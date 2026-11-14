@@ -1,7 +1,7 @@
 import time
 from .Job import Job
 from service import Service, CodeError
-from queue import Queue
+from queue import Queue, Empty
 from db import Session
 from core import RecordNew
 from util import format_ts_ms, get_ts_s, ts_s_to_str
@@ -28,12 +28,15 @@ class AddVideoRecordJob(Job):
             self.duration_limit_due_ts_s = get_ts_s() + self.duration_limit_s
             self.logger.info(f'Duration limit due at {ts_s_to_str(self.duration_limit_due_ts_s)}.')
 
-        while not self.aid_queue.empty():
+        while True:
             if self.duration_limit_due_ts_s is not None and get_ts_s() >= self.duration_limit_due_ts_s:
                 self.logger.info(f'Duration limit reached. Now exit.')
                 break
 
-            aid = self.aid_queue.get()
+            try:
+                aid = self.aid_queue.get_nowait()
+            except Empty:
+                break
             self.logger.debug(f'Now start add video record. aid: {aid}')
             item_start = time.perf_counter()
 

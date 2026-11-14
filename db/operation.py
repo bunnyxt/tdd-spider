@@ -1,211 +1,110 @@
+"""Parameterized PostgreSQL operations; errors propagate to transaction owners."""
 from .models import TddVideo, TddMember, TddVideoStaff
-import logging
-import time
-logger_db = logging.getLogger('db')
+from .values import database_value, timestamp
 
 __all__ = ['DBOperation']
 
 
 class DBOperation:
-
     @classmethod
     def add(cls, obj, session):
-        try:
-            session.add(obj)
-            session.commit()
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {'obj': obj}), exc_info=True)
-            session.rollback()
+        from .write import append_objects
+        if obj.table in ('tdd_video', 'tdd_member', 'tdd_video_staff'):
+            columns = [field for field in obj.fields if field not in ('id','last_video_aid')]
+            quoted = ', '.join('"' + field + '"' for field in columns)
+            params = tuple(database_value(field, getattr(obj, field)) for field in columns)
+            row = session.execute('INSERT INTO ' + obj.table + ' (' + quoted + ') VALUES (' +
+                                  ', '.join(['%s'] * len(columns)) + ') RETURNING id', params).first()
+            obj.id = row[0]
+        else:
+            if session._depth:
+                append_objects(session, [obj])
+            else:
+                from .replay import observe
+                persisted = observe('append', {'objects':[obj]})
+                obj.id = persisted[0].id
+        return obj
 
     @classmethod
-    def query_video_via_aid(cls, aid, session):
-        try:
-            result = session.query(TddVideo).filter(
-                TddVideo.aid == aid).first()
-            return result
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {'aid': aid}), exc_info=True)
-            # Roll back so a transient failure (e.g. 'too many connections')
-            # does not leave the session stuck in an invalid transaction that
-            # breaks every following query on it. NOTE: on failure this still
-            # returns None, which callers like update_video treat as "not
-            # exist" -- an infra error can thus be mislabeled; revisit if that
-            # distinction matters.
-            try:
-                session.rollback()
-            except Exception:
-                pass
-            return None
+    def update(cls, obj, fields, session):
+        if (set(fields) & {'id','added','last_video_aid'}) or not set(fields).issubset(obj.fields) or obj.table not in ('tdd_video','tdd_member','tdd_video_staff'):
+            raise ValueError('Unsupported update columns')
+        if not fields:
+            return
+        assignments = ', '.join('"' + field + '" = %s' for field in fields)
+        session.execute('UPDATE ' + obj.table + ' SET ' + assignments + ' WHERE id = %s',
+                        tuple(database_value(field, getattr(obj, field)) for field in fields) + (obj.id,))
+
+    @classmethod
+    def _one(cls, model, where, params, session, lock=False):
+        row = session.execute('SELECT * FROM ' + model.table + ' WHERE ' + where +
+                              (' FOR UPDATE' if lock else ''), params).first()
+        return model(**row) if row else None
+
+    @classmethod
+    def query_video_via_aid(cls, aid, session, lock=False):
+        return cls._one(TddVideo, 'aid = %s', (aid,), session, lock)
+
+    @classmethod
+    def query_member_via_mid(cls, mid, session, lock=False):
+        return cls._one(TddMember, 'mid = %s', (mid,), session, lock)
 
     @classmethod
     def query_video_staff_via_aid_mid(cls, aid, mid, session):
-        try:
-            result = session.query(TddVideoStaff).filter(
-                TddVideoStaff.aid == aid, TddVideoStaff.mid == mid).first()
-            return result
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {'aid': aid, 'mid': mid}), exc_info=True)
-            return None
-
-    @classmethod
-    def delete_video_staff_via_aid_mid(cls, aid, mid, session):
-        try:
-            session.query(TddVideoStaff).filter(
-                TddVideoStaff.aid == aid, TddVideoStaff.mid == mid).delete()
-            session.commit()
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {'aid': aid, 'mid': mid}), exc_info=True)
-            return None
+        return cls._one(TddVideoStaff, 'aid = %s AND mid = %s', (aid,mid), session)
 
     @classmethod
     def query_video_staff_via_aid(cls, aid, session):
-        try:
-            result = session.query(TddVideoStaff).filter(
-                TddVideoStaff.aid == aid).all()
-            return result
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {'aid': aid}), exc_info=True)
-            return None
+        return [TddVideoStaff(**r) for r in session.execute('SELECT * FROM tdd_video_staff WHERE aid = %s', (aid,))]
+
+    @classmethod
+    def delete_video_staff_via_aid_mid(cls, aid, mid, session):
+        session.execute('DELETE FROM tdd_video_staff WHERE aid = %s AND mid = %s', (aid,mid))
 
     @classmethod
     def delete_video_staff_via_id(cls, id, session):
-        try:
-            session.query(TddVideoStaff).filter(
-                TddVideoStaff.id == id).delete()
-            session.commit()
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {'id': id}), exc_info=True)
-            return None
-
-    @classmethod
-    def query_member_via_mid(cls, mid, session):
-        try:
-            result = session.query(TddMember).filter(
-                TddMember.mid == mid).first()
-            return result
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {'mid': mid}), exc_info=True)
-            return None
-
-    # full-table scans (all bvids / all mids) stream ~1M+ rows and occasionally
-    # trip the connection read_timeout when MySQL is busy (e.g. the 06:00 cron
-    # pile-up crashed 15_ this way). A transient timeout should not lose the
-    # whole daily run, so retry with backoff -- pool_pre_ping (see db/basic.py)
-    # hands back a live connection on the next attempt.
-    _FULL_SCAN_RETRIES = 3
-    _FULL_SCAN_BACKOFF_S = 5.0
-
-    @classmethod
-    def _query_first_col_with_retry(cls, session, sql):
-        # returns list of first-column values, or None if it ultimately fails
-        # (preserves the historical contract of the callers below)
-        for attempt in range(1, cls._FULL_SCAN_RETRIES + 1):
-            try:
-                result = session.execute(sql)
-                return list(r[0] for r in result)
-            except Exception as e:
-                # clear the failed/half-read transaction so the retry starts clean
-                try:
-                    session.rollback()
-                except Exception:
-                    pass
-                if attempt >= cls._FULL_SCAN_RETRIES:
-                    logger_db.error('Query failed after %d attempts: %s, error: %s'
-                                    % (cls._FULL_SCAN_RETRIES, sql, e), exc_info=True)
-                    return None
-                backoff = cls._FULL_SCAN_BACKOFF_S * attempt
-                logger_db.warning('Query attempt %d/%d failed, retrying in %.0fs: %s, error: %s'
-                                  % (attempt, cls._FULL_SCAN_RETRIES, backoff, sql, e))
-                time.sleep(backoff)
+        session.execute('DELETE FROM tdd_video_staff WHERE id = %s', (id,))
 
     @classmethod
     def query_all_video_bvids(cls, session):
-        return cls._query_first_col_with_retry(session, 'select bvid from tdd_video')
+        # Preserve the existing candidate enumeration; no implicit regrouping.
+        return [r[0] for r in session.execute('SELECT bvid FROM tdd_video')]
 
     @classmethod
     def query_member_mids(cls, offset, size, session):
-        try:
-            result = session.execute(
-                'select mid from tdd_member limit %d, %d' % (offset, size))
-            return list(r[0] for r in result)
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' % (
-                e, {'offset': offset, 'size': size}), exc_info=True)
-            return None
+        return [r[0] for r in session.execute('SELECT mid FROM tdd_member LIMIT %s OFFSET %s', (size,offset))]
 
     @classmethod
     def query_all_member_mids(cls, session):
-        return cls._query_first_col_with_retry(session, 'select mid from tdd_member')
+        return [r[0] for r in session.execute('SELECT mid FROM tdd_member')]
 
     @classmethod
-    def _tid_filters(cls, is_tid_30):
-        # is_tid_30: True -> tid == 30, False -> tid != 30, None -> no tid
-        # filter. tid is nullable and in SQL both `== 30` and `!= 30` exclude
-        # NULL, so None is a strict superset of the two (kept as a param to
-        # document the retired c0/c30 partition; the merged pipeline passes None).
-        if is_tid_30 is None:
-            return []
-        return [TddVideo.tid == 30] if is_tid_30 else [TddVideo.tid != 30]
+    def _aids(cls, session, freq=None, is_tid_30=None):
+        conditions, params = ['code = 0', 'state = 0'], []
+        if freq is not None:
+            conditions.append('freq = %s')
+            params.append(freq)
+        if is_tid_30 is not None:
+            conditions.append('tid = %s' if is_tid_30 else 'tid <> %s')
+            params.append(30)
+        return [r[0] for r in session.execute('SELECT aid FROM tdd_video WHERE ' + ' AND '.join(conditions), tuple(params))]
 
     @classmethod
     def query_all_update_video_aids(cls, session, is_tid_30=None):
-        try:
-            result = session.query(TddVideo.aid).filter(
-                TddVideo.code == 0, TddVideo.state == 0,
-                *cls._tid_filters(is_tid_30)).all()
-            return list(r[0] for r in result)
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {'is_tid_30': is_tid_30}), exc_info=True)
-            return None
+        return cls._aids(session, is_tid_30=is_tid_30)
 
     @classmethod
     def query_freq_update_video_aids(cls, freq, session, is_tid_30=None):
-        try:
-            result = session.query(TddVideo.aid).filter(
-                TddVideo.code == 0, TddVideo.state == 0, TddVideo.freq == freq,
-                *cls._tid_filters(is_tid_30)).all()
-            return list(r[0] for r in result)
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' % (
-                e, {'freq': freq, 'is_tid_30': is_tid_30}), exc_info=True)
-            return None
+        return cls._aids(session, freq, is_tid_30)
 
     @classmethod
     def query_403_video_aids(cls, session):
-        try:
-            result = session.query(TddVideo.aid).filter(
-                TddVideo.code == -403).all()
-            return list(r[0] for r in result)
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {}), exc_info=True)
-            return None
+        return [r[0] for r in session.execute('SELECT aid FROM tdd_video WHERE code = %s', (-403,))]
 
     @classmethod
     def query_video_pubdate_all(cls, session):
-        try:
-            result = session.query(TddVideo.aid, TddVideo.pubdate).all()
-            return list((r[0], r[1]) for r in result)
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {}), exc_info=True)
-            return None
+        return [(r[0],r[1]) for r in session.execute('SELECT aid, pubdate FROM tdd_video')]
 
     @classmethod
     def query_video_records_of_given_aid_added_before_given_ts(cls, aid, ts, session):
-        try:
-            result = session.query(TddVideo.aid).filter(
-                TddVideo.aid == aid, TddVideo.added < ts).all()
-            return result
-        except Exception as e:
-            logger_db.error('Exception: %s, params: %s' %
-                            (e, {'aid': aid, 'ts': ts}), exc_info=True)
-            return None
+        return session.execute('SELECT aid FROM tdd_video WHERE aid = %s AND added < %s', (aid,timestamp(ts)))

@@ -1,4 +1,4 @@
-from db import engine
+from db import Session
 from util import logging_init, get_ts_s, fullname, \
     get_ts_ms, format_duration_summary
 from runrecord import track
@@ -18,7 +18,7 @@ def member_total_stat_update():
     start_ts_ms = get_ts_ms()
 
     with track(script_fullname) as recorder:
-        connection = engine.raw_connection()
+        connection = Session()
         cnt = 0
         batch_size = 1000
 
@@ -31,18 +31,17 @@ def member_total_stat_update():
                   's.mid as s_mid, v.code, v.state, r.id ' \
                   'from ' \
                   'tdd_video v ' \
-                  'left join tdd_video_record r on v.laststat = r.id ' \
+                  'left join tdd_video_record_latest r on v.aid = r.aid ' \
                   'left join tdd_video_staff s on v.aid = s.aid ' \
                   'where ' \
-                  'v.mid is not null && v.laststat is not null;'
-            cursor = connection.cursor()
-            try:
-                cursor.execute('select mid, last_total_stat from tdd_member where mid > 0')
-                members = dict(cursor.fetchall())
-                cursor.execute(sql)
-                result = cursor.fetchall()
-            finally:
-                cursor.close()
+                  'v.mid is not null AND r.id is not null;'
+            members = {r[0]:r[1] for r in connection.execute(
+                'SELECT m.mid, r.id FROM tdd_member m '
+                'LEFT JOIN tdd_member_total_stat_record_latest r ON m.mid = r.mid WHERE m.mid > 0')}
+            # Include previous aggregate entities whose profile has never arrived.
+            members.update({r[0]:r[1] for r in connection.execute(
+                'SELECT mid, id FROM tdd_member_total_stat_record_latest WHERE mid > 0')})
+            result = [tuple(row.values()) for row in connection.execute(sql)]
             result_len = len(result)
             logger.info(f'Total {result_len} result got.')
             logger.info('Aggregate read duration: %.3fs', time.perf_counter() - read_start)

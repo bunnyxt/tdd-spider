@@ -4,7 +4,7 @@ from db import Session
 from service import Service, NewlistArchive
 from task import add_video, commit_video_record_via_newlist_archive_stat, AlreadyExistError
 from util import format_ts_ms
-from queue import Queue
+from queue import Queue, Empty
 
 __all__ = ['AddVideoFromArchiveJob']
 
@@ -18,8 +18,11 @@ class AddVideoFromArchiveJob(Job):
         self.session = Session()
 
     def process(self):
-        while not self.archive_video_queue.empty():
-            added, archive = self.archive_video_queue.get()
+        while True:
+            try:
+                added, archive = self.archive_video_queue.get_nowait()
+            except Empty:
+                break
             self.logger.debug(
                 f'Now start add video from archive. archive: {archive}')
             item_start = time.perf_counter()
@@ -51,7 +54,7 @@ class AddVideoFromArchiveJob(Job):
                 else:
                     self.logger.info(f'New video record parsed from archive stat committed! '
                                      f'video record: {new_video_record}')
-                self.stat.condition['new_video_record'] += 1
+                    self.stat.condition['new_video_record'] += 1
 
             duration_ms = int((time.perf_counter() - item_start) * 1000)
             self.logger.debug(f'Finish add video from archive. '

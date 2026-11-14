@@ -70,7 +70,8 @@ the whole repository as clean.
 ## Tests
 
 - Committed tests live in `tests/`. Run them from the repo root:
-  `venv-3.11/bin/python -m unittest discover -s tests` (stdlib `unittest`, no
-  extra deps; a plain `python` works too where `venv-3.11` isn't set up).
+  `.venv/bin/python -m unittest discover -s tests` after installing
+  `requirements.txt` with Python 3.12. PostgreSQL integration tests are opt-in;
+  see `docs/postgresql.md`.
 - Root-level `test-*.py` / `test-*.ipynb` / `test.py` are throwaway scratch and
   are git-ignored — don't put committed tests there, and don't rely on them.

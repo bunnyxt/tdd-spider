@@ -57,6 +57,7 @@ class VideoView(NamedTuple):
     attribute: Optional[int]
     forward: Optional[int]
     staff: Optional[list[VideoViewStaffItem]]
+    present_fields: Optional[frozenset] = None
 
 
 # minimal view payload for stat-record jobs: exactly what RecordNew needs.
@@ -84,6 +85,7 @@ class MemberCard(NamedTuple):
     sex: str
     face: str
     sign: str
+    present_fields: Optional[frozenset] = None
 
 
 class MemberRelation(NamedTuple):

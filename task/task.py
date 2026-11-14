@@ -1,777 +1,350 @@
-from service import Service, ServiceError, CodeError, VideoView, NewlistArchiveStat
-from sqlalchemy.orm.session import Session
-from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, TddMemberFollowerRecord, \
-    TddMemberLog, TddSprintVideoRecord
-from util import get_ts_s, a2b, same_pic_url, null_or_str
-from core import TddError, RecordNew, MemberFollowerRecordNew
-from .error import AlreadyExistError, NotExistError
-
+"""Fetch observations outside transactions, then persist each business change together."""
 import logging
 import time
+from uuid import uuid4, uuid5
+
+from service import Service, ServiceError, CodeError
+from db import DBOperation, Session, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, \
+    TddMemberFollowerRecord, TddMemberLog, TddSprintVideoRecord
+from db.write import append_objects
+from db.values import clean_text
+from db.replay import observe
+from util import get_ts_s, a2b, same_pic_url
+from core import RecordNew, MemberFollowerRecordNew
+from .error import AlreadyExistError, NotExistError
 
 logger = logging.getLogger('task')
-
-__all__ = ['add_video_record_via_video_view',
-           'fetch_video_record_via_video_view',
-           'commit_video_records_batch',
-           'commit_video_record_via_video_view',
-           'commit_video_record_via_newlist_archive_stat',
-           'add_sprint_video_record_via_video_view',
-           'add_video', 'update_video',
-           'add_member', 'update_member', 'commit_staff', 'add_member_follower_record',
-           'fetch_member_follower_record', 'commit_member_follower_records_batch',
-           'get_video_tags_str']
+STAT_FIELDS = ('view','danmaku','reply','favorite','coin','share','like')
+__all__ = ['add_video_record_via_video_view','fetch_video_record_via_video_view','commit_video_records_batch',
+           'commit_video_record_via_video_view','commit_video_record_via_newlist_archive_stat',
+           'add_sprint_video_record_via_video_view','add_video','update_video','add_member','update_member',
+           'commit_staff','add_member_follower_record','fetch_member_follower_record',
+           'commit_member_follower_records_batch','get_video_tags_str']
 
 
-def fetch_video_record_via_video_view(aid: int, service: Service,
-                                      out_stat: dict = None) -> RecordNew:
-    # Fetch-only: build a lightweight, session-independent record from the
-    # video view WITHOUT touching the DB. Pair with a writer that persists
-    # records (single-record add_video_record_via_video_view, or the batched
-    # commit_video_records_batch for bulk pipelines).
-    # out_stat (optional): filled with 'http_ms' (view fetch incl retries).
+def _stats(stat):
+    return {field: -1 if field == 'view' and getattr(stat, field) == '--' else getattr(stat, field)
+            for field in STAT_FIELDS}
 
-    # get video view (trimmed: the record only needs bvid + stat, and the
-    # trimmed worker response skips the 200KB-2.8MB season/UGC bloat that the
-    # full view payload carries for season/multi-part videos)
-    stage_start = time.perf_counter()
-    try:
-        video_view = service.get_video_view_trimmed({'aid': aid})
-    except ServiceError as e:
-        raise e
+
+def fetch_video_record_via_video_view(aid, service, out_stat=None):
+    start = time.perf_counter()
+    view = service.get_video_view_trimmed({'aid': aid})
     if out_stat is not None:
-        out_stat['http_ms'] = int((time.perf_counter() - stage_start) * 1000)
-
-    added = get_ts_s()
-    view = -1 if video_view.stat.view == '--' else video_view.stat.view
-
-    return RecordNew(
-        added=added,
-        aid=aid,
-        # removeprefix, not lstrip('BV'): lstrip strips any RUN of leading
-        # B/V characters. Identical output for every real bvid (they all
-        # start 'BV1'), but only removeprefix is correct by construction.
-        bvid=video_view.bvid.removeprefix('BV'),
-        view=view,
-        danmaku=video_view.stat.danmaku,
-        reply=video_view.stat.reply,
-        favorite=video_view.stat.favorite,
-        coin=video_view.stat.coin,
-        share=video_view.stat.share,
-        like=video_view.stat.like,
-        dislike=video_view.stat.dislike,
-        now_rank=video_view.stat.now_rank,
-        his_rank=video_view.stat.his_rank,
-        vt=video_view.stat.vt,
-        vv=video_view.stat.vv,
-    )
+        out_stat['http_ms'] = int((time.perf_counter() - start) * 1000)
+    return RecordNew(added=get_ts_s(), aid=aid, bvid=view.bvid.removeprefix('BV'), **_stats(view.stat))
 
 
-def add_video_record_via_video_view(aid: int, service: Service, session: Session,
-                                    out_stat: dict = None) -> RecordNew:
-    # Fetch + persist one record. Good for small aid batches; bulk pipelines
-    # should use fetch_video_record_via_video_view + commit_video_records_batch
-    # to avoid per-record commit contention.
-    # out_stat (optional): filled with per-stage durations for instrumentation,
-    # keys 'http_ms' (view fetch incl retries) and 'db_ms' (insert + commit).
-    # Same pattern as update_video's out_context.
-    record = fetch_video_record_via_video_view(aid, service, out_stat=out_stat)
-
-    # persist. The ORM object is confined to this function -- it exists only
-    # to run the INSERT and never leaves.
-    new_video_record = TddVideoRecord(
-        aid=record.aid,
-        added=record.added,
-        view=record.view,
-        danmaku=record.danmaku,
-        reply=record.reply,
-        favorite=record.favorite,
-        coin=record.coin,
-        share=record.share,
-        like=record.like,
-        dislike=record.dislike,
-        now_rank=record.now_rank,
-        his_rank=record.his_rank,
-        vt=record.vt,
-        vv=record.vv,
-    )
-    # TODO: use new db operation which can raise exception
-    stage_start = time.perf_counter()
-    DBOperation.add(new_video_record, session)
-    if out_stat is not None:
-        out_stat['db_ms'] = int((time.perf_counter() - stage_start) * 1000)
-
+def add_video_record_via_video_view(aid, service, session, out_stat=None):
+    record = fetch_video_record_via_video_view(aid, service, out_stat)
+    commit_video_records_batch([record], session, out_stat)
     return record
 
 
-def commit_video_records_batch(records: list, session: Session, out_stat: dict = None) -> None:
-    # Persist many RecordNew with ONE multi-row INSERT and ONE commit. This is
-    # the bulk counterpart of add_video_record_via_video_view: profiling showed
-    # per-record commits under high concurrency cost ~157ms/record (p50 17ms,
-    # p90 458ms -- commit/fsync contention), which a single writer with batches
-    # avoids. Raises on failure; the caller owns rollback/retry policy.
-    # out_stat (optional): filled with 'db_ms' (insert + commit).
-    if not records:
-        return
-
-    stage_start = time.perf_counter()
-    sql = 'insert into ' \
-          'tdd_video_record(added, aid, `view`, danmaku, reply, favorite, coin, share, `like`, ' \
-          'dislike, now_rank, his_rank, vt, vv) ' \
-          'values '
-    sql += ', '.join(
-        '(%d, %d, %d, %d, %d, %d, %d, %d, %d, %s, %s, %s, %s, %s)' % (
-            r.added, r.aid,
-            r.view, r.danmaku, r.reply, r.favorite, r.coin, r.share, r.like,
-            null_or_str(r.dislike), null_or_str(r.now_rank), null_or_str(r.his_rank),
-            null_or_str(r.vt), null_or_str(r.vv))
-        for r in records)
-    session.execute(sql)
-    session.commit()
+def _commit_objects(objects, session, out_stat=None, batch_id=None):
+    start = time.perf_counter()
+    persisted = observe('append', {'objects':objects}, batch_id=batch_id)
     if out_stat is not None:
-        out_stat['db_ms'] = int((time.perf_counter() - stage_start) * 1000)
+        out_stat['db_ms'] = int((time.perf_counter() - start) * 1000)
+    return persisted
 
 
-def commit_video_record_via_video_view(video_view: VideoView, added: int, session: Session) -> TddVideoRecord:
-    # assemble video record
-    new_video_record = TddVideoRecord(
-        aid=video_view.aid,
-        added=added,
-        view=-1 if video_view.stat.view == '--' else video_view.stat.view,
-        danmaku=video_view.stat.danmaku,
-        reply=video_view.stat.reply,
-        favorite=video_view.stat.favorite,
-        coin=video_view.stat.coin,
-        share=video_view.stat.share,
-        like=video_view.stat.like,
-        dislike=video_view.stat.dislike,
-        now_rank=video_view.stat.now_rank,
-        his_rank=video_view.stat.his_rank,
-        vt=video_view.stat.vt,
-        vv=video_view.stat.vv,
-    )
-
-    # add to db
-    # TODO: use new db operation which can raise exception
-    DBOperation.add(new_video_record, session)
-
-    return new_video_record
+def commit_video_records_batch(records, session, out_stat=None, batch_id=None):
+    return _commit_objects([TddVideoRecord(added=r.added, aid=r.aid,
+                           **{field:getattr(r,field) for field in STAT_FIELDS}) for r in records],
+                           session, out_stat, batch_id)
 
 
-def commit_video_record_via_newlist_archive_stat(stat: NewlistArchiveStat, added: int, aid: int, session: Session) -> TddVideoRecord:
-    # assemble video record
-    new_video_record = TddVideoRecord(
-        # sometimes stat.aid is 0, use aid provided by caller instead
-        aid=stat.aid if stat.aid != 0 else aid,
-        added=added,
-        view=-1 if stat.view == '--' else stat.view,
-        danmaku=stat.danmaku,
-        reply=stat.reply,
-        favorite=stat.favorite,
-        coin=stat.coin,
-        share=stat.share,
-        like=stat.like,
-        dislike=stat.dislike,
-        now_rank=stat.now_rank,
-        his_rank=stat.his_rank,
-        vt=stat.vt,
-        vv=stat.vv,
-    )
-
-    # add to db
-    # TODO: use new db operation which can raise exception
-    DBOperation.add(new_video_record, session)
-
-    return new_video_record
+def commit_video_record_via_video_view(video_view, added, session):
+    obj = TddVideoRecord(added=added, aid=video_view.aid, **_stats(video_view.stat))
+    return _commit_objects([obj], session)[0]
 
 
-def add_sprint_video_record_via_video_view(aid: int, service: Service, session: Session) -> TddSprintVideoRecord:
-    # get video view (trimmed: sprint record is stat-only too)
-    try:
-        video_view = service.get_video_view_trimmed({'aid': aid})
-    except ServiceError as e:
-        raise e
-
-    # assemble sprint video record
-    new_sprint_video_record = TddSprintVideoRecord(
-        aid=aid,
-        added=get_ts_s(),
-        view=-1 if video_view.stat.view == '--' else video_view.stat.view,
-        danmaku=video_view.stat.danmaku,
-        reply=video_view.stat.reply,
-        favorite=video_view.stat.favorite,
-        coin=video_view.stat.coin,
-        share=video_view.stat.share,
-        like=video_view.stat.like,
-    )
-
-    # add to db
-    # TODO: use new db operation which can raise exception
-    DBOperation.add(new_sprint_video_record, session)
-
-    return new_sprint_video_record
+def commit_video_record_via_newlist_archive_stat(stat, added, aid, session):
+    obj = TddVideoRecord(added=added, aid=stat.aid if stat.aid != 0 else aid, **_stats(stat))
+    return _commit_objects([obj], session)[0]
 
 
-def add_video(aid: int, service: Service, session: Session, test_exist=True, commit_video_record=True) -> TddVideo:
-    # test exist
-    if test_exist:
-        video = DBOperation.query_video_via_aid(aid, session)
-        if video is not None:
-            # video already exist
-            raise AlreadyExistError(table='tdd_video', params={'aid': aid})
+def add_sprint_video_record_via_video_view(aid, service, session):
+    view = service.get_video_view_trimmed({'aid':aid})
+    return observe('sprint-observe',{'record':TddSprintVideoRecord(added=get_ts_s(), aid=aid, **_stats(view.stat))})
 
-    # get video view
-    try:
-        video_view = service.get_video_view({'aid': aid})
-    except ServiceError as e:
-        raise e
 
-    # assemble video
-    new_video = TddVideo(
-        added=get_ts_s(),
-        aid=aid,
-        bvid=video_view.bvid[2:],  # remove 'BV' prefix
-        videos=video_view.videos,
-        tid=video_view.tid,
-        tname=video_view.tname,
-        copyright=video_view.copyright,
-        pic=video_view.pic,
-        title=video_view.title,
-        pubdate=video_view.pubdate,
-        desc=video_view.desc,
-        mid=video_view.owner.mid,
-        code=0,
-        state=video_view.state,
-    )
+def _present(obj, field):
+    fields = getattr(obj, 'present_fields', None)
+    return fields is None or field in fields
 
-    # optional attributes
-    if video_view.attribute is not None:
-        new_video.attribute = video_view.attribute
-    if video_view.forward is not None:
-        new_video.forward = video_view.forward
 
-    # set tags
-    new_video.tags = get_video_tags_str(aid, service)
+def _member_object(mid, card, added):
+    return TddMember(mid=mid, added=added, code=0,
+                     **{field:clean_text(getattr(card,field)) for field in ('name','face','sex','sign')})
 
-    # set recent
-    new_video.recent = 2
 
-    # set isvc
-    for tag in new_video.tags.split(';'):
-        if tag.upper() == 'VOCALOID中文曲':
-            new_video.isvc = 2
-            break
-
-    # create member mid set
-    member_mid_set: set[int] = {new_video.mid}
-
-    # add member
-    try:
-        add_member(new_video.mid, service, session)
-    except AlreadyExistError as e:
-        logger.debug(f'Uploader member of new video already exist! '
-                     f'video: {new_video}, mid: {new_video.mid}, error: {e}')
-    except Exception as e:
-        logger.error(f'Fail to add uploader member when add new video! '
-                     f'video: {new_video}, mid: {new_video.mid}, error: {e}')
-        raise e
-
-    # add staff
-    if video_view.staff is not None:
-        added_staff_mids: list[int] = []
+def _prepare_members(aid, mids, service, session, strict=False):
+    prepared = {}
+    for mid in sorted(set(mids), key=lambda value: str(value)):
+        if type(mid) is not int or mid <= 0:
+            logger.warning('Skip invalid video member: aid=%s, mid=%r', aid,mid)
+            continue
+        if DBOperation.query_member_via_mid(mid,session) is not None:
+            continue
         try:
-            new_video.hasstaff = 1
-            for staff_item in video_view.staff:
-                member_mid_set.add(staff_item.mid)
-                try:
-                    add_member(staff_item.mid, service, session)
-                except AlreadyExistError:
-                    logger.debug(f'Staff member of new video already exist! '
-                                 f'video: {new_video}, mid: {staff_item.mid}')
-                except Exception as e:
-                    logger.error(f'Fail to add staff member when add new video! '
-                                 f'video: {new_video}, mid: {staff_item.mid}, error: {e}')
-                    raise e
-                try:
-                    commit_staff(new_video.added, aid,
-                                 staff_item.mid, staff_item.title, session)
-                except AlreadyExistError:
-                    logger.debug(f'Video staff relationship of new video already exist! '
-                                 f'video: {new_video}, mid: {staff_item.mid}, title: {staff_item.title}')
-                except Exception as e:
-                    logger.error(f'Fail to add video staff relationship when add new video! '
-                                 f'video: {new_video}, mid: {staff_item.mid}, title: {staff_item.title}, error: {e}')
-                    raise e
-                added_staff_mids.append(staff_item.mid)
-        except Exception as e:
-            # rollback already committed video staff relationship
-            for mid in added_staff_mids:
-                # TODO: use new db operation which can raise exception
-                DBOperation.delete_video_staff_via_aid_mid(aid, mid, session)
-                # no need to remove already added member
-            raise e
-    else:
-        new_video.hasstaff = 0
+            prepared[mid] = _member_object(mid, service.get_member_card(
+                {'mid':mid}, timeout=1.5, colddown_factor=0.1), get_ts_s())
+        except ServiceError as error:
+            if strict:
+                raise
+            logger.warning('Missing video member; retry on metadata refresh: aid=%s, mid=%s, error=%s',aid,mid,error)
+    return prepared
 
-    # add to db
-    # TODO: use new db operation which can raise exception
-    DBOperation.add(new_video, session)
 
+def _insert_prepared_members(prepared, session):
+    for mid, member in prepared.items():
+        # The unique key handles another concurrent observation of the same profile.
+        fields = tuple(field for field in member.fields if field not in ('id','last_video_aid'))
+        from db.values import database_value
+        session.execute('INSERT INTO tdd_member (' + ','.join('"'+f+'"' for f in fields) + ') VALUES (' +
+                        ','.join(['%s']*len(fields)) + ') ON CONFLICT (mid) DO NOTHING',
+                        tuple(database_value(field,getattr(member,field)) for field in fields))
+
+
+def add_video(aid, service, session, test_exist=True, commit_video_record=True):
+    if test_exist and DBOperation.query_video_via_aid(aid,session) is not None:
+        raise AlreadyExistError(table='tdd_video',params={'aid':aid})
+    view = service.get_video_view({'aid':aid})
+    if view.title is None:
+        logger.warning('Reject new video with null title: aid=%s',aid)
+        raise ValueError('New video title must not be null')
+    added = get_ts_s()
+    tags = get_video_tags_str(aid,service)
+    staff = view.staff or []
+    members = _prepare_members(aid,[view.owner.mid] + [s.mid for s in staff],service,session,strict=True)
+    video = TddVideo(added=added, aid=aid, bvid=view.bvid.removeprefix('BV'), mid=view.owner.mid,
+                     code=0, tags=tags, recent=2, hasstaff=1 if view.staff is not None else 0,
+                     **{field:clean_text(getattr(view,field)) for field in
+                        ('videos','tid','tname','copyright','pic','title','pubdate','desc','attribute','state','forward')})
+    if any(tag.upper() == 'VOCALOID中文曲' for tag in tags.split(';')):
+        video.isvc = 2
+    return observe('video-add',dict(aid=aid,video=video,view=view,members=list(members.values()),
+                                    added=added,commit_video_record=commit_video_record))
+
+
+def _apply_video_add(payload,session,batch_id):
+    aid,video,view,added = (payload[field] for field in ('aid','video','view','added'))
+    members = {member.mid:member for member in payload['members']}
+    staff = view.staff or []
+    commit_video_record = payload['commit_video_record']
+    if DBOperation.query_video_via_aid(aid,session) is not None:
+        raise AlreadyExistError(table='tdd_video',params={'aid':aid})
+    _insert_prepared_members(members,session)
+    DBOperation.add(video,session)
+    for item in staff:
+        try:
+            commit_staff(added,aid,item.mid,item.title,session)
+        except AlreadyExistError:
+            logger.debug('Video staff relationship already exists: aid=%s, mid=%s',aid,item.mid)
     if commit_video_record:
-        # commit video record
-        try:
-            commit_video_record_via_video_view(
-                video_view, new_video.added, session)
-        except Exception as e:
-            logger.error(
-                f'Fail to commit video record! video: {new_video}, error: {e}')
-            session.rollback()
-            raise e
+        append_objects(session,[TddVideoRecord(added=added,aid=aid,**_stats(view.stat))],uuid5(batch_id,'tdd_video_record'))
+    return video
 
-    # update member last_video and video_count
+
+def _change(current, field, new, logs, added, key, model):
+    old, new = clean_text(getattr(current,field)), clean_text(new)
+    if old == new:
+        return False
+    logs.append(model(added=added, **key, attr=field, oldval=None if old is None else str(old),
+                      newval=None if new is None else str(new)))
+    setattr(current,field,new)
+    return True
+
+
+def update_video(aid, service, session, out_context=None):
+    # Fetch can be slow. No database write lock is held while waiting for HTTP.
+    code_error, view = None, None
     try:
-        for mid in member_mid_set:
-            member = DBOperation.query_member_via_mid(mid, session)
-            member.last_video = new_video.id
-            member.video_count += 1
-            session.commit()
-    except Exception as e:
-        logger.error(f'Fail to update member last_video and video_count! '
-                     f'video: {new_video}, error: {e}')
-        session.rollback()
-        raise e
-
-    return new_video
-
-
-def update_video(aid: int, service: Service, session: Session, out_context: dict = None) -> list[TddVideoLog]:
-    # get current video
-    # TODO: use new db operation which can raise exception
-    curr_video: TddVideo = DBOperation.query_video_via_aid(aid, session)
-    if curr_video is None:
-        raise NotExistError(table='tdd_video', params={'aid': aid})
-
-    video_update_logs: list[TddVideoLog] = []
-    bvid = a2b(aid)
-
-    # get video view
-    try:
-        video_view = service.get_video_view({'aid': aid})
+        view = service.get_video_view({'aid':aid})
         if out_context is not None:
-            out_context['video_view'] = video_view
-    except CodeError as e:
-        if e.code != curr_video.code:
-            if e.code != -403:  # just due to not logged in, actually it's okay
-                video_update_logs.append(
-                    TddVideoLog(get_ts_s(), aid, bvid,
-                                'code', curr_video.code, e.code))
-                curr_video.code = e.code
-    except ServiceError as e:
-        raise e
-    else:
-        # Retry missing profiles even when owner/staff relationships have not
-        # changed. A prior card failure must not leave them missing forever.
-        profile_mids = {video_view.owner.mid}
-        if video_view.staff is not None:
-            profile_mids.update(item.mid for item in video_view.staff)
-        for profile_mid in profile_mids:
-            ensure_video_member(aid, profile_mid, service, session)
-
-        # check attributes
-        added = get_ts_s()
-        # code
-        if 0 != curr_video.code:
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'code', curr_video.code, 0))
-            curr_video.code = 0
-        # videos
-        if video_view.videos != curr_video.videos:
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'videos', curr_video.videos, video_view.videos))
-            curr_video.videos = video_view.videos
-        # tid
-        if video_view.tid != curr_video.tid:
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'tid', curr_video.tid, video_view.tid))
-            curr_video.tid = video_view.tid
-        # tname
-        if video_view.tname != curr_video.tname:
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'tname', curr_video.tname, video_view.tname))
-            curr_video.tname = video_view.tname
-        # copyright
-        if video_view.copyright != curr_video.copyright:
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'copyright', curr_video.copyright, video_view.copyright))
-            curr_video.copyright = video_view.copyright
-        # pic
-        if curr_video.pic is None or not same_pic_url(video_view.pic, curr_video.pic):
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'pic', curr_video.pic, video_view.pic))
-            curr_video.pic = video_view.pic
-        # title
-        if video_view.title != curr_video.title:
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'title', curr_video.title, video_view.title))
-            curr_video.title = video_view.title
-        # pubdate
-        if video_view.pubdate != curr_video.pubdate:
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'pubdate', curr_video.pubdate, video_view.pubdate))
-            curr_video.pubdate = video_view.pubdate
-        # desc
-        if video_view.desc != curr_video.desc:
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'desc', curr_video.desc, video_view.desc))
-            curr_video.desc = video_view.desc
-        # mid
-        if video_view.owner.mid != curr_video.mid:
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'mid', curr_video.mid, video_view.owner.mid))
-            curr_video.mid = video_view.owner.mid
-        # attribute
-        if video_view.attribute is not None:
-            if video_view.attribute != curr_video.attribute:
-                video_update_logs.append(
-                    TddVideoLog(added, aid, bvid,
-                                'attribute', curr_video.attribute, video_view.attribute))
-                curr_video.attribute = video_view.attribute
-        # state
-        if video_view.state != curr_video.state:
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'state', curr_video.state, video_view.state))
-            curr_video.state = video_view.state
-        # forward
-        if video_view.forward is not None:
-            if video_view.forward != curr_video.forward:
-                video_update_logs.append(
-                    TddVideoLog(added, aid, bvid,
-                                'forward', curr_video.forward, video_view.forward))
-                curr_video.forward = video_view.forward
-        # hasstaff
-        new_hasstaff = 1 if video_view.staff is not None else 0
-        if new_hasstaff != curr_video.hasstaff:
-            video_update_logs.append(
-                TddVideoLog(added, aid, bvid,
-                            'hasstaff', curr_video.hasstaff, new_hasstaff))
-            curr_video.hasstaff = new_hasstaff
-        # update staff list
-        # TODO: update staff last_video and video_count if changed
-        curr_staff_list = DBOperation.query_video_staff_via_aid(aid, session)
-        if new_hasstaff == 1:
-            for staff_item in video_view.staff:
-                # find staff in db
-                curr_staff_item_found = None
-                for curr_staff_item in curr_staff_list:
-                    if curr_staff_item.mid == staff_item.mid:
-                        curr_staff_item_found = curr_staff_item
-                        curr_staff_list.remove(curr_staff_item)
-                if curr_staff_item_found:
-                    # staff exist, check it
-                    if staff_item.title != curr_staff_item_found.title:
-                        video_update_logs.append(
-                            TddVideoLog(added, aid, bvid,
-                                        'staff',
-                                        f'mid: {curr_staff_item_found.mid}; title: {curr_staff_item_found.title}',
-                                        f'mid: {staff_item.mid}; title: {staff_item.title}'))
-                        curr_staff_item_found.title = staff_item.title
-                else:
-                    # staff not exist, add it
-                    # The profile was checked above, including unchanged staff.
-                    # add staff
-                    try:
-                        new_staff = commit_staff(
-                            added, aid, staff_item.mid, staff_item.title, session)
-                    except TddError as e:
-                        logger.warning(f'Fail to add new staff! '
-                                       f'aid: {aid}, mid: {staff_item.mid}, title: {staff_item.title}, error: {e}')
-                    else:
-                        video_update_logs.append(
-                            TddVideoLog(added, aid, bvid,
-                                        'staff', None, f'mid: {new_staff.mid}; title: {new_staff.title}'))
-            # remove staff left in old_staff_list
-            for curr_staff_item in curr_staff_list:
-                DBOperation.delete_video_staff_via_id(
-                    curr_staff_item.id, session)
-                video_update_logs.append(
-                    TddVideoLog(added, aid, bvid,
-                                'staff', f'mid: {curr_staff_item.mid}; title: {curr_staff_item.title}', None))
-        # update tags string. The video_tags endpoint is separate from the
-        # view and unstable (frequent ResponseError). It must NOT be fatal: the
-        # view fetch already succeeded and its changes (title, tname, code,
-        # state, ...) are staged on curr_video, so letting a tags failure
-        # propagate here would roll ALL of them back at the commit below --
-        # dropping real metadata/reactivation updates over a flaky tags call.
-        # On failure, skip tags this pass (it gets another chance next cycle)
-        # and keep the view-based changes.
+            out_context['video_view'] = view
+    except CodeError as error:
+        code_error = error
+    tags = None
+    members = {}
+    if view is not None:
+        mids = [view.owner.mid] + [s.mid for s in (view.staff or [])]
+        members = _prepare_members(aid,mids,service,session)
         try:
-            new_tags = get_video_tags_str(aid, service)
-        except ServiceError as e:
-            logger.warning(
-                f'Skip tags update (view changes kept). aid: {aid}, error: {e}')
-        else:
-            new_tags_sorted = ';'.join(sorted(new_tags.split(';')))
-            curr_tags_sorted = ';'.join(sorted((curr_video.tags or '').split(';')))
-            if new_tags_sorted != curr_tags_sorted:
-                video_update_logs.append(
-                    TddVideoLog(added, aid, bvid,
-                                'tags', curr_video.tags, new_tags))
-                curr_video.tags = new_tags
-
-    # commit changes
-    try:
-        session.commit()
-    except Exception as e:
-        logger.error(
-            f'Fail to commit changes! object: {curr_video}, error: {e}')
-        session.rollback()
-        raise e
-
-    # add to db
-    # TODO: use new db operation which can raise exception
-    for log in video_update_logs:
-        DBOperation.add(log, session)
-
-    return video_update_logs
+            tags = get_video_tags_str(aid,service)
+        except ServiceError as error:
+            logger.warning('Skip tags update (view changes kept). aid: %s, error: %s',aid,error)
+    return observe('video-update',dict(aid=aid,view=view,code_error=None if code_error is None else code_error.code,
+                                       tags=tags,members=list(members.values()),added=get_ts_s()))
 
 
-def ensure_video_member(aid: int, mid: int, service: Service, session: Session):
-    if type(mid) is not int or mid <= 0:
-        logger.warning('Skip invalid video member: aid=%s, mid=%r', aid, mid)
-        return
-    if session.query(TddMember.mid).filter(TddMember.mid == mid).first() is not None:
-        return
-    try:
-        add_member(mid, service, session, test_exist=False)
-    except ServiceError as e:
-        logger.warning('Missing video member; retry on metadata refresh: aid=%s, mid=%s, error=%s',
-                       aid, mid, e)
+def _apply_video_update(payload,session,batch_id):
+    aid,view,tags,added,code_error = (payload[field] for field in ('aid','view','tags','added','code_error'))
+    members = {member.mid:member for member in payload['members']}
+    logs = []
+    current = DBOperation.query_video_via_aid(aid,session,lock=True)
+    if current is None:
+        raise NotExistError(table='tdd_video',params={'aid':aid})
+    changed = []
+    def change(field,new):
+        if _change(current,field,new,logs,added,{'aid':aid},TddVideoLog):
+            changed.append(field)
+    if code_error is not None:
+        if code_error != -403:
+            change('code',code_error)
+    else:
+        _insert_prepared_members(members,session)
+        change('code',0)
+        for field in ('videos','tid','tname','copyright','pic','title','pubdate','desc','state','attribute','forward'):
+            if not _present(view,field):
+                continue
+            new = clean_text(getattr(view,field))
+            if field == 'pic' and current.pic is not None and new is not None and same_pic_url(new,current.pic):
+                continue
+            change(field,new)
+        change('mid',view.owner.mid)
+        if _present(view,'staff'):
+            change('hasstaff',1 if view.staff is not None else 0)
+            existing = {item.mid:item for item in DBOperation.query_video_staff_via_aid(aid,session)}
+            remaining,seen = set(existing),set()
+            for item in view.staff or []:
+                if item.mid in seen:
+                    logger.warning('Skip repeated video staff relationship: aid=%s, mid=%s',aid,item.mid)
+                    continue
+                seen.add(item.mid)
+                remaining.discard(item.mid)
+                old = existing.get(item.mid)
+                title = clean_text(item.title)
+                if old is None:
+                    new_staff = commit_staff(added,aid,item.mid,title,session,test_exist=False)
+                    logs.append(TddVideoLog(added,aid,attr='staff',newval=f'mid: {new_staff.mid}; title: {title}'))
+                elif clean_text(old.title) != title:
+                    logs.append(TddVideoLog(added,aid,attr='staff',oldval=f'mid: {old.mid}; title: {clean_text(old.title)}',newval=f'mid: {item.mid}; title: {title}'))
+                    old.title = title
+                    DBOperation.update(old,['title'],session)
+            for mid,item in existing.items():
+                if mid not in remaining:
+                    continue
+                DBOperation.delete_video_staff_via_id(item.id,session)
+                logs.append(TddVideoLog(added,aid,attr='staff',oldval=f'mid: {item.mid}; title: {clean_text(item.title)}'))
+        if tags is not None:
+            if sorted(tags.split(';')) != sorted((clean_text(current.tags) or '').split(';')):
+                change('tags',tags)
+    DBOperation.update(current,changed,session)
+    append_objects(session,logs,uuid5(batch_id,'tdd_video_log'))
+    return logs
 
 
-def add_member(mid: int, service: Service, session: Session, test_exist=True):
+def ensure_video_member(aid, mid, service, session):
+    prepared = _prepare_members(aid,[mid],service,session)
+    return observe('member-ensure',dict(members=list(prepared.values())))
+
+
+def add_member(mid, service, session, test_exist=True):
     if type(mid) is not int or mid <= 0:
         raise ValueError(f'Member mid must be a positive integer: {mid!r}')
-    # test exist
-    if test_exist:
-        member = session.query(TddMember).filter(TddMember.mid == mid).first()
-        if member is not None:
-            # member already exist
-            raise AlreadyExistError(table='member', params={'mid': mid})
+    if test_exist and DBOperation.query_member_via_mid(mid,session) is not None:
+        raise AlreadyExistError(table='member',params={'mid':mid})
+    member = _member_object(mid,service.get_member_card({'mid':mid},timeout=1.5,colddown_factor=0.1),get_ts_s())
+    return observe('member-add',dict(member=member))
 
-    # get member space
+
+def update_member(mid, service, session):
+    card, code = None, 0
     try:
-        # special config for get_member_card
-        member_card = service.get_member_card(
-            {'mid': mid}, timeout=1.5, colddown_factor=0.1)
-    except ServiceError as e:
-        raise e
-
-    # assemble member
-    new_member = TddMember(
-        mid=mid,
-        added=get_ts_s(),
-        sex=member_card.sex,
-        name=member_card.name,
-        face=member_card.face,
-        sign=member_card.sign,
-        code=0
-    )
-
-    # Let the caller observe a failed profile insert and retry it later.
-    try:
-        session.add(new_member)
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-
-    return new_member
+        card = service.get_member_card({'mid':mid},timeout=1.5,colddown_factor=0.1)
+    except CodeError as error:
+        if error.code != -404:
+            raise
+        code = error.code
+    return observe('member-update',dict(mid=mid,card=card,code=code,added=get_ts_s()))
 
 
-def update_member(mid: int, service: Service, session: Session):
-    # get current member
-    # TODO: use new db operation which can raise exception
-    curr_member: TddMember = DBOperation.query_member_via_mid(mid, session)
-    if curr_member is None:
-        raise NotExistError(table='tdd_member', params={'mid': mid})
-
-    member_update_logs: list[TddMemberLog] = []
-
-    # get member space
-    try:
-        # special config for get_member_card
-        member_card = service.get_member_card(
-            {'mid': mid}, timeout=1.5, colddown_factor=0.1)
-    except CodeError as e:
-        # code maybe -404, otherwise anti-crawler triggered, raise error
-        if e.code != -404:
-            raise e
-        if e.code != curr_member.code:
-            member_update_logs.append(
-                TddMemberLog(get_ts_s(), mid,
-                             'code', curr_member.code, e.code))
-            curr_member.code = e.code
-    except ServiceError as e:
-        raise e
-    else:
-        # check attributes
-        added = get_ts_s()
-        # code
-        if 0 != curr_member.code:
-            member_update_logs.append(
-                TddMemberLog(added, mid,
-                             'code', curr_member.code, 0))
-            curr_member.code = 0
-        # sex
-        if member_card.sex != curr_member.sex:
-            member_update_logs.append(
-                TddMemberLog(added, mid,
-                             'sex', curr_member.sex, member_card.sex))
-            curr_member.sex = member_card.sex
-        # name
-        if member_card.name != curr_member.name:
-            member_update_logs.append(
-                TddMemberLog(added, mid,
-                             'name', curr_member.name, member_card.name))
-            curr_member.name = member_card.name
-        # face
-        if not same_pic_url(member_card.face, curr_member.face):
-            member_update_logs.append(
-                TddMemberLog(added, mid,
-                             'face', curr_member.face, member_card.face))
-            curr_member.face = member_card.face
-        # sign
-        if member_card.sign != curr_member.sign:
-            member_update_logs.append(
-                TddMemberLog(added, mid,
-                             'sign', curr_member.sign, member_card.sign))
-            curr_member.sign = member_card.sign
-
-    # commit changes
-    try:
-        session.commit()
-    except Exception as e:
-        logger.error(
-            f'Fail to commit changes! object: {curr_member}, error: {e}')
-        session.rollback()
-        raise e
-
-    # add to db
-    # TODO: use new db operation which can raise exception
-    for log in member_update_logs:
-        DBOperation.add(log, session)
-
-    return member_update_logs
+def _apply_member_update(payload,session,batch_id):
+    mid,card,code,added = (payload[field] for field in ('mid','card','code','added'))
+    logs = []
+    current = DBOperation.query_member_via_mid(mid,session,lock=True)
+    if current is None:
+        raise NotExistError(table='tdd_member',params={'mid':mid})
+    changed = []
+    def change(field,new):
+        if _change(current,field,new,logs,added,{'mid':mid},TddMemberLog):
+            changed.append(field)
+    change('code',code)
+    if card is not None:
+        for field in ('sex','name','face','sign'):
+            if not _present(card,field):
+                continue
+            value = getattr(card,field)
+            if field == 'face' and value is not None and current.face is not None and same_pic_url(value,current.face):
+                continue
+            change(field,value)
+    DBOperation.update(current,changed,session)
+    append_objects(session,logs,uuid5(batch_id,'tdd_member_log'))
+    return logs
 
 
-def commit_staff(added: int, aid: int, mid: int, title: str, session: Session, test_exist=True):
-    bvid = a2b(aid)
-
-    # test exist
-    if test_exist:
-        staff = DBOperation.query_video_staff_via_aid_mid(aid, mid, session)
-        if staff is not None:
-            # staff already exist
-            raise AlreadyExistError(table='video_staff', params={
-                                    'aid': aid, 'mid': mid})
-
-    # assemble staff
-    new_staff = TddVideoStaff(
-        added=added,
-        aid=aid,
-        bvid=bvid,
-        mid=mid,
-        title=title
-    )
-
-    # add to db
-    # TODO: use new db operation which can raise exception
-    DBOperation.add(new_staff, session)
-
-    return new_staff
+def commit_staff(added, aid, mid, title, session, test_exist=True):
+    if test_exist and DBOperation.query_video_staff_via_aid_mid(aid,mid,session) is not None:
+        raise AlreadyExistError(table='video_staff',params={'aid':aid,'mid':mid})
+    obj = TddVideoStaff(added=added,aid=aid,bvid=a2b(aid),mid=mid,title=clean_text(title))
+    DBOperation.add(obj,session)
+    return obj
 
 
-def add_member_follower_record(mid: int, service: Service, session: Session):
-    # get member relation
-    try:
-        member_relation = service.get_member_relation({'vmid': mid})
-    except ServiceError as e:
-        raise e
-
-    # assemble follower record
-    new_follower_record = TddMemberFollowerRecord(
-        mid=mid,
-        added=get_ts_s(),
-        follower=member_relation.follower,
-    )
-
-    # add to db
-    # TODO: use new db operation which can raise exception
-    DBOperation.add(new_follower_record, session)
-
-    return new_follower_record
-
-
-def fetch_member_follower_record(mid: int, service: Service,
-                                 out_stat: dict = None) -> MemberFollowerRecordNew:
-    # Fetch-only: build a session-independent follower record WITHOUT touching
-    # the DB. Pair with commit_member_follower_records_batch (the bulk writer).
-    # out_stat (optional): filled with 'http_ms'.
-    stage_start = time.perf_counter()
-    try:
-        member_relation = service.get_member_relation({'vmid': mid})
-    except ServiceError as e:
-        raise e
+def fetch_member_follower_record(mid, service, out_stat=None):
+    start = time.perf_counter()
+    relation = service.get_member_relation({'vmid':mid})
     if out_stat is not None:
-        out_stat['http_ms'] = int((time.perf_counter() - stage_start) * 1000)
-
-    return MemberFollowerRecordNew(
-        added=get_ts_s(),
-        mid=mid,
-        follower=member_relation.follower,
-    )
+        out_stat['http_ms'] = int((time.perf_counter()-start)*1000)
+    return MemberFollowerRecordNew(added=get_ts_s(),mid=mid,follower=relation.follower)
 
 
-def commit_member_follower_records_batch(records: list, session: Session, out_stat: dict = None) -> None:
-    # Persist many MemberFollowerRecordNew with ONE multi-row INSERT and ONE
-    # commit -- the bulk counterpart of add_member_follower_record, removing the
-    # per-record commit/fsync contention. Raises on failure; caller owns retry.
-    # out_stat (optional): filled with 'db_ms'.
-    if not records:
-        return
-
-    stage_start = time.perf_counter()
-    sql = 'insert into tdd_member_follower_record(added, mid, follower) values '
-    sql += ', '.join(
-        '(%d, %d, %d)' % (r.added, r.mid, r.follower) for r in records)
-    session.execute(sql)
-    session.commit()
-    if out_stat is not None:
-        out_stat['db_ms'] = int((time.perf_counter() - stage_start) * 1000)
+def add_member_follower_record(mid, service, session):
+    record = fetch_member_follower_record(mid,service)
+    return commit_member_follower_records_batch([record],session)[0]
 
 
-def get_video_tags_str(aid: int, service: Service) -> str:
-    # get video tags
-    try:
-        video_tags = service.get_video_tags({'aid': aid})
-    except ServiceError as e:
-        raise e
+def commit_member_follower_records_batch(records, session, out_stat=None, batch_id=None):
+    return _commit_objects([TddMemberFollowerRecord(**record._asdict()) for record in records],session,out_stat,batch_id)
 
-    # assemble tags string
-    tags_str = ''
-    for tag in video_tags.tags:
-        tags_str += tag.tag_name
-        tags_str += ';'
 
-    return tags_str
+def get_video_tags_str(aid, service):
+    return ''.join(clean_text(tag.tag_name) + ';' for tag in service.get_video_tags({'aid':aid}).tags)
+
+
+def apply_observation(operation,payload,session,batch_id):
+    if operation == 'video-add':
+        return _apply_video_add(payload,session,batch_id)
+    if operation == 'video-update':
+        return _apply_video_update(payload,session,batch_id)
+    if operation == 'member-update':
+        return _apply_member_update(payload,session,batch_id)
+    if operation == 'sprint-observe':
+        record = payload['record']
+        append_objects(session,[record],uuid5(batch_id,'tdd_sprint_video_record'))
+        if record.view is not None and record.view >= 1000000:
+            session.execute('UPDATE tdd_sprint_video SET status = %s WHERE aid = %s',('finished',record.aid))
+        return record
+    if operation in ('sprint-daily-record','sprint-daily-summary'):
+        from db.values import database_value
+        if operation == 'sprint-daily-record':
+            table = 'tdd_sprint_daily_record'
+            columns = ('added','date','aid','view','viewincr','pday','lday')
+        else:
+            table = 'tdd_sprint_daily'
+            columns = ('added','date','correct','vidnum','newvids','millvids','viewincr','viewincrincr','comment')
+        if set(payload) != set(columns):
+            raise ValueError('Unexpected sprint daily columns')
+        result = session.execute('INSERT INTO ' + table + ' (' + ','.join('"'+c+'"' for c in columns) +
+                                 ') VALUES (' + ','.join(['%s']*len(columns)) + ') RETURNING id',
+                                 tuple(database_value(c,payload[c]) for c in columns))
+        return dict(result.first())
+    if operation == 'member-add':
+        return DBOperation.add(payload['member'],session)
+    if operation == 'member-ensure':
+        _insert_prepared_members({member.mid:member for member in payload['members']},session)
+        return []
+    raise ValueError('Unsupported replay operation')
