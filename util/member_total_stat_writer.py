@@ -1,8 +1,7 @@
-"""Commit independent aggregate batches through the shared receipt protocol."""
+"""Commit independent aggregate batches in explicit business transactions."""
 from itertools import islice
-from uuid import uuid4
 from db import TddMemberTotalStatRecord
-from db.replay import observe
+from db.observation import observe
 from .member_total_stat import STAT_FIELDS
 
 FIELDS = ('added','mid','video_count') + STAT_FIELDS
@@ -16,13 +15,12 @@ def write_member_stats(session, records, logger, batch_size=1000):
         batch = list(islice(records,batch_size))
         if not batch:
             return committed
-        batch_id = uuid4()
         try:
-            observe('append',{'objects':[TddMemberTotalStatRecord(**record) for record in batch]},batch_id=batch_id)
+            observe('append',{'objects':[TddMemberTotalStatRecord(**record) for record in batch]})
         except Exception:
             logger.critical('Incomplete aggregate write: confirmed_committed_rows=%d, failed_batch_rows=%d, '
-                            'batch_id=%s. Resolve the receipt before replaying this observation.',
-                            committed,len(batch),batch_id)
+                            'Check the failure log and reconcile before retrying.',
+                            committed,len(batch))
             raise
         committed += len(batch)
-        logger.info('Aggregate batch committed: rows=%d, committed_rows=%d, batch_id=%s',len(batch),committed,batch_id)
+        logger.info('Aggregate batch committed: rows=%d, committed_rows=%d',len(batch),committed)

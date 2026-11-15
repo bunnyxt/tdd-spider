@@ -1,0 +1,11 @@
+# User crontab example. Configure the cron daemon's scheduling zone to
+# Asia/Shanghai first. Setting TZ in a command changes its environment, not
+# necessarily the scheduler's timezone. Replace all paths and service names.
+# On cron implementations that support CRON_TZ, CRON_TZ=Asia/Shanghai may be
+# used instead; verify with a harmless scheduled command before enabling jobs.
+# Configure TDD_TRIAL_RUN_ID in the cron environment during a trial, and remove
+# it when switching control to formal. Do not place credentials in this file.
+PGSERVICE=tdd-maintenance
+35 2 * * * bash /path/to/spider/scripts/postgresql/run-maintenance.sh ensure-partitions >> /path/to/log/partitions.log 2>&1
+45 5 * * * bash /path/to/spider/scripts/postgresql/run-maintenance.sh refresh-member-pool >> /path/to/log/member-pool.log 2>&1
+45 9 * * * bash /path/to/spider/scripts/postgresql/run-maintenance.sh refresh-video-pool >> /path/to/log/video-pool.log 2>&1

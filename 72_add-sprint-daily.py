@@ -1,5 +1,5 @@
 from db import Session
-from db.replay import observe
+from db.observation import observe
 from db.values import timestamp
 import datetime
 from runrecord import track

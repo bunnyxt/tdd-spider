@@ -1,7 +1,7 @@
-"""Opt-in real PostgreSQL replay, watermark rollback, and row-lock interleaving.
+"""Opt-in real PostgreSQL delayed observations, watermark rollback, and row-lock interleaving.
 
 Uses the same explicitly selected disposable database as test_pg_application.
-All rows and pending inputs are synthetic; no HTTP endpoint is contacted.
+All rows and failure inputs are synthetic; no HTTP endpoint is contacted.
 """
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -16,7 +16,7 @@ from uuid import uuid4
 from db import DBOperation,Session,TddMember,TddVideo
 from db.basic import engine
 from db.ingest import guard_write_transaction
-from db.replay import observe,replay
+from db.observation import observe
 from task.task import apply_observation
 from test_endpoint_get_video_view import expected_result
 from util import a2b
@@ -33,7 +33,7 @@ class PostgresProfileObservationTest(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.directory = Path(directory.name)
         environment = mock.patch.dict(os.environ,{'TDD_TRIAL_RUN_ID':str(self.run_id),
-                                                  'TDD_REPLAY_DIR':directory.name})
+                                                  'TDD_FAILURE_DIR':directory.name})
         environment.start()
         self.addCleanup(environment.stop)
         self.view = expected_result()._replace(aid=self.aid,bvid='BV'+a2b(self.aid),staff=[],
@@ -55,17 +55,16 @@ class PostgresProfileObservationTest(unittest.TestCase):
     def apply_in_transaction(self,payload):
         with self.session.transaction():
             guard_write_transaction(self.session.connection,self.run_id)
-            return apply_observation('video-update',payload,self.session,uuid4())
+            return apply_observation('video-update',payload,self.session)
 
-    def test_saved_old_status_replay_cannot_undo_newer_video_or_member(self):
-        batch = uuid4()
-        with mock.patch('db.replay._execute',side_effect=RuntimeError('injected offline')):
+    def test_delayed_old_status_cannot_undo_newer_video_or_member(self):
+        with mock.patch('db.ingest.run_transaction',side_effect=RuntimeError('injected offline')):
             with self.assertRaisesRegex(RuntimeError,'injected offline'):
-                observe('video-update',self.payload(100,code=-404),batch_id=batch)
+                observe('video-update',self.payload(100,code=-404))
         observe('video-update',self.payload(200,title='fresh'))
         before = self.session.execute('SELECT count(*) FROM tdd_video_log WHERE aid=%s',(self.aid,))[0][0]
         with self.assertLogs('task',level='WARNING'):
-            self.assertEqual(replay(self.directory/(str(batch)+'.json')),[])
+            self.assertEqual(observe('video-update',self.payload(100,code=-404)),[])
         video = DBOperation.query_video_via_aid(self.aid,self.session)
         self.assertEqual((video.code,video.title,video.added),(0,'fresh',1))
         self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_video_log WHERE aid=%s',(self.aid,))[0][0],before)
@@ -85,13 +84,13 @@ class PostgresProfileObservationTest(unittest.TestCase):
                 with session.transaction():
                     guard_write_transaction(connection,self.run_id)
                     pid_queue.put(connection.info.backend_pid)
-                    return apply_observation('video-update',second,session,uuid4())
+                    return apply_observation('video-update',second,session)
         with ThreadPoolExecutor(max_workers=1) as executor:
             with engine.connection() as connection:
                 session = Session(connection)
                 with session.transaction():
                     guard_write_transaction(connection,self.run_id)
-                    apply_observation('video-update',first,session,uuid4())
+                    apply_observation('video-update',first,session)
                     future = executor.submit(waiting_writer)
                     waiting_pid = pid_queue.get(timeout=5)
                     deadline = time.monotonic()+5
@@ -118,7 +117,7 @@ class PostgresProfileObservationTest(unittest.TestCase):
         self.concurrent(self.payload(100,title='old'),self.payload(200,title='fresh'))
         self.assertEqual(DBOperation.query_video_via_aid(self.aid,self.session).title,'fresh')
 
-    def test_profile_failure_rolls_back_first_watermark_before_older_replay(self):
+    def test_profile_failure_rolls_back_first_watermark_before_older_observation(self):
         with mock.patch('task.task.append_objects',side_effect=RuntimeError('injected log failure')):
             with self.assertRaisesRegex(RuntimeError,'injected log failure'):
                 self.apply_in_transaction(self.payload(300,title='rolled back'))

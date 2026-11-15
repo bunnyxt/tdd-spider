@@ -51,8 +51,7 @@ class MemberTotalStatWriterTest(unittest.TestCase):
                 self.assertEqual(write_member_stats(session,iter(records(count)),LOG),count)
                 self.assertEqual(len(session.committed),count)
                 self.assertEqual([len(batch) for batch in session.batches], [1000]*(count//1000) + ([count%1000] if count%1000 else []))
-                ids = [call.kwargs['batch_id'] for call in writer.call_args_list]
-                self.assertEqual(len(ids),len(set(ids)))
+                self.assertTrue(all(not call.kwargs for call in writer.call_args_list))
                 if count:
                     self.assertEqual(session.committed[0].view,2147483648)
 
@@ -64,7 +63,7 @@ class MemberTotalStatWriterTest(unittest.TestCase):
             self.assertEqual(len(session.committed),1000)
             self.assertIn('confirmed_committed_rows=1000',logs.output[0])
             self.assertIn('failed_batch_rows=1',logs.output[0])
-            self.assertIn('batch_id=',logs.output[0])
+            self.assertIn('reconcile before retrying',logs.output[0])
 
     def test_invalid_batch_size_fails_before_opening_transaction(self):
         for size in (0,-1,True,1.5):

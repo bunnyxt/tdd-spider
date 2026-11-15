@@ -1,6 +1,5 @@
 import time
 from queue import Empty
-from uuid import uuid4
 from .Job import Job
 from task import commit_video_records_batch
 
@@ -22,13 +21,13 @@ class BatchInsertVideoRecordJob(Job):
     def _flush(self, batch):
         if not batch:
             return
-        start, batch_id = time.perf_counter(), uuid4()
+        start = time.perf_counter()
         try:
-            commit_video_records_batch(batch,batch_id=batch_id)
+            commit_video_records_batch(batch)
         except Exception as error:
             self.stat.condition['batch_insert_fail'] += len(batch)
-            self.logger.error('Video batch unresolved: batch_id=%s rows=%d error=%s. '
-                              'Keep replay input and resolve its receipt before retrying.',batch_id,len(batch),_short(error))
+            self.logger.error('Video batch unconfirmed: rows=%d error=%s. '
+                              'Check the failure log and reconcile before retrying.',len(batch),_short(error))
         else:
             self.stat.condition['batch_insert'] += 1
             self.stat.condition['persisted'] += len(batch)

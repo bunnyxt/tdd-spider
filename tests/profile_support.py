@@ -3,7 +3,6 @@ from contextlib import contextmanager
 from datetime import datetime
 import sqlite3
 from unittest import mock
-from uuid import uuid4
 
 from db import TddVideo,TddMember,TddVideoStaff,TddVideoLog,TddMemberLog
 from db.basic import Result,ResultRow
@@ -49,7 +48,7 @@ class ProfileSession:
         self.db.commit()
         return obj
 
-    def append(self,session,objects,batch_id=None):
+    def append(self,session,objects):
         for obj in objects:
             fields = [field for field in obj.fields if field != 'id']
             row = self.execute('INSERT INTO '+obj.table+' ('+','.join('"'+f+'"' for f in fields)+') VALUES ('+
@@ -59,4 +58,4 @@ class ProfileSession:
 
     def observe(self,operation,payload,**kwargs):
         with self.transaction(), mock.patch('task.task.append_objects',side_effect=self.append):
-            return apply_observation(operation,payload,self,uuid4())
+            return apply_observation(operation,payload,self)

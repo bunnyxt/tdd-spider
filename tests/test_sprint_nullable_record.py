@@ -3,7 +3,6 @@ from queue import Queue
 from types import SimpleNamespace
 import unittest
 from unittest import mock
-from uuid import uuid4
 
 from db import TddSprintVideoRecord
 from job import AddSprintVideoRecordJob
@@ -24,7 +23,7 @@ class SprintNullableRecordTest(unittest.TestCase):
                                      favorite=None,coin=None,share=None,like=None)
         session = mock.Mock()
         with mock.patch('task.task.append_objects') as append:
-            self.assertIs(apply_observation('sprint-observe',{'record':record},session,uuid4()),record)
+            self.assertIs(apply_observation('sprint-observe',{'record':record},session),record)
         append.assert_called_once()
         self.assertIsNone(append.call_args.args[1][0].view)
         session.execute.assert_not_called()

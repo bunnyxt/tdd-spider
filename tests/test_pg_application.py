@@ -1,7 +1,7 @@
-"""Opt-in PostgreSQL application replay against a disposable database clone.
+"""Opt-in PostgreSQL application writes against a disposable database clone.
 
 Set TDD_PG_INTEGRATION=1 with PG* connection settings. These tests append
-synthetic observations and intentionally leave their receipts for inspection.
+synthetic observations and intentionally leave their manifests for inspection.
 They never contact an HTTP endpoint.
 """
 import json
@@ -17,7 +17,7 @@ from uuid import uuid4
 
 from core import MemberFollowerRecordNew,RecordNew
 from db import DBOperation,Session,TddVideo,TddMember,TddVideoStaff,TddVideoRecordAbnormalChange
-from db.replay import replay
+from db.observation import observe
 from db.values import timestamp
 from job import FetchMemberFollowerRecordJob,BatchInsertMemberFollowerRecordJob
 from service import CodeError,MemberCard,VideoView,VideoViewOwner,VideoViewStaffItem,VideoViewStat,VideoTags
@@ -40,7 +40,7 @@ class PostgresApplicationTest(unittest.TestCase):
         self.addCleanup(self.session.close)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.environment = mock.patch.dict(os.environ,{'TDD_TRIAL_RUN_ID':str(self.run_id),'TDD_REPLAY_DIR':self.directory.name})
+        self.environment = mock.patch.dict(os.environ,{'TDD_TRIAL_RUN_ID':str(self.run_id),'TDD_FAILURE_DIR':self.directory.name})
         self.environment.start()
         self.addCleanup(self.environment.stop)
         self.clock = mock.patch('task.task.get_ts_s',return_value=ADDED)
@@ -86,7 +86,10 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual(DBOperation.query_member_via_mid(self.mid,self.session).last_video_aid,self.aid)
         pending = list(Path(self.directory.name).glob('*.json'))
         self.assertEqual(len(pending),1)
-        replay(pending[0])
+        # The injected log failure proved rollback; retry the original business
+        # operation explicitly. The failure diagnostic is retained for review.
+        update_video(self.aid,self.service,self.session)
+        self.assertTrue(pending[0].exists())
         current = DBOperation.query_video_via_aid(self.aid,self.session)
         self.assertEqual((current.title,current.state),('changed',-4))
         self.assertEqual(DBOperation.query_video_staff_via_aid(self.aid,self.session),[])
@@ -131,16 +134,13 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual(DBOperation.query_member_via_mid(self.mid,self.session).sign,'')
         self.expected_manifest({'tdd_member_log':2})
 
-    def test_same_second_independent_observations_receipt_replay_and_bigint_total(self):
+    def test_same_second_independent_observations_and_bigint_total(self):
         self.service.get_video_view.return_value = self.view(view=2147483647,staff=False)
         add_video(self.aid,self.service,self.session)
         self.service.get_video_view.return_value = self.view(aid=self.aid+1,view=2147483647,staff=False)
         add_video(self.aid+1,self.service,self.session)
         record = RecordNew(ADDED,self.aid,a2b(self.aid),2147483647,1,2,3,4,5,6)
-        batch = uuid4()
-        first = commit_video_records_batch([record],batch_id=batch)
-        replayed = commit_video_records_batch([record],batch_id=batch)
-        self.assertEqual(first[0].id,replayed[0].id)
+        first = commit_video_records_batch([record])
         independent = commit_video_records_batch([record])
         self.assertNotEqual(first[0].id,independent[0].id)
         self.assertEqual(self.session.execute('SELECT id FROM tdd_video_record_latest WHERE aid=%s',(self.aid,))[0][0],independent[0].id)
@@ -221,7 +221,7 @@ class PostgresApplicationTest(unittest.TestCase):
     def test_sprint_million_status_and_daily_legacy_windows_and_sentinels(self):
         import datetime
         from db import TddSprintVideoRecord
-        from db.replay import observe
+        from db.observation import observe
         from job import AddSprintVideoRecordJob
         from test_remaining_script_run_records import _load
         cst = datetime.timezone(datetime.timedelta(hours=8))
@@ -294,19 +294,17 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual(list(Path(self.directory.name).glob('*.json')),[])
         self.expected_manifest({'tdd_video_record':4})
 
-    def test_aggregate_thousand_row_commit_survives_next_batch_failure_and_replay(self):
-        import importlib
-        replay_module = importlib.import_module('db.replay')
-        execute = replay_module._execute
+    def test_aggregate_thousand_row_commit_survives_failure_then_manual_retry(self):
+        from db.ingest import run_transaction
         calls = []
-        def fail_second(envelope,factory):
-            calls.append(envelope['batch_id'])
+        def fail_second(factory,callback,*,run_id):
+            calls.append(run_id)
             if len(calls) == 2:
                 raise RuntimeError('injected second aggregate batch failure')
-            return execute(envelope,factory)
+            return run_transaction(factory,callback,run_id=run_id)
         rows = [dict(added=ADDED,mid=self.mid+i,video_count=1,view=2147483648,
                      danmaku=0,reply=0,favorite=0,coin=0,share=0,like=0) for i in range(1001)]
-        with mock.patch('db.replay._execute',side_effect=fail_second), \
+        with mock.patch('db.ingest.run_transaction',side_effect=fail_second), \
              self.assertLogs(LOG,level='CRITICAL'), self.assertRaisesRegex(RuntimeError,'second aggregate'):
             write_member_stats(self.session,rows,LOG)
         mids = [row['mid'] for row in rows]
@@ -314,7 +312,11 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_member_total_stat_record_latest WHERE mid=ANY(%s)',(mids,))[0][0],1000)
         pending = list(Path(self.directory.name).glob('*.json'))
         self.assertEqual(len(pending),1)
-        replay(pending[0])
+        self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_member_total_stat_record WHERE mid=%s',(rows[-1]['mid'],))[0][0],0)
+        # The injected second failure occurred before its transaction started.
+        # Submit just that verified-missing row; no generic replay is involved.
+        self.assertEqual(write_member_stats(self.session,rows[-1:],LOG),1)
+        self.assertTrue(pending[0].exists())
         self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_member_total_stat_record WHERE mid=ANY(%s)',(mids,))[0][0],1001)
         self.expected_manifest({'tdd_member_total_stat_record':1001})
 
@@ -324,8 +326,8 @@ class PostgresApplicationTest(unittest.TestCase):
             mids.put(mid)
         service = mock.Mock()
         service.get_member_relation.side_effect = lambda params: SimpleNamespace(follower=params['vmid']%1000)
-        fetch = FetchMemberFollowerRecordJob('replay-fetch',mids,records,service)
-        writer = BatchInsertMemberFollowerRecordJob('replay-writer',records,batch_size=2)
+        fetch = FetchMemberFollowerRecordJob('follower-fetch',mids,records,service)
+        writer = BatchInsertMemberFollowerRecordJob('follower-writer',records,batch_size=2)
         self.addCleanup(writer.cleanup)
         fetch.process()
         records.put(None)

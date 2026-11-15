@@ -20,7 +20,7 @@ class DBOperation:
             if session._depth:
                 append_objects(session, [obj])
             else:
-                from .replay import observe
+                from .observation import observe
                 persisted = observe('append', {'objects':[obj]})
                 obj.id = persisted[0].id
         return obj

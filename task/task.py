@@ -1,14 +1,13 @@
 """Fetch observations outside transactions, then persist each business change together."""
 import logging
 import time
-from uuid import uuid5
 
 from service import Service, ServiceError, CodeError
 from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, \
     TddMemberFollowerRecord, TddMemberLog, TddSprintVideoRecord
 from db.write import append_objects
 from db.values import clean_text
-from db.replay import observe
+from db.observation import observe
 from util import get_ts_s, a2b, same_pic_url
 from core import RecordNew, MemberFollowerRecordNew
 from .error import AlreadyExistError, NotExistError
@@ -41,18 +40,18 @@ def add_video_record_via_video_view(aid, service, out_stat=None):
     return record
 
 
-def _commit_objects(objects, out_stat=None, batch_id=None):
+def _commit_objects(objects, out_stat=None):
     start = time.perf_counter()
-    persisted = observe('append', {'objects':objects}, batch_id=batch_id)
+    persisted = observe('append', {'objects':objects})
     if out_stat is not None:
         out_stat['db_ms'] = int((time.perf_counter() - start) * 1000)
     return persisted
 
 
-def commit_video_records_batch(records, out_stat=None, batch_id=None):
+def commit_video_records_batch(records, out_stat=None):
     return _commit_objects([TddVideoRecord(added=r.added, aid=r.aid,
                            **{field:getattr(r,field) for field in STAT_FIELDS}) for r in records],
-                           out_stat, batch_id)
+                           out_stat)
 
 
 def commit_video_record_via_video_view(video_view, added):
@@ -153,7 +152,7 @@ def add_video(aid, service, session, test_exist=True, commit_video_record=True):
                                     added=added,commit_video_record=commit_video_record))
 
 
-def _apply_video_add(payload,session,batch_id):
+def _apply_video_add(payload,session):
     aid,video,view,added = (payload[field] for field in ('aid','video','view','added'))
     members = {member.mid:member for member in payload['members']}
     staff = view.staff or []
@@ -169,7 +168,7 @@ def _apply_video_add(payload,session,batch_id):
         except AlreadyExistError:
             logger.debug('Video staff relationship already exists: aid=%s, mid=%s',aid,item.mid)
     if commit_video_record:
-        append_objects(session,[TddVideoRecord(added=added,aid=aid,**_stats(view.stat))],uuid5(batch_id,'tdd_video_record'))
+        append_objects(session,[TddVideoRecord(added=added,aid=aid,**_stats(view.stat))])
     return video
 
 
@@ -208,7 +207,7 @@ def update_video(aid, service, session, out_context=None):
                                        tags=tags,members=list(members.values()),added=added))
 
 
-def _apply_video_update(payload,session,batch_id):
+def _apply_video_update(payload,session):
     aid,view,tags,added,code_error = (payload[field] for field in ('aid','view','tags','added','code_error'))
     members = {member.mid:member for member in payload['members']}
     logs = []
@@ -266,7 +265,7 @@ def _apply_video_update(payload,session,batch_id):
             if sorted(tags.split(';')) != sorted((clean_text(current.tags) or '').split(';')):
                 change('tags',tags)
     DBOperation.update(current,changed,session)
-    append_objects(session,logs,uuid5(batch_id,'tdd_video_log'))
+    append_objects(session,logs)
     return logs
 
 
@@ -295,7 +294,7 @@ def update_member(mid, service):
     return observe('member-update',dict(mid=mid,card=card,code=code,added=get_ts_s()))
 
 
-def _apply_member_update(payload,session,batch_id):
+def _apply_member_update(payload,session):
     mid,card,code,added = (payload[field] for field in ('mid','card','code','added'))
     logs = []
     current = DBOperation.query_member_via_mid(mid,session,lock=True)
@@ -317,7 +316,7 @@ def _apply_member_update(payload,session,batch_id):
                 continue
             change(field,value)
     DBOperation.update(current,changed,session)
-    append_objects(session,logs,uuid5(batch_id,'tdd_member_log'))
+    append_objects(session,logs)
     return logs
 
 
@@ -342,24 +341,24 @@ def add_member_follower_record(mid, service):
     return commit_member_follower_records_batch([record])[0]
 
 
-def commit_member_follower_records_batch(records, out_stat=None, batch_id=None):
-    return _commit_objects([TddMemberFollowerRecord(**record._asdict()) for record in records],out_stat,batch_id)
+def commit_member_follower_records_batch(records, out_stat=None):
+    return _commit_objects([TddMemberFollowerRecord(**record._asdict()) for record in records],out_stat)
 
 
 def get_video_tags_str(aid, service):
     return ''.join(clean_text(tag.tag_name) + ';' for tag in service.get_video_tags({'aid':aid}).tags)
 
 
-def apply_observation(operation,payload,session,batch_id):
+def apply_observation(operation,payload,session):
     if operation == 'video-add':
-        return _apply_video_add(payload,session,batch_id)
+        return _apply_video_add(payload,session)
     if operation == 'video-update':
-        return _apply_video_update(payload,session,batch_id)
+        return _apply_video_update(payload,session)
     if operation == 'member-update':
-        return _apply_member_update(payload,session,batch_id)
+        return _apply_member_update(payload,session)
     if operation == 'sprint-observe':
         record = payload['record']
-        append_objects(session,[record],uuid5(batch_id,'tdd_sprint_video_record'))
+        append_objects(session,[record])
         if record.view is not None and record.view >= 1000000:
             session.execute('UPDATE tdd_sprint_video SET status = %s WHERE aid = %s',('finished',record.aid))
         return record
@@ -384,4 +383,4 @@ def apply_observation(operation,payload,session,batch_id):
     if operation == 'member-ensure':
         _insert_prepared_members({member.mid:member for member in payload['members']},session)
         return []
-    raise ValueError('Unsupported replay operation')
+    raise ValueError('Unsupported observation operation')

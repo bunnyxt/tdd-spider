@@ -239,7 +239,7 @@ class VideoRecordAcquisitionJob(Job):
         if (self.writer_stat.condition['batch_insert_fail']
                 or self.writer_stat.condition['persisted'] != self.fetch_stat.condition['success']
                 or self.fetch_stat.condition['record_dropped_queue_full']):
-            raise RuntimeError('Unconfirmed fetched records; resolve durable replay input before analysis')
+            raise RuntimeError('Unconfirmed fetched records; check failure log and reconcile database writes before analysis')
 
         self.logger.info('Finish add need insert aid list!')
 

@@ -1,20 +1,8 @@
-"""Transactional append receipts and trial complete-key manifests.
-
-An observation receives a UUID *before* attempting a transaction. Reuse that
-UUID, payload and run ID after an uncertain commit; independent observations
-must receive new UUIDs, including observations collected in the same second.
-Input persistence and operator recovery live in :mod:`db.replay`.
-"""
-import hashlib
-import json
-import math
+"""Guarded SQL transactions and trial-only complete-key manifests."""
 import os
-import time
 from datetime import datetime, timezone
-from decimal import Decimal
-from uuid import UUID
+from uuid import UUID, uuid4
 
-import psycopg
 from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
@@ -37,38 +25,12 @@ _SPEC = {
 
 
 def _encode(value):
+    """Keep trial key timestamps compatible with migration cleanup tools."""
     if isinstance(value, datetime):
         if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError('Receipt datetimes must have a timezone')
+            raise ValueError('Manifest datetimes must have a timezone')
         return {'__tdd_type__': 'datetime', 'value': value.astimezone(timezone.utc).isoformat()}
-    if isinstance(value, (UUID, Decimal)):
-        return {'__tdd_type__': type(value).__name__, 'value': str(value)}
-    if isinstance(value, dict):
-        if '__tdd_type__' in value or any(not isinstance(k, str) for k in value):
-            raise ValueError('Receipt maps require string keys without __tdd_type__')
-        return {k: _encode(v) for k, v in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_encode(v) for v in value]
-    if value is None or isinstance(value, (str, bool, int)):
-        return value
-    if isinstance(value, float) and math.isfinite(value):
-        return value
-    raise TypeError('Unsupported receipt value type')
-
-
-def _decode(value):
-    if isinstance(value, dict):
-        if '__tdd_type__' in value:
-            constructor = {'datetime': datetime.fromisoformat, 'UUID': UUID, 'Decimal': Decimal}
-            return constructor[value['__tdd_type__']](value['value'])
-        return {k: _decode(v) for k, v in value.items()}
-    return [_decode(v) for v in value] if isinstance(value, list) else value
-
-
-def _digest(payload):
-    encoded = _encode(payload)
-    raw = json.dumps(encoded, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
-    return hashlib.sha256(raw.encode()).hexdigest()
+    return value
 
 
 def _require_transaction(conn):
@@ -82,7 +44,7 @@ def _check_run_control(conn, run_id):
     run_id = UUID(str(run_id)) if run_id is not None else None
     # Maintenance owns the exclusive session-level version of this lock. This
     # separate SELECT runs after it is released, giving READ COMMITTED a fresh
-    # control snapshot before even an existing receipt can be returned.
+    # control snapshot before business data is read or changed.
     conn.execute('SELECT pg_advisory_xact_lock_shared(141376009,169)').fetchone()
     control = conn.execute(
         'SELECT mode,active_run_id FROM tdd_ingest.control WHERE singleton').fetchone()
@@ -99,40 +61,11 @@ def guard_write_transaction(conn, run_id=None):
 
     Call first inside an explicit READ COMMITTED transaction, before reading
     business state used by the update. Recomputable derived updates need no
-    append receipt, but must obey the same maintenance lock and run control.
+    manifest, but must obey the same maintenance lock and run control.
     """
     _require_transaction(conn)
     _set_transaction_limits(conn)
     _check_run_control(conn, run_id)
-
-
-def _claim(conn, batch_id, kind, payload, run_id):
-    batch_id = UUID(str(batch_id))
-    run_id = UUID(str(run_id)) if run_id is not None else None
-    _check_run_control(conn, run_id)
-    digest = _digest(payload)
-    # A conflicting uncommitted insert blocks here. The following statement in
-    # READ COMMITTED sees its committed result; a rolled-back insert is ours.
-    inserted = conn.execute(
-        'INSERT INTO tdd_ingest.batch(batch_id,kind,payload_sha256,run_id) '
-        'VALUES(%s,%s,%s,%s) ON CONFLICT(batch_id) DO NOTHING RETURNING batch_id',
-        (batch_id, kind, digest, run_id)).fetchone()
-    if inserted:
-        return True, None
-    row = conn.execute(
-        'SELECT kind,payload_sha256,run_id,result FROM tdd_ingest.batch '
-        'WHERE batch_id=%s FOR UPDATE', (batch_id,)).fetchone()
-    if row is None or row[:3] != (kind, digest, run_id):
-        raise ValueError('Batch UUID was reused with different input or run ID')
-    if row[3] is None:
-        raise RuntimeError('An incomplete receipt cannot be replayed')
-    return False, _decode(row[3])
-
-
-def _finish(conn, batch_id, result):
-    # Wrap null results so SQL NULL remains an unmistakable unfinished receipt.
-    conn.execute('UPDATE tdd_ingest.batch SET result=%s,committed_at=clock_timestamp() '
-                 'WHERE batch_id=%s', (Jsonb({'value': _encode(result)}), UUID(str(batch_id))))
 
 
 def _set_transaction_limits(conn):
@@ -148,9 +81,10 @@ def _set_transaction_limits(conn):
                  "set_config('transaction_timeout',%s,true)", limits).fetchone()
 
 
-def append_rows(conn, table, columns, rows, *, batch_id, run_id=None):
+def append_rows(conn, table, columns, rows, *, run_id=None):
     """Append one immutable batch inside the caller's transaction.
 
+    The caller must acquire guard_write_transaction before business work.
     Return complete PK tuples in input order. Pipelined prepared INSERTs use
     default identity values and one RETURNING result set per input row, so the
     mapping does not depend on multi-row RETURNING order. Failed attempts can
@@ -165,10 +99,6 @@ def append_rows(conn, table, columns, rows, *, batch_id, run_id=None):
     if any(len(row) != len(columns) for row in rows):
         raise ValueError('Append row width does not match columns')
     _require_transaction(conn)
-    fresh, result = _claim(conn, batch_id, 'append:' + table,
-                           {'columns': columns, 'rows': rows}, run_id)
-    if not fresh:
-        return [tuple(key) for key in result['value']]
     keys = []
     query = sql.SQL('INSERT INTO public.{} ({}) VALUES ({}) RETURNING {}').format(
         sql.Identifier(table), sql.SQL(',').join(map(sql.Identifier, columns)),
@@ -188,6 +118,7 @@ def append_rows(conn, table, columns, rows, *, batch_id, run_id=None):
                 if index + 1 < len(chunk) and not cursor.nextset():
                     raise RuntimeError('An append batch has missing result sets')
     if run_id is not None and keys:
+        batch_id = uuid4()
         with conn.cursor() as cursor:
             cursor.executemany(
                 'INSERT INTO tdd_ingest.manifest(batch_id,ordinal,run_id,table_name,key) '
@@ -195,44 +126,20 @@ def append_rows(conn, table, columns, rows, *, batch_id, run_id=None):
                 [(UUID(str(batch_id)), i, UUID(str(run_id)), table,
                   Jsonb({field: _encode(value) for field, value in zip(pk, key)}))
                  for i, key in enumerate(keys)])
-    _finish(conn, batch_id, keys)
     return keys
 
 
-def run_batch(connection_factory, callback, *, batch_id, payload, run_id=None, max_attempts=3):
-    """Commit a whole observation once, checking its receipt after reconnecting.
+def run_transaction(connection_factory, callback, *, run_id=None):
+    """Run database-only work in one guarded transaction, without automatic retry.
 
-    callback(conn) must do database work only, must not commit/rollback, and
-    returns a receipt-serializable result. Fetch HTTP input before this call.
-    Persist UUID and payload before calling; on failure retain them for replay.
+    The caller fetches HTTP input beforehand. An exception, including an
+    uncertain commit acknowledgement, propagates for manual reconciliation.
     """
-    if max_attempts < 1:
-        raise ValueError('max_attempts must be positive')
-    # Validate before acquiring a connection, without exposing payload in errors.
-    _digest(payload)
-    for attempt in range(max_attempts):
-        try:
-            with connection_factory() as conn:
-                if conn.info.transaction_status != TransactionStatus.IDLE:
-                    raise RuntimeError('run_batch requires an idle connection')
-                with conn.transaction():
-                    _require_transaction(conn)
-                    _set_transaction_limits(conn)
-                    fresh, previous = _claim(conn, batch_id, 'observation', payload, run_id)
-                    if fresh:
-                        result = callback(conn)
-                        _require_transaction(conn)
-                        _finish(conn, batch_id, result)
-                    else:
-                        result = previous['value']
-            return result
-        except (psycopg.OperationalError, psycopg.InterfaceError,
-                psycopg.errors.TransactionTimeout) as error:
-            # Includes serialization/deadlock and lost commit acknowledgement.
-            # Reconnect with the SAME UUID; never split or blindly reinsert.
-            if attempt + 1 == max_attempts:
-                raise
-            if (error.sqlstate and error.sqlstate != '25P04'
-                    and error.sqlstate[:2] not in ('08', '40', '53', '55', '57', '58')):
-                raise
-            time.sleep(min(0.1 * 2 ** attempt, 1.0))
+    with connection_factory() as conn:
+        if conn.info.transaction_status != TransactionStatus.IDLE:
+            raise RuntimeError('run_transaction requires an idle connection')
+        with conn.transaction():
+            guard_write_transaction(conn, run_id)
+            result = callback(conn)
+            _require_transaction(conn)
+    return result

@@ -1,6 +1,5 @@
 import time
 from queue import Empty
-from uuid import uuid4
 from .Job import Job
 from task import commit_member_follower_records_batch
 
@@ -8,7 +7,7 @@ __all__ = ['BatchInsertMemberFollowerRecordJob']
 
 
 class BatchInsertMemberFollowerRecordJob(Job):
-    """Single follower writer using stable observation receipts for replay."""
+    """One follower writer; count only confirmed database batches."""
     def __init__(self, name, record_queue, batch_size=1000, poll_timeout_s=1.0):
         super().__init__(name)
         self.record_queue, self.batch_size = record_queue,batch_size
@@ -17,13 +16,13 @@ class BatchInsertMemberFollowerRecordJob(Job):
     def _flush(self, batch):
         if not batch:
             return
-        start, batch_id = time.perf_counter(),uuid4()
+        start = time.perf_counter()
         try:
-            commit_member_follower_records_batch(batch,batch_id=batch_id)
+            commit_member_follower_records_batch(batch)
         except Exception as error:
             self.stat.condition['batch_insert_fail'] += len(batch)
-            self.logger.error('Follower batch unresolved: batch_id=%s rows=%d error=%s. '
-                              'Keep replay input and resolve its receipt before retrying.',batch_id,len(batch),str(error)[:300])
+            self.logger.error('Follower batch unconfirmed: rows=%d error=%s. '
+                              'Check the failure log and reconcile before retrying.',len(batch),str(error)[:300])
         else:
             self.stat.condition['batch_insert'] += 1
             self.stat.condition['persisted'] += len(batch)
