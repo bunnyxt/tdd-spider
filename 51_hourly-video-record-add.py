@@ -1,5 +1,7 @@
 from db import Session, DBOperation, TddVideoRecordAbnormalChange
 from db.values import timestamp
+from db.ingest import guard_write_transaction
+from db.write import trial_run_id
 from threading import Thread
 from queue import Queue
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, \
@@ -674,6 +676,7 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
         self.time_task = time_task
         self.time_label = time_task[-5:]
         self.records = records
+        self.run_id = trial_run_id()
         self.metrics = {}  # activity counts, written into the run record by the caller
         self.logger = logging.getLogger('RecentActivityFreqUpdateRunner')
 
@@ -684,6 +687,7 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
             last_1d_ts = now_ts - 1 * 24 * 60 * 60
             last_7d_ts = now_ts - 7 * 24 * 60 * 60
             with session.transaction():
+                guard_write_transaction(session.connection, self.run_id)
                 session.execute('update tdd_video set recent = 0 where added < %s',
                                 (timestamp(last_7d_ts),))
                 session.execute('update tdd_video set recent = 1 where added >= %s AND added < %s',
@@ -706,13 +710,11 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
                                 '%Y-%m-%d %H:%M').replace(
                                     tzinfo=datetime.timezone(datetime.timedelta(hours=8))).timestamp())
 
-            current = {row['aid']: row['activity'] for row in session.execute(
-                'select aid, activity from tdd_video where activity != 0')}
             this_views = {r.aid: r.view for r in sorted(self.records, key=lambda r: r.added)
                           if r.view >= 0}  # -1 is '--' from the api
 
             # only videos in both scans get a new activity, and only changed ones are written
-            changes = defaultdict(list)  # new activity -> aids
+            desired = defaultdict(list)  # Pair/validate before opening the write transaction.
             paired = hot = active = 0
             with gzip.open(last_path, 'rt') as f:
                 if tuple(next(f).strip().split(',')) != SNAPSHOT_FIELDS:
@@ -735,10 +737,15 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
                     activity = 2 if growth >= hot_threshold else 1 if growth >= active_threshold else 0
                     hot += activity == 2
                     active += activity == 1
-                    if current.get(aid, 0) != activity:
-                        changes[activity].append(aid)
+                    desired[activity].append(aid)
 
             with session.transaction():
+                guard_write_transaction(session.connection, self.run_id)
+                current = {row['aid']: row['activity'] for row in session.execute(
+                    'select aid, activity from tdd_video where activity != 0')}
+                changes = defaultdict(list)  # new activity -> aids
+                for activity, aids in desired.items():
+                    changes[activity] = [aid for aid in aids if current.get(aid, 0) != activity]
                 for activity, aids in sorted(changes.items()):
                     for i in range(0, len(aids), 1000):
                         session.execute('update tdd_video set activity = %s where aid = ANY(%s)',
@@ -757,6 +764,7 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
         self.logger.info('Now start update freq field...')
         try:
             with session.transaction():
+                guard_write_transaction(session.connection, self.run_id)
                 session.execute('update tdd_video set freq = 0')
                 session.execute('update tdd_video set freq = 1 where activity = 1')
                 session.execute('update tdd_video set freq = 2 where activity = 2 OR recent = 1')
@@ -769,11 +777,13 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
         self.logger.info(
             'Now start updating recent, activity, freq fields of video...')
         session = self.session = Session()
-        self._update_recent(session)
-        if self.time_label == '04:00':
-            self._update_activity(session)
-        self._update_freq(session)
-        session.close()
+        try:
+            self._update_recent(session)
+            if self.time_label == '04:00':
+                self._update_activity(session)
+            self._update_freq(session)
+        finally:
+            session.close()
         self.logger.info(
             'Finish update recent, activity, freq fields of video!')
 

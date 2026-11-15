@@ -18,7 +18,7 @@ The database must already contain the compatible business tables, partitions
 and maintenance triggers. Install `db/ingest.sql` as the database owner before
 starting collectors. Grant the collector role `USAGE` on `tdd_ingest`,
 `SELECT` on `tdd_ingest.control`, `SELECT, INSERT, UPDATE` on
-`tdd_ingest.batch`, and `INSERT` on
+`tdd_ingest.batch` and `tdd_ingest.profile_observation`, and `INSERT` on
 `tdd_ingest.manifest`, alongside its business-table and identity-sequence
 permissions. Do not grant collectors `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE`
 on `tdd_ingest.control`. The application does not create or drop business tables.
@@ -63,6 +63,37 @@ committed observation returns its original result. A confirmed rollback can
 execute the saved input. Reusing a UUID with changed input is rejected. Do not
 replace a pending file with a newly fetched input.
 
+Mutable video and member profiles also record their most recent observed
+Unix second in `tdd_ingest.profile_observation`. A profile transaction locks
+the business row and advances this watermark atomically with profile fields,
+status, staff relationships and change logs. An older observation is confirmed
+as a no-op and logs a warning; it cannot undo a newer successful observation.
+Independent observations in the same second retain last-write-wins behavior.
+Video view/status time is captured before slower member/tag enrichment. The
+business row's `added` remains its original creation time. An ignored `-403`
+does not advance the watermark, and immutable statistics appends remain
+independent of profile ordering.
+
+When upgrading an existing collector database, rerun `db/ingest.sql` and grant
+the collector `SELECT, INSERT, UPDATE` on the new watermark table before
+starting this code. For an existing baseline, initialize each video's and
+member's watermark with the baseline's source cutoff second before accepting
+profile updates. During a baseline replacement, stop collectors and drain
+transactions, hold the exclusive maintenance lock, discard pending inputs for
+the retired run, then replace the profiles and their watermark entries in the
+same maintenance step. Seed `('video', aid, source_cutoff_second)` for every
+replaced video and `('member', mid, source_cutoff_second)` for every replaced
+member. Do not infer the cutoff from a business row's creation time or the
+later import completion time. The cutoff is an ordering fence for the
+installed baseline, not a claim that every source profile was fetched at that
+second. Do not replay pre-upgrade profile inputs whose ordering relative to
+that baseline is unknown.
+Keep watermark rows with their matching profiles when backing up or restoring
+a live deployment. Preserving watermarks from a different baseline can reject
+valid observations; clearing them while retaining pending old observations can
+allow stale state to return. Keep these watermarks when accepting a trial's
+profiles into formal mode; changing the run ID alone does not reset ordering.
+
 Set `TDD_TRIAL_RUN_ID` to the active run UUID when collecting a trial run. This
 additionally records the complete primary keys of the seven immutable append
 tables in `tdd_ingest.manifest`. Receipts also prevent duplicate retries during
@@ -81,14 +112,20 @@ The owner or a separate maintenance role configures the single row in
 | `trial` | Exactly `active_run_id`, which must be a non-NULL UUID. |
 | `formal` | SQL NULL only; `active_run_id` must also be NULL. |
 
-Each observation and append takes transaction-level shared advisory lock
+Each observation, append, and hourly `recent`/`activity`/`freq` write transaction
+takes transaction-level shared advisory lock
 `(141376009, 169)` before reading control, checking any receipt or performing
 its business callback. The maintenance connection must hold the matching
 session-level exclusive advisory lock for its entire maintenance operation,
 including control changes. The control read uses a separate READ COMMITTED
 statement after acquiring the lock, so it sees a completed maintenance change
-even if it waited for the lock. An old run cannot replay a receipt after a new
-run is activated or after the deployment enters formal mode.
+even if it waited for the lock. The shared lock remains held through commit or
+rollback. Each hourly derived phase checks control even if fetching produced
+no candidates, so an empty upstream result cannot bypass a stopped or obsolete
+run. Activity input files are checked before opening its write transaction;
+the relevant database state is read after the transaction's gate. An old run
+cannot replay a receipt after a new run is activated or after the deployment
+enters formal mode.
 
 This is an application ingest guard, not a prohibition on arbitrary direct SQL.
 Stop collector processes and scheduled starts, drain their transactions, and
@@ -122,7 +159,7 @@ with the same schema and writer permissions. They append synthetic fixtures
 and never call an HTTP endpoint:
 
 ```sh
-TDD_ALLOW_UNMANAGED_INGEST=1 TDD_PG_INTEGRATION=1 .venv/bin/python -m unittest discover -s tests -p test_pg_application.py
+TDD_ALLOW_UNMANAGED_INGEST=1 TDD_PG_INTEGRATION=1 .venv/bin/python -m unittest discover -s tests -p 'test_pg_*.py'
 ```
 
 The command above explicitly selects empty-control compatibility because these

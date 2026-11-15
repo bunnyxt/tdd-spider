@@ -16,6 +16,10 @@ class ProfileSession:
     def __init__(self):
         self.db = sqlite3.connect(':memory:')
         self.statements = []
+        self.db.execute("ATTACH DATABASE ':memory:' AS tdd_ingest")
+        self.db.execute('CREATE TABLE tdd_ingest.profile_observation '
+                        '(entity_kind TEXT NOT NULL,entity_id INTEGER NOT NULL,observed_at INTEGER NOT NULL,'
+                        'PRIMARY KEY(entity_kind,entity_id))')
         for model in (TddVideo,TddMember,TddVideoStaff,TddVideoLog,TddMemberLog):
             fields = ','.join('"'+field+'"'+(' INTEGER PRIMARY KEY' if field == 'id' else '') for field in model.fields)
             unique = ', UNIQUE(aid,mid)' if model is TddVideoStaff else ', UNIQUE(mid)' if model is TddMember else ''

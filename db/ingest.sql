@@ -1,6 +1,7 @@
 -- Install as the database owner before enabling collectors. Auxiliary objects
 -- do not alter business tables. Grant the collector role USAGE on this schema,
--- SELECT on control, SELECT/INSERT/UPDATE on batch, and INSERT on manifest.
+-- SELECT on control, SELECT/INSERT/UPDATE on batch and profile_observation,
+-- and INSERT on manifest.
 -- Collectors must not be able to change control or DELETE/TRUNCATE receipts.
 BEGIN;
 CREATE SCHEMA IF NOT EXISTS tdd_ingest;
@@ -20,6 +21,15 @@ CREATE TABLE IF NOT EXISTS tdd_ingest.batch (
     run_id uuid,
     result jsonb,
     committed_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+-- Mutable profiles have immutable creation times in their business tables.
+-- Keep the most recent observed second separately so delayed input replay
+-- cannot replace a newer code, profile field, or staff relationship.
+CREATE TABLE IF NOT EXISTS tdd_ingest.profile_observation (
+    entity_kind text NOT NULL CHECK (entity_kind IN ('video', 'member')),
+    entity_id bigint NOT NULL,
+    observed_at bigint NOT NULL,
+    PRIMARY KEY (entity_kind, entity_id)
 );
 CREATE TABLE IF NOT EXISTS tdd_ingest.manifest (
     batch_id uuid NOT NULL REFERENCES tdd_ingest.batch(batch_id),

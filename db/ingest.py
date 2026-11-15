@@ -73,13 +73,12 @@ def _digest(payload):
 
 def _require_transaction(conn):
     if conn.info.transaction_status != TransactionStatus.INTRANS:
-        raise RuntimeError('An explicit transaction is required for append receipts')
+        raise RuntimeError('An explicit transaction is required for ingest writes')
     if conn.execute('SHOW transaction_isolation').fetchone()[0] != 'read committed':
         raise RuntimeError('Ingest requires READ COMMITTED isolation')
 
 
-def _claim(conn, batch_id, kind, payload, run_id):
-    batch_id = UUID(str(batch_id))
+def _check_run_control(conn, run_id):
     run_id = UUID(str(run_id)) if run_id is not None else None
     # Maintenance owns the exclusive session-level version of this lock. This
     # separate SELECT runs after it is released, giving READ COMMITTED a fresh
@@ -93,6 +92,24 @@ def _claim(conn, batch_id, kind, payload, run_id):
     elif not ((control[0] == 'trial' and run_id == control[1] and run_id is not None)
               or (control[0] == 'formal' and run_id is None)):
         raise RuntimeError('Ingest control does not permit this run')
+
+
+def guard_write_transaction(conn, run_id=None):
+    """Gate derived writes and hold off maintenance until the caller commits.
+
+    Call first inside an explicit READ COMMITTED transaction, before reading
+    business state used by the update. Recomputable derived updates need no
+    append receipt, but must obey the same maintenance lock and run control.
+    """
+    _require_transaction(conn)
+    _set_transaction_limits(conn)
+    _check_run_control(conn, run_id)
+
+
+def _claim(conn, batch_id, kind, payload, run_id):
+    batch_id = UUID(str(batch_id))
+    run_id = UUID(str(run_id)) if run_id is not None else None
+    _check_run_control(conn, run_id)
     digest = _digest(payload)
     # A conflicting uncommitted insert blocks here. The following statement in
     # READ COMMITTED sees its committed result; a rolled-back insert is ours.

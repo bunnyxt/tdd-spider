@@ -103,9 +103,33 @@ def _insert_prepared_members(prepared, session):
         # The unique key handles another concurrent observation of the same profile.
         fields = tuple(field for field in member.fields if field not in ('id','last_video_aid'))
         from db.values import database_value
-        session.execute('INSERT INTO tdd_member (' + ','.join('"'+f+'"' for f in fields) + ') VALUES (' +
-                        ','.join(['%s']*len(fields)) + ') ON CONFLICT (mid) DO NOTHING',
-                        tuple(database_value(field,getattr(member,field)) for field in fields))
+        inserted = session.execute('INSERT INTO tdd_member (' + ','.join('"'+f+'"' for f in fields) + ') VALUES (' +
+                        ','.join(['%s']*len(fields)) + ') ON CONFLICT (mid) DO NOTHING RETURNING mid',
+                        tuple(database_value(field,getattr(member,field)) for field in fields)).first()
+        if inserted is not None:
+            _claim_profile_observation('member',mid,member.added,session)
+
+
+def _claim_profile_observation(kind, entity_id, observed_at, session):
+    """Advance a profile watermark inside its row-locked business transaction.
+
+    The UPSERT also serializes the first watermark for an existing migrated
+    profile. Equal-second inputs retain the usual last-write-wins behavior.
+    A failed profile/log transaction rolls its watermark back too.
+    """
+    if kind not in ('video','member') or type(observed_at) is not int:
+        raise ValueError('A profile observation requires a kind and integer Unix seconds')
+    accepted = session.execute(
+        'INSERT INTO tdd_ingest.profile_observation AS previous '
+        '(entity_kind,entity_id,observed_at) VALUES (%s,%s,%s) '
+        'ON CONFLICT (entity_kind,entity_id) DO UPDATE SET observed_at = EXCLUDED.observed_at '
+        'WHERE previous.observed_at <= EXCLUDED.observed_at RETURNING observed_at',
+        (kind,entity_id,observed_at)).first()
+    if accepted is None:
+        logger.warning('Skip stale profile observation: kind=%s, entity_id=%s, observed_at=%s',
+                       kind,entity_id,observed_at)
+        return False
+    return True
 
 
 def add_video(aid, service, session, test_exist=True, commit_video_record=True):
@@ -138,6 +162,7 @@ def _apply_video_add(payload,session,batch_id):
         raise AlreadyExistError(table='tdd_video',params={'aid':aid})
     _insert_prepared_members(members,session)
     DBOperation.add(video,session)
+    _claim_profile_observation('video',aid,added,session)
     for item in staff:
         try:
             commit_staff(added,aid,item.mid,item.title,session)
@@ -167,6 +192,9 @@ def update_video(aid, service, session, out_context=None):
             out_context['video_view'] = view
     except CodeError as error:
         code_error = error
+    # Metadata enrichment may take much longer than the view request. Order
+    # profile changes by when the view/status was observed, before enrichment.
+    added = get_ts_s()
     tags = None
     members = {}
     if view is not None:
@@ -177,7 +205,7 @@ def update_video(aid, service, session, out_context=None):
         except ServiceError as error:
             logger.warning('Skip tags update (view changes kept). aid: %s, error: %s',aid,error)
     return observe('video-update',dict(aid=aid,view=view,code_error=None if code_error is None else code_error.code,
-                                       tags=tags,members=list(members.values()),added=get_ts_s()))
+                                       tags=tags,members=list(members.values()),added=added))
 
 
 def _apply_video_update(payload,session,batch_id):
@@ -187,6 +215,10 @@ def _apply_video_update(payload,session,batch_id):
     current = DBOperation.query_video_via_aid(aid,session,lock=True)
     if current is None:
         raise NotExistError(table='tdd_video',params={'aid':aid})
+    if code_error == -403:
+        return []
+    if not _claim_profile_observation('video',aid,added,session):
+        return []
     changed = []
     def change(field,new):
         if _change(current,field,new,logs,added,{'aid':aid},TddVideoLog):
@@ -269,6 +301,8 @@ def _apply_member_update(payload,session,batch_id):
     current = DBOperation.query_member_via_mid(mid,session,lock=True)
     if current is None:
         raise NotExistError(table='tdd_member',params={'mid':mid})
+    if not _claim_profile_observation('member',mid,added,session):
+        return []
     changed = []
     def change(field,new):
         if _change(current,field,new,logs,added,{'mid':mid},TddMemberLog):
@@ -344,7 +378,9 @@ def apply_observation(operation,payload,session,batch_id):
                                  tuple(database_value(c,payload[c]) for c in columns))
         return dict(result.first())
     if operation == 'member-add':
-        return DBOperation.add(payload['member'],session)
+        member = DBOperation.add(payload['member'],session)
+        _claim_profile_observation('member',member.mid,member.added,session)
+        return member
     if operation == 'member-ensure':
         _insert_prepared_members({member.mid:member for member in payload['members']},session)
         return []

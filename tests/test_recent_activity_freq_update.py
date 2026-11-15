@@ -7,6 +7,9 @@ import threading
 import unittest
 from contextlib import contextmanager
 from unittest import mock
+from uuid import uuid4
+
+from psycopg.pq import TransactionStatus
 
 from core import RecordNew
 from runrecord._sqlite import sqlite3
@@ -21,11 +24,23 @@ def _rec(aid, view):
 
 
 class FakeSession:
-    def __init__(self, current=None, fail=False):
+    def __init__(self, current=None, fail=False, control=('formal', None)):
         self.current, self.fail = current or {}, fail  # current: aid -> non-zero activity
         self.statements, self.commits, self.rollbacks = [], 0, 0
+        self.control = control
+        self.events = []
+        self.connection = mock.Mock()
+        self.connection.info.transaction_status = TransactionStatus.IDLE
+        self.connection.execute.side_effect = self._guard_execute
+
+    def _guard_execute(self, sql, params=None):
+        self.events.append(sql)
+        row = (self.control if sql.startswith('SELECT mode,active_run_id')
+               else ('read committed',) if sql == 'SHOW transaction_isolation' else (None,))
+        return mock.Mock(fetchone=mock.Mock(return_value=row))
 
     def execute(self, sql, params=None):
+        self.events.append(sql)
         if self.fail and sql.startswith('update'):
             raise RuntimeError('db down')
         self.statements.append((sql, params))
@@ -33,6 +48,7 @@ class FakeSession:
 
     @contextmanager
     def transaction(self):
+        self.connection.info.transaction_status = TransactionStatus.INTRANS
         try:
             yield self
         except Exception:
@@ -40,6 +56,8 @@ class FakeSession:
             raise
         else:
             self.commit()
+        finally:
+            self.connection.info.transaction_status = TransactionStatus.IDLE
 
     def commit(self):
         self.commits += 1
@@ -54,6 +72,10 @@ class FakeSession:
 @unittest.skipUnless(_DEPS, 'db dependencies unavailable')
 class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
     def setUp(self):
+        environment = mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': '',
+                                                   'TDD_ALLOW_UNMANAGED_INGEST': ''})
+        environment.start()
+        self.addCleanup(environment.stop)
         cwd = os.getcwd()
         os.chdir(tempfile.mkdtemp())  # data/0400 is relative to cwd, as under cron
         self.addCleanup(os.chdir, cwd)
@@ -76,6 +98,58 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
         self.assertEqual(updates, [(1, [2, 3]), (2, [4])])
         self.assertEqual(runner.metrics,
                          {'activity_paired': 5, 'activity_hot': 1, 'activity_active': 2, 'activity_changed': 3})
+
+    def test_each_derived_transaction_rejects_stopped_and_obsolete_runs(self):
+        self._last_week([(1, 0)])
+        for method in ('_update_recent', '_update_activity', '_update_freq'):
+            for control in (('stopped', None), ('trial', uuid4())):
+                for records in ([], [_rec(1, 9000)]):
+                    with self.subTest(method=method, control=control, empty=not records), \
+                            mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID':
+                                str(uuid4()) if control[0] == 'trial' else ''}):
+                        session = FakeSession(control=control)
+                        runner = s51.RecentActivityFreqUpdateRunner('2026-09-13 04:00', records)
+                        with self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
+                            with self.assertRaisesRegex(RuntimeError, 'does not permit'):
+                                getattr(runner, method)(session)
+                        self.assertEqual(session.statements, [])
+                        self.assertEqual((session.commits, session.rollbacks), (0, 1))
+
+    def test_formal_and_matching_trial_lock_before_business_reads_or_writes(self):
+        self._last_week([(1, 0)])
+        run_id = uuid4()
+        for control, configured_run in ((('formal', None), ''), (('trial', run_id), str(run_id))):
+            with self.subTest(control=control), mock.patch.dict(
+                    os.environ, {'TDD_TRIAL_RUN_ID': configured_run}):
+                runner = s51.RecentActivityFreqUpdateRunner('2026-09-13 04:00', [_rec(1, 9000)])
+                session = FakeSession(control=control)
+                for method in ('_update_recent', '_update_activity', '_update_freq'):
+                    session.events.clear()
+                    getattr(runner, method)(session)
+                    lock = session.events.index('SELECT pg_advisory_xact_lock_shared(141376009,169)')
+                    check = session.events.index('SELECT mode,active_run_id FROM tdd_ingest.control WHERE singleton')
+                    business = next(i for i, sql in enumerate(session.events)
+                                    if sql.startswith(('select aid', 'update tdd_video')))
+                    self.assertLess(lock, check)
+                    self.assertLess(check, business)
+                self.assertEqual((session.commits, session.rollbacks), (3, 0))
+
+    def test_run_control_is_rechecked_after_an_earlier_phase_commits(self):
+        session = FakeSession()
+        def stop_after_commit():
+            session.commits += 1
+            session.control = ('stopped', None)
+        session.commit = stop_after_commit
+        runner = s51.RecentActivityFreqUpdateRunner('2026-09-13 05:00', [])
+        with mock.patch.object(s51, 'Session', return_value=session), \
+                mock.patch.object(session, 'close') as close, \
+                self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
+            with self.assertRaisesRegex(RuntimeError, 'does not permit'):
+                runner.process()
+        self.assertEqual(len(session.statements), 3)  # recent committed; freq was never written.
+        self.assertTrue(all('set recent' in sql for sql, _ in session.statements))
+        self.assertEqual((session.commits, session.rollbacks), (1, 1))
+        close.assert_called_once()
 
     def test_missing_snapshot_fails(self):
         session = FakeSession(current={1: 2})
