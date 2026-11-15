@@ -17,9 +17,11 @@ their existing worker configuration in `service/endpoints.json`.
 The database must already contain the compatible business tables, partitions
 and maintenance triggers. Install `db/ingest.sql` as the database owner before
 starting collectors. Grant the collector role `USAGE` on `tdd_ingest`,
-`SELECT, INSERT, UPDATE` on `tdd_ingest.batch`, and `INSERT` on
+`SELECT` on `tdd_ingest.control`, `SELECT, INSERT, UPDATE` on
+`tdd_ingest.batch`, and `INSERT` on
 `tdd_ingest.manifest`, alongside its business-table and identity-sequence
-permissions. The application does not create or drop business tables.
+permissions. Do not grant collectors `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE`
+on `tdd_ingest.control`. The application does not create or drop business tables.
 
 Application timestamps remain integer Unix seconds. PostgreSQL stores `added`
 and diagnostic snapshot timestamps as whole-second `timestamptz`. Only actual
@@ -55,15 +57,50 @@ interrupted commit, keep the file and replay that exact observation:
 .venv/bin/python -m db.replay data/replay/<observation-uuid>.json
 ```
 
-Replay checks the receipt under the original UUID and run identifier before
-writing. An already committed observation returns its original result. A
-confirmed rollback can execute the saved input. Reusing a UUID with changed
-input is rejected. Do not replace a pending file with a newly fetched input.
+Replay first checks deployment control, then checks the receipt under the
+original UUID and run identifier before writing. An accepted run's already
+committed observation returns its original result. A confirmed rollback can
+execute the saved input. Reusing a UUID with changed input is rejected. Do not
+replace a pending file with a newly fetched input.
 
-Set `TDD_TRIAL_RUN_ID` to a UUID when collecting a trial run. This additionally
-records the complete primary keys of the seven immutable append tables in
-`tdd_ingest.manifest`. Without it, receipts still prevent duplicate retries.
-Sprint daily summaries and details remain separately committed observations.
+Set `TDD_TRIAL_RUN_ID` to the active run UUID when collecting a trial run. This
+additionally records the complete primary keys of the seven immutable append
+tables in `tdd_ingest.manifest`. Receipts also prevent duplicate retries during
+formal collection, which must not set a trial run ID. Sprint daily summaries
+and details remain separately committed observations.
+
+## Deployment and run control
+
+The owner or a separate maintenance role configures the single row in
+`tdd_ingest.control`; collectors can only read it. `singleton` must be true,
+`deployment_id` identifies the database deployment, and the accepted modes are:
+
+| Mode | Accepted observation run ID |
+| --- | --- |
+| `stopped` | None: all observations and receipt replays are rejected. |
+| `trial` | Exactly `active_run_id`, which must be a non-NULL UUID. |
+| `formal` | SQL NULL only; `active_run_id` must also be NULL. |
+
+Each observation and append takes transaction-level shared advisory lock
+`(141376009, 169)` before reading control, checking any receipt or performing
+its business callback. The maintenance connection must hold the matching
+session-level exclusive advisory lock for its entire maintenance operation,
+including control changes. The control read uses a separate READ COMMITTED
+statement after acquiring the lock, so it sees a completed maintenance change
+even if it waited for the lock. An old run cannot replay a receipt after a new
+run is activated or after the deployment enters formal mode.
+
+This is an application ingest guard, not a prohibition on arbitrary direct SQL.
+Stop collector processes and scheduled starts, drain their transactions, and
+only then maintain or replace data. Releasing the maintenance lock does not
+restart collectors automatically.
+
+Installation leaves control empty and ingestion fails closed. A missing
+control table also fails normally as a database error. Only a disposable,
+one-off verification database may opt into empty-control compatibility with
+`TDD_ALLOW_UNMANAGED_INGEST=1`; this does not ignore a missing table or override
+any existing control row, including `stopped`. Do not use this compatibility
+setting for a managed trial or formal deployment.
 
 Database receipts and trial manifests are currently retained. The application
 does not delete them when a pending input is cleared. Owner-managed retention,
@@ -85,8 +122,13 @@ with the same schema and writer permissions. They append synthetic fixtures
 and never call an HTTP endpoint:
 
 ```sh
-TDD_PG_INTEGRATION=1 .venv/bin/python -m unittest discover -s tests -p test_pg_application.py
+TDD_ALLOW_UNMANAGED_INGEST=1 TDD_PG_INTEGRATION=1 .venv/bin/python -m unittest discover -s tests -p test_pg_application.py
 ```
+
+The command above explicitly selects empty-control compatibility because these
+legacy fixtures use a new trial UUID per test. Run it only against a disposable
+database with `db/ingest.sql` installed and no control row. Tests of managed
+deployments must configure control under the maintenance lock instead.
 
 `TDD_PG_EVIDENCE_FILE` can select a JSON-lines file containing the expected
 trial manifest counts for an independent observer. The collector writer does

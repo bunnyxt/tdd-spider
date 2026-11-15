@@ -1,9 +1,18 @@
 -- Install as the database owner before enabling collectors. Auxiliary objects
 -- do not alter business tables. Grant the collector role USAGE on this schema,
--- SELECT/INSERT/UPDATE on batch, and INSERT on manifest (no DELETE or TRUNCATE).
+-- SELECT on control, SELECT/INSERT/UPDATE on batch, and INSERT on manifest.
+-- Collectors must not be able to change control or DELETE/TRUNCATE receipts.
 BEGIN;
 CREATE SCHEMA IF NOT EXISTS tdd_ingest;
 REVOKE ALL ON SCHEMA tdd_ingest FROM PUBLIC;
+CREATE TABLE IF NOT EXISTS tdd_ingest.control (
+    singleton boolean PRIMARY KEY CHECK (singleton IS TRUE),
+    deployment_id uuid NOT NULL,
+    mode text NOT NULL CHECK (mode IN ('stopped', 'trial', 'formal')),
+    active_run_id uuid,
+    CHECK ((mode = 'trial') = (active_run_id IS NOT NULL))
+);
+-- Intentionally no initial row: an unconfigured deployment fails closed.
 CREATE TABLE IF NOT EXISTS tdd_ingest.batch (
     batch_id uuid PRIMARY KEY,
     kind text NOT NULL,

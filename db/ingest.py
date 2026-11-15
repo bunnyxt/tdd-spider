@@ -81,6 +81,18 @@ def _require_transaction(conn):
 def _claim(conn, batch_id, kind, payload, run_id):
     batch_id = UUID(str(batch_id))
     run_id = UUID(str(run_id)) if run_id is not None else None
+    # Maintenance owns the exclusive session-level version of this lock. This
+    # separate SELECT runs after it is released, giving READ COMMITTED a fresh
+    # control snapshot before even an existing receipt can be returned.
+    conn.execute('SELECT pg_advisory_xact_lock_shared(141376009,169)').fetchone()
+    control = conn.execute(
+        'SELECT mode,active_run_id FROM tdd_ingest.control WHERE singleton').fetchone()
+    if control is None:
+        if os.environ.get('TDD_ALLOW_UNMANAGED_INGEST') != '1':
+            raise RuntimeError('Ingest control is not configured')
+    elif not ((control[0] == 'trial' and run_id == control[1] and run_id is not None)
+              or (control[0] == 'formal' and run_id is None)):
+        raise RuntimeError('Ingest control does not permit this run')
     digest = _digest(payload)
     # A conflicting uncommitted insert blocks here. The following statement in
     # READ COMMITTED sees its committed result; a rolled-back insert is ours.
