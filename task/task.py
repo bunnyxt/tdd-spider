@@ -1,10 +1,10 @@
 """Fetch observations outside transactions, then persist each business change together."""
 import logging
 import time
-from uuid import uuid4, uuid5
+from uuid import uuid5
 
 from service import Service, ServiceError, CodeError
-from db import DBOperation, Session, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, \
+from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, \
     TddMemberFollowerRecord, TddMemberLog, TddSprintVideoRecord
 from db.write import append_objects
 from db.values import clean_text
@@ -35,13 +35,13 @@ def fetch_video_record_via_video_view(aid, service, out_stat=None):
     return RecordNew(added=get_ts_s(), aid=aid, bvid=view.bvid.removeprefix('BV'), **_stats(view.stat))
 
 
-def add_video_record_via_video_view(aid, service, session, out_stat=None):
+def add_video_record_via_video_view(aid, service, out_stat=None):
     record = fetch_video_record_via_video_view(aid, service, out_stat)
-    commit_video_records_batch([record], session, out_stat)
+    commit_video_records_batch([record], out_stat)
     return record
 
 
-def _commit_objects(objects, session, out_stat=None, batch_id=None):
+def _commit_objects(objects, out_stat=None, batch_id=None):
     start = time.perf_counter()
     persisted = observe('append', {'objects':objects}, batch_id=batch_id)
     if out_stat is not None:
@@ -49,23 +49,23 @@ def _commit_objects(objects, session, out_stat=None, batch_id=None):
     return persisted
 
 
-def commit_video_records_batch(records, session, out_stat=None, batch_id=None):
+def commit_video_records_batch(records, out_stat=None, batch_id=None):
     return _commit_objects([TddVideoRecord(added=r.added, aid=r.aid,
                            **{field:getattr(r,field) for field in STAT_FIELDS}) for r in records],
-                           session, out_stat, batch_id)
+                           out_stat, batch_id)
 
 
-def commit_video_record_via_video_view(video_view, added, session):
+def commit_video_record_via_video_view(video_view, added):
     obj = TddVideoRecord(added=added, aid=video_view.aid, **_stats(video_view.stat))
-    return _commit_objects([obj], session)[0]
+    return _commit_objects([obj])[0]
 
 
-def commit_video_record_via_newlist_archive_stat(stat, added, aid, session):
+def commit_video_record_via_newlist_archive_stat(stat, added, aid):
     obj = TddVideoRecord(added=added, aid=stat.aid if stat.aid != 0 else aid, **_stats(stat))
-    return _commit_objects([obj], session)[0]
+    return _commit_objects([obj])[0]
 
 
-def add_sprint_video_record_via_video_view(aid, service, session):
+def add_sprint_video_record_via_video_view(aid, service):
     view = service.get_video_view_trimmed({'aid':aid})
     return observe('sprint-observe',{'record':TddSprintVideoRecord(added=get_ts_s(), aid=aid, **_stats(view.stat))})
 
@@ -284,7 +284,7 @@ def add_member(mid, service, session, test_exist=True):
     return observe('member-add',dict(member=member))
 
 
-def update_member(mid, service, session):
+def update_member(mid, service):
     card, code = None, 0
     try:
         card = service.get_member_card({'mid':mid},timeout=1.5,colddown_factor=0.1)
@@ -337,13 +337,13 @@ def fetch_member_follower_record(mid, service, out_stat=None):
     return MemberFollowerRecordNew(added=get_ts_s(),mid=mid,follower=relation.follower)
 
 
-def add_member_follower_record(mid, service, session):
+def add_member_follower_record(mid, service):
     record = fetch_member_follower_record(mid,service)
-    return commit_member_follower_records_batch([record],session)[0]
+    return commit_member_follower_records_batch([record])[0]
 
 
-def commit_member_follower_records_batch(records, session, out_stat=None, batch_id=None):
-    return _commit_objects([TddMemberFollowerRecord(**record._asdict()) for record in records],session,out_stat,batch_id)
+def commit_member_follower_records_batch(records, out_stat=None, batch_id=None):
+    return _commit_objects([TddMemberFollowerRecord(**record._asdict()) for record in records],out_stat,batch_id)
 
 
 def get_video_tags_str(aid, service):

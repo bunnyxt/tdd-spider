@@ -7,11 +7,6 @@ from job import (FetchMemberFollowerRecordJob, FetchVideoRecordJob, JobStat,
 from service import RateLimitError
 
 
-class FakeSession:
-    def rollback(self):
-        raise AssertionError('rate limiting must not roll back the DB session')
-
-
 class UpdateMemberJobRateLimitTest(TestCase):
     def test_rate_limit_waits_then_moves_to_next_member(self):
         mid_queue = Queue()
@@ -23,7 +18,6 @@ class UpdateMemberJobRateLimitTest(TestCase):
         job.mid_queue = mid_queue
         job.service = object()
         job.poll_timeout_s = 0.01
-        job.session = FakeSession()
         job.stat = JobStat()
         job.logger = logging.getLogger('test.UpdateMemberJob')
 
@@ -35,8 +29,8 @@ class UpdateMemberJobRateLimitTest(TestCase):
             job.process()
 
         self.assertEqual(update.call_args_list, [
-            mock.call(123, job.service, job.session),
-            mock.call(456, job.service, job.session),
+            mock.call(123, job.service),
+            mock.call(456, job.service),
         ])
         sleep.assert_called_once_with(60)
         self.assertEqual(job.stat.total_count, 2)

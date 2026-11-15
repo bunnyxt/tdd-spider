@@ -32,8 +32,7 @@ class SprintNullableRecordTest(unittest.TestCase):
     def test_job_counts_confirmed_nullable_record_without_million_status(self):
         queue = Queue()
         queue.put(10)
-        with mock.patch('job.AddSprintVideoRecordJob.Session',return_value=mock.Mock()):
-            job = AddSprintVideoRecordJob('nullable',queue,mock.Mock())
+        job = AddSprintVideoRecordJob('nullable',queue,mock.Mock())
         self.addCleanup(job.cleanup)
         with mock.patch('job.AddSprintVideoRecordJob.add_sprint_video_record_via_video_view',
                         return_value=SimpleNamespace(aid=10,view=None)):

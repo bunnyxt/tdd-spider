@@ -35,9 +35,9 @@ class VideoMemberProfilesTest(unittest.TestCase):
     def test_missing_optional_fields_preserve_old_and_explicit_empty_clears(self):
         self.session.seed(TddMember(added=1,mid=10,name='name',face='',sex='old',sign='old',code=0))
         self.service.get_member_card.return_value = MemberCard(10,'name',None,'',None,frozenset(('mid','name','face')))
-        self.assertEqual(update_member(10,self.service,self.session),[])
+        self.assertEqual(update_member(10,self.service),[])
         self.service.get_member_card.return_value = MemberCard(10,'name',None,'','\x00')
-        logs = update_member(10,self.service,self.session)
+        logs = update_member(10,self.service)
         self.assertEqual({log.attr:(log.oldval,log.newval) for log in logs},{'sex':('old',None),'sign':('old','')})
         member = DBOperation.query_member_via_mid(10,self.session)
         self.assertEqual((member.sex,member.sign),(None,''))

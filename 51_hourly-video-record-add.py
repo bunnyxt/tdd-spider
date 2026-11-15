@@ -54,19 +54,11 @@ def get_need_insert_aid_list(time_label, session):
     return aid_list
 
 
-def _stamp(time_task: str) -> str:
-    # '2026-07-14 08:00' -> '202607140800'. Same convention as the log files
-    # (51_202607140800_INFO.log): digits only, no '-', ' ' or ':'. Keeps the
-    # date so runs on different days never append into the same file.
-    return time_task.replace('-', '').replace(' ', '').replace(':', '')
-
-
 def fetch_and_batch_insert_records(
         need_insert_aid_list: list, record_queue: Queue, *,
         job_num: int, fetch_label: str, writer_label: str, logger_name: str,
         duration_limit_s=60 * 40,
         fetched_queue_maxsize: int = 20000,
-        recovery_path: Optional[str] = None,
         update_job_num: int = 10, update_label: str = 'video-update'):
     """
     Bulk fetch-then-batch-insert pipeline shared by the C0 and C30 (simple)
@@ -136,8 +128,7 @@ def fetch_and_batch_insert_records(
                            'record_dropped_queue_full', 'duration_limit_reached'],
         logger_name=logger_name)
     writer_pool = JobPool(
-        [BatchInsertVideoRecordJob('writer_0', fetched_record_queue, record_queue,
-                                   recovery_path=recovery_path)],
+        [BatchInsertVideoRecordJob('writer_0', fetched_record_queue, record_queue)],
         progress_total=len(need_insert_aid_list),
         progress_label=writer_label,
         progress_interval_s=5.0,  # writer progress is less chatty
@@ -243,7 +234,6 @@ class VideoRecordAcquisitionJob(Job):
             writer_label=self.WRITER_LABEL,
             logger_name='VideoRecordAcquisitionJob',
             duration_limit_s=60 * 40,  # 40 minutes, caps the 04:00 full scan
-            recovery_path=f'data/record_recovery_{_stamp(self.time_task)}.csv',
             update_job_num=10, update_label=self.UPDATE_LABEL)
 
         if (self.writer_stat.condition['batch_insert_fail']

@@ -43,7 +43,7 @@ class AddVideoRecordJob(Job):
             stage_stat = {}  # per-stage durations, filled by the task (http_ms, db_ms)
             try:
                 new_video_record = add_video_record_via_video_view(
-                    aid, self.service, self.session, out_stat=stage_stat)
+                    aid, self.service, out_stat=stage_stat)
             except CodeError as e:
                 if self.update_if_code_error:
                     self.logger.info(f'Code error occurred. Now start update video. aid: {aid}')

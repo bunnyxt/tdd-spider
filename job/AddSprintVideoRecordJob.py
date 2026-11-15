@@ -1,6 +1,5 @@
 import time
 from .Job import Job
-from db import Session
 from service import Service
 from queue import Queue
 from task import add_sprint_video_record_via_video_view
@@ -14,7 +13,6 @@ class AddSprintVideoRecordJob(Job):
         super().__init__(name)
         self.aid_queue = aid_queue
         self.service = service
-        self.session = Session()
         self.error = None
 
     def run(self):
@@ -23,8 +21,6 @@ class AddSprintVideoRecordJob(Job):
         except Exception as error:
             self.error = error
             self.logger.exception('Sprint record job failed')
-        finally:
-            self.session.close()
 
     def process(self):
         while not self.aid_queue.empty():
@@ -33,7 +29,7 @@ class AddSprintVideoRecordJob(Job):
             item_start = time.perf_counter()
 
             try:
-                new_sprint_video_record = add_sprint_video_record_via_video_view(aid, self.service, self.session)
+                new_sprint_video_record = add_sprint_video_record_via_video_view(aid, self.service)
             except Exception as e:
                 self.logger.error(f'Fail to add sprint video record. aid: {aid}, error: {e}')
                 self.stat.condition['exception'] += 1
@@ -53,6 +49,3 @@ class AddSprintVideoRecordJob(Job):
                               f'aid: {aid}, duration: {format_ts_ms(duration_ms)}')
             self.stat.total_count += 1
             self.stat.total_duration_ms += duration_ms
-
-    def cleanup(self):
-        self.session.close()

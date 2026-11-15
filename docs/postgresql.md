@@ -41,6 +41,14 @@ each attempt; those transaction-local settings do not replace the connection
 bounds used by other queries. Retryable observation failures use the same UUID
 for at most three attempts.
 
+Observation entry points, including the video/follower batch writers, call
+`observe()` to acquire their connection and own the complete write transaction.
+They do not accept a caller's `Session`. Sessions passed to profile-preparation
+queries or internal transactional helpers remain scoped to those operations.
+Batch writers configure batch size and queue polling; retry attempts belong to
+the observation transaction, and recovery uses the pending-input directory
+below.
+
 ## Pending observations
 
 Each business observation gets a UUID and a durable JSON input before its
