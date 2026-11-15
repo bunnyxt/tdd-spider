@@ -54,8 +54,7 @@ def add_member_follower_record():
             progress_total=len(mids),
             progress_label='follower-db-writer',
             progress_interval_s=5.0,
-            ensure_conditions=['batch_insert', 'batch_insert_split',
-                               'batch_insert_split_ok', 'batch_insert_fail'],
+            ensure_conditions=['batch_insert', 'persisted', 'batch_insert_fail'],
             logger_name=script_id)
 
         fetch_pool.start()
@@ -80,7 +79,11 @@ def add_member_follower_record():
         logger.info(fetch_stat.get_summary('follower-fetch'))
         logger.info(writer_stat.get_summary('follower-db-writer'))
         service.stats.log_summary(logger)
-        logger.info(f'{writer_stat.total_count} follower record(s) fetched and inserted.')
+        logger.info('%d follower record(s) confirmed persisted.', writer_stat.condition.get('persisted',0))
+        if (writer_stat.condition.get('batch_insert_fail',0)
+                or writer_stat.condition.get('persisted',0) != fetch_stat.condition.get('success',0)
+                or fetch_stat.condition.get('record_dropped_queue_full',0)):
+            raise RuntimeError('Follower write incomplete; resolve saved replay batches')
 
 
 def main():

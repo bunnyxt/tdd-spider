@@ -1,6 +1,7 @@
-[db_mysql]
-user = username
-password = passwd
+[db_postgresql]
+user = writer
+password = replace-me
 host = localhost
-port = 3306
+port = 5432
 dbname = tdd
+sslmode = prefer

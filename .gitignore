@@ -10,6 +10,7 @@
 
 # python
 venv/
+.venv/
 venv-3.11/
 __pycache__/
 .ipynb_checkpoints/

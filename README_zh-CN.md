@@ -25,17 +25,9 @@
 ## 安装
 
 1. 下载代码，`git clone https://github.com/bunnyxt/tdd-spider.git && cd tdd-spider`。
-2. 配置`Python 3.5+`环境（强烈推荐使用`virtualenv`或`conda`新建虚拟环境以避免依赖冲突），运行`pip install -r requirements.txt`安装依赖。
-3. 安装[ProxyPool](https://github.com/Python3WebSpider/ProxyPool)，为了尽可能提高 IP 的可用性，配置以下环境变量
-   ```yaml
-   CYCLE_TESTER: 10
-   CYCLE_GETTER: 60
-   TEST_URL: http://api.bilibili.com/x/web-interface/view?aid=456930
-   TEST_TIMEOUT: 3
-   TEST_BATCH: 100
-   ```
-   PS：推荐使用`docker`方式使用，并在`docker-compose.yml`文件底部`environment`之后粘贴以上环境变量配置，配置完成后使用`nohup docker-compose up &`在后台启动 ProxyPool 服务。
-4. 打开`conf/conf.ini`文件，填写配置，包括数据库连接（`MySQL 5.7.30`）、ProxyPool 地址（默认[http://localhost:5555/random](http://localhost:5555/random)）等。
+2. 使用 Python 3.12 创建虚拟环境，运行 `pip install -r requirements.txt` 安装锁定依赖。
+3. 将 `conf/conf.ini.example` 复制为 `conf/conf.ini`，填写 PostgreSQL 连接配置；将 `service/endpoints.json.example` 复制为 `service/endpoints.json`，配置自己的 HTTP worker。
+4. 确认目标数据库已安装业务表、分区、维护 trigger 和 `db/ingest.sql` 中的观察回执辅助表。配置及失败观察重放方式见 [PostgreSQL 运行说明](docs/postgresql.md)。
 
 ## 运行
 
@@ -43,7 +35,7 @@
 手工排查时优先使用项目虚拟环境在前台运行，以便保留输出并用 `Ctrl-C` 停止：
 
 ```shell
-venv-3.11/bin/python <script-name.py>
+.venv/bin/python <script-name.py>
 ```
 
 手工启动前，应先确认 cron 或其他操作者没有运行同一个任务。检查进程时先列出 Python 进程，再核对目标 PID 的完整命令：

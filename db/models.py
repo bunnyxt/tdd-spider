@@ -1,289 +1,55 @@
-from .basic import Base
-from sqlalchemy import Column, Integer, String, ForeignKey, BigInteger
-from sqlalchemy.dialects.mysql import LONGTEXT, TINYINT, DOUBLE
-
-__all__ = ['TddVideo', 'TddMember', 'TddVideoStaff', 'TddVideoRecord', 'TddMemberFollowerRecord',
-           'TddVideoLog', 'TddMemberLog', 'TddMemberTotalStatRecord',
-           'TddVideoRecordAbnormalChange',
-           'TddSprintVideoRecord']
+"""Small row objects. SQL and transaction ownership live in the data layer."""
+from types import SimpleNamespace
 
 
-class TddVideo(Base):
-    """tdd_video table"""
+class Row(SimpleNamespace):
+    table = None
+    fields = ()
+    defaults = {}
 
-    __tablename__ = 'tdd_video'
-
-    id = Column(BigInteger, primary_key=True, nullable=False,
-                unique=True, autoincrement=True)
-    added = Column(Integer, nullable=False)
-    aid = Column(BigInteger, nullable=False, unique=True)
-    bvid = Column(String(10), nullable=False)
-    videos = Column(Integer, default=None)
-    tid = Column(Integer, default=None)
-    tname = Column(String(30), default=None)
-    copyright = Column(Integer, default=None)
-    pic = Column(String(200), default=None)
-    title = Column(String(200), nullable=False)
-    pubdate = Column(Integer, default=None)
-    desc = Column(LONGTEXT, default=None)
-    tags = Column(String(500), default=None)
-    mid = Column(Integer, default=None)
-    # TODO how to enable nullable=False and have default value
-    code = Column(Integer, nullable=False, default=0)
-    attribute = Column(Integer)
-    state = Column(Integer)
-    forward = Column(Integer)
-    hasstaff = Column(TINYINT, nullable=False, default=-1)  #
-    singer = Column(String(200), nullable=False, default='未定义')  #
-    solo = Column(TINYINT, nullable=False, default=-1)  #
-    original = Column(TINYINT, nullable=False, default=-1)  #
-    employed = Column(Integer, nullable=False, default=-1)  #
-    isvc = Column(TINYINT, nullable=False, default=-1)  #
-    engine = Column(TINYINT, nullable=False, default=-1)  #
-    freq = Column(TINYINT, nullable=False, default=0)  #
-    activity = Column(TINYINT, nullable=False, default=0)  #
-    recent = Column(TINYINT, nullable=False, default=0)  #
-    laststat = Column(BigInteger, ForeignKey(
-        'tdd_video_record.id'), default=None)
-
-    def __repr__(self):
-        return "<TddVideo(aid=%d,title=%s)>" % (self.aid, self.title)
+    def __init__(self, **values):
+        unknown = set(values) - set(self.fields)
+        if unknown:
+            raise TypeError(f'Unknown {self.table} fields: {sorted(unknown)}')
+        super().__init__(**{**dict.fromkeys(self.fields), **self.defaults, **values})
 
 
-class TddMember(Base):
-    """tdd_member table"""
-
-    __tablename__ = 'tdd_member'
-
-    id = Column(BigInteger, primary_key=True, nullable=False,
-                unique=True, autoincrement=True)
-    added = Column(Integer, nullable=False)
-    mid = Column(Integer, nullable=False, unique=True)
-    sex = Column(String(20), nullable=False)
-    name = Column(String(100), nullable=False)
-    face = Column(String(200), nullable=False)
-    sign = Column(String(500), nullable=False, default='')  #
-    # TODO how to enable nullable=False and have default value
-    code = Column(Integer, nullable=False, default=0)
-    video_count = Column(Integer, nullable=False, default=0)
-    last_video = Column(BigInteger)  # fk
-    last_total_stat = Column(BigInteger)  # fk
-    last_follower = Column(BigInteger)  # fk
-
-    def __repr__(self):
-        return "<TddMember(mid=%d,name=%s)>" % (self.mid, self.name)
+STAT_FIELDS = ('view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like')
 
 
-class TddVideoStaff(Base):
-    """tdd_video_staff table"""
-
-    __tablename__ = 'tdd_video_staff'
-
-    id = Column(BigInteger, primary_key=True, nullable=False,
-                unique=True, autoincrement=True)
-    added = Column(Integer, nullable=False)
-    aid = Column(BigInteger, nullable=False)
-    bvid = Column(String(10), nullable=False)
-    mid = Column(Integer, nullable=False)
-    title = Column(String(30), nullable=False)
-
-    # UNIQUE KEY `aid_mid_UNIQUE` (`aid`,`mid`)
-
-    def __repr__(self):
-        return "<TddVideoStaff(aid=%d,mid=%d)>" % (self.aid, self.mid)
+def row_type(name, table, fields, defaults=None):
+    return type(name, (Row,), {'table': table, 'fields': tuple(fields), 'defaults': defaults or {}})
 
 
-class TddVideoRecord(Base):
-    """tdd_video_record table"""
-
-    __tablename__ = 'tdd_video_record'
-
-    id = Column(BigInteger, primary_key=True, nullable=False,
-                unique=True, autoincrement=True)
-    added = Column(Integer, nullable=False)
-    aid = Column(BigInteger, nullable=False)
-    # maybe '--' from api, set -1 instead
-    view = Column(Integer, nullable=False)
-    danmaku = Column(Integer, nullable=False)
-    reply = Column(Integer, nullable=False)
-    favorite = Column(Integer, nullable=False)
-    coin = Column(Integer, nullable=False)
-    share = Column(Integer, nullable=False)
-    like = Column(Integer, nullable=False)
-    # 5 new fields, could be None
-    dislike = Column(Integer, default=None)
-    now_rank = Column(Integer, default=None)
-    his_rank = Column(Integer, default=None)
-    vt = Column(BigInteger, default=None)
-    vv = Column(BigInteger, default=None)
-
-    # Foreign key here?
-
-    def __repr__(self):
-        return "<TddVideoRecord(aid=%d,view=%d)>" % (self.aid, self.view)
+TddVideo = row_type('TddVideo', 'tdd_video',
+    ('id','added','aid','bvid','videos','tid','tname','copyright','pic','title','pubdate','desc','tags','mid',
+     'code','attribute','state','forward','hasstaff','solo','original','employed','isvc','engine','freq','activity','recent'),
+    dict(hasstaff=-1, solo=-1, original=-1, employed=-1, isvc=-1, engine=-1, freq=0, activity=0, recent=0))
+TddMember = row_type('TddMember', 'tdd_member',
+    ('id','added','mid','sex','name','face','sign','code','last_video_aid'))
+TddVideoStaff = row_type('TddVideoStaff', 'tdd_video_staff', ('id','added','aid','bvid','mid','title'))
+TddVideoRecord = row_type('TddVideoRecord', 'tdd_video_record', ('id','added','aid') + STAT_FIELDS)
+TddMemberFollowerRecord = row_type('TddMemberFollowerRecord', 'tdd_member_follower_record', ('id','added','mid','follower'))
+TddMemberTotalStatRecord = row_type('TddMemberTotalStatRecord', 'tdd_member_total_stat_record', ('id','added','mid','video_count') + STAT_FIELDS)
+TddSprintVideoRecord = row_type('TddSprintVideoRecord', 'tdd_sprint_video_record', ('id','added','aid') + STAT_FIELDS)
+TddVideoRecordAbnormalChange = row_type('TddVideoRecordAbnormalChange', 'tdd_video_record_abnormal_change',
+    ('id','added','aid','attr','speed_now','speed_last','speed_now_incr_rate','period_range','speed_period','speed_overall',
+     'this_record_id','this_added') + tuple('this_' + f for f in STAT_FIELDS) +
+    ('last_record_id','last_added') + tuple('last_' + f for f in STAT_FIELDS) + ('description','comment'))
 
 
-class TddMemberFollowerRecord(Base):
-    """tdd_member_follower_record table"""
-
-    __tablename__ = 'tdd_member_follower_record'
-
-    id = Column(BigInteger, primary_key=True, nullable=False,
-                unique=True, autoincrement=True)
-    added = Column(Integer, nullable=False)
-    mid = Column(Integer, nullable=False)
-    follower = Column(Integer, nullable=False)
-
-    # UNIQUE KEY `added_mid_UNIQUE` (`added`,`mid`)
-
-    def __repr__(self):
-        return '<TddMemberFollowerRecord(mid=%d,follower=%d)>' % (self.mid, self.follower)
+class TddVideoLog(Row):
+    table = 'tdd_video_log'
+    fields = ('id','added','aid','attr','oldval','newval')
+    def __init__(self, added=None, aid=None, bvid=None, attr=None, oldval=None, newval=None, **values):
+        super().__init__(added=added, aid=aid, attr=attr, oldval=oldval, newval=newval, **values)
 
 
-class TddVideoLog(Base):
-    """tdd_video_log_table"""
-
-    __tablename__ = 'tdd_video_log'
-
-    id = Column(BigInteger, primary_key=True, nullable=False,
-                unique=True, autoincrement=True)
-    added = Column(Integer, nullable=False)
-    aid = Column(BigInteger, nullable=False)
-    bvid = Column(String(10), nullable=False)
-    attr = Column(String(30), nullable=False)
-    oldval = Column(LONGTEXT)
-    newval = Column(LONGTEXT)
-
-    def __init__(self, added, aid, bvid, attr, oldval, newval):
-        self.added = added
-        self.aid = aid
-        self.bvid = bvid
-        self.attr = attr
-        self.oldval = oldval
-        self.newval = newval
-
-    def __repr__(self):
-        return '<TddVideoLog(aid=%d,attr=%s)>' % (self.aid, self.attr)
+class TddMemberLog(Row):
+    table = 'tdd_member_log'
+    fields = ('id','added','mid','attr','oldval','newval')
+    def __init__(self, added=None, mid=None, attr=None, oldval=None, newval=None, **values):
+        super().__init__(added=added, mid=mid, attr=attr, oldval=oldval, newval=newval, **values)
 
 
-class TddMemberLog(Base):
-    """tdd_member_log_table"""
-
-    __tablename__ = 'tdd_member_log'
-
-    id = Column(BigInteger, primary_key=True, nullable=False,
-                unique=True, autoincrement=True)
-    added = Column(Integer, nullable=False)
-    mid = Column(Integer, nullable=False)
-    attr = Column(String(30), nullable=False)
-    oldval = Column(LONGTEXT)
-    newval = Column(LONGTEXT)
-
-    def __init__(self, added, mid, attr, oldval, newval):
-        self.added = added
-        self.mid = mid
-        self.attr = attr
-        self.oldval = oldval
-        self.newval = newval
-
-    def __repr__(self):
-        return '<TddMemberLog(mid=%d,attr=%s)>' % (self.mid, self.attr)
-
-
-class TddMemberTotalStatRecord(Base):
-    """tdd_member_total_stat_record"""
-
-    __tablename__ = 'tdd_member_total_stat_record'
-
-    id = Column(BigInteger, primary_key=True, nullable=False,
-                unique=True, autoincrement=True)
-    added = Column(Integer, nullable=False)
-    mid = Column(Integer, nullable=False)
-    video_count = Column(Integer, nullable=False)
-    # maybe '--' from api, set -1 instead
-    view = Column(Integer, nullable=False)
-    danmaku = Column(Integer, nullable=False)
-    reply = Column(Integer, nullable=False)
-    favorite = Column(Integer, nullable=False)
-    coin = Column(Integer, nullable=False)
-    share = Column(Integer, nullable=False)
-    like = Column(Integer, nullable=False)
-
-    def __init__(self, added, mid, video_count=0, view=0, danmaku=0, reply=0, favorite=0, coin=0, share=0, like=0):
-        self.added = added
-        self.mid = mid
-        self.video_count = video_count
-        self.view = view
-        self.danmaku = danmaku
-        self.reply = reply
-        self.favorite = favorite
-        self.coin = coin
-        self.share = share
-        self.like = like
-
-    def __repr__(self):
-        return '<TddMemberTotalStatRecord(mid=%d,video_count=%d)>' % (self.mid, self.video_count)
-
-
-class TddVideoRecordAbnormalChange(Base):
-    """tdd_video_record_abnormal_change"""
-
-    __tablename__ = 'tdd_video_record_abnormal_change'
-
-    id = Column(BigInteger, primary_key=True, nullable=False,
-                unique=True, autoincrement=True)
-    added = Column(Integer, nullable=False)
-    aid = Column(BigInteger, nullable=False)
-    attr = Column(String, nullable=False)
-    speed_now = Column(DOUBLE, nullable=False)
-    speed_last = Column(DOUBLE, nullable=False)
-    speed_now_incr_rate = Column(DOUBLE, nullable=False)
-    period_range = Column(Integer, nullable=False)
-    speed_period = Column(DOUBLE, nullable=False)
-    speed_overall = Column(DOUBLE, nullable=False)
-    this_record_id = Column(BigInteger, nullable=False)
-    this_added = Column(Integer, nullable=True)
-    this_view = Column(Integer, nullable=True)
-    this_danmaku = Column(Integer, nullable=True)
-    this_reply = Column(Integer, nullable=True)
-    this_favorite = Column(Integer, nullable=True)
-    this_coin = Column(Integer, nullable=True)
-    this_share = Column(Integer, nullable=True)
-    this_like = Column(Integer, nullable=True)
-    last_record_id = Column(BigInteger, nullable=False)
-    last_added = Column(Integer, nullable=True)
-    last_view = Column(Integer, nullable=True)
-    last_danmaku = Column(Integer, nullable=True)
-    last_reply = Column(Integer, nullable=True)
-    last_favorite = Column(Integer, nullable=True)
-    last_coin = Column(Integer, nullable=True)
-    last_share = Column(Integer, nullable=True)
-    last_like = Column(Integer, nullable=True)
-    description = Column(String, default='')
-    comment = Column(String, default='')
-
-    def __repr__(self):
-        return '<TddVideoRecordAbnormalChange(aid=%d,attr=%s)>' % (self.aid, self.attr)
-
-
-class TddSprintVideoRecord(Base):
-    """tdd_sprint_video_record table"""
-
-    __tablename__ = 'tdd_sprint_video_record'
-
-    id = Column(BigInteger, primary_key=True, nullable=False,
-                unique=True, autoincrement=True)
-    added = Column(Integer, default=None)
-    aid = Column(BigInteger, default=None)
-    view = Column(Integer, default=None)  # maybe '--' from api, set -1 instead
-    danmaku = Column(Integer, default=None)
-    reply = Column(Integer, default=None)
-    favorite = Column(Integer, default=None)
-    coin = Column(Integer, default=None)
-    share = Column(Integer, default=None)
-    like = Column(Integer, default=None)
-
-    # Foreign key here?
-
-    def __repr__(self):
-        return "<TddSprintVideoRecord(aid=%d,view=%d)>" % (self.aid, self.view)
+__all__ = [name for name in globals() if name.startswith('Tdd')]

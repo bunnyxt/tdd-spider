@@ -1,41 +1,121 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
+"""Lazy, bounded PostgreSQL connections and explicit business transactions."""
+from contextlib import contextmanager
+from threading import Lock
 from conf import get_db_args
+from .values import epoch
 
-__all__ = ['engine', 'Base', 'Session',
-           'create_all', 'drop_all', 'update_engine']
+__all__ = ['engine', 'Session', 'update_engine']
 
 
-def get_engine():
-    db_args = get_db_args()
-    conn_str = "mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8mb4&connect_timeout=10&read_timeout=30&write_timeout=60".format(
-        db_args['user'], db_args['password'], db_args['host'], db_args['port'], db_args['dbname'])  # mysql
-    eng = create_engine(conn_str, pool_recycle=3600, pool_size=50,
-                        max_overflow=150, pool_timeout=60, pool_pre_ping=True)
-    return eng
+class ResultRow(dict):
+    def __getitem__(self, key):
+        return tuple(self.values())[key] if isinstance(key, int) else super().__getitem__(key)
+
+
+class Result(list):
+    def fetchall(self):
+        return self
+    def fetchone(self):
+        return self[0] if self else None
+    first = fetchone
+
+
+class Engine:
+    def __init__(self):
+        self._pool = None
+        self._lock = Lock()
+
+    @property
+    def pool(self):
+        if self._pool is None:
+            with self._lock:
+                if self._pool is None:
+                    from psycopg_pool import ConnectionPool
+                    args = get_db_args()
+                    args['dbname'] = args.pop('database', args.get('dbname'))
+                    args.pop('max_connections', None)
+                    self._pool = ConnectionPool('', kwargs={**args, 'autocommit': True},
+                                                min_size=0, max_size=4, timeout=60)
+        return self._pool
+
+    def connection(self):
+        return self.pool.connection()
+
+    def raw_connection(self):
+        return Session()
+
+    def dispose(self):
+        if self._pool is not None:
+            self._pool.close()
+            self._pool = None
+
+
+engine = Engine()
 
 
 def update_engine():
-    global engine, Base, Session
-    engine = get_engine()
-    Base = declarative_base()
-    Session = sessionmaker(bind=engine)
+    engine.dispose()
 
 
-def create_all():
-    # create table in db
-    # do not need to use it if db already created these tables
-    Base.metadata.create_all(engine)
+class Session:
+    def __init__(self, connection=None):
+        self._connection = connection
+        self._external = connection is not None
+        self._depth = 0
 
+    @property
+    def connection(self):
+        if self._connection is None:
+            self._connection = engine.pool.getconn()
+        return self._connection
 
-def drop_all():
-    # drop table in db
-    # WARNING do not use it unless you are sure to drop all table
-    Base.metadata.drop_all(engine)
+    def _release(self):
+        if self._connection is not None and not self._external:
+            engine.pool.putconn(self._connection)
+            self._connection = None
 
+    def execute(self, statement, params=None):
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(statement, params)
+                if cursor.description is None:
+                    return Result()
+                names = [col.name for col in cursor.description]
+                return Result(ResultRow(zip(names, (epoch(v) for v in row))) for row in cursor.fetchall())
+        finally:
+            if not self._depth:
+                self._release()
 
-engine = get_engine()
-Base = declarative_base()
-Session = sessionmaker(bind=engine)
-# db_session = Session()
+    def cursor(self):
+        return self.connection.cursor()
+
+    @contextmanager
+    def transaction(self):
+        self._depth += 1
+        try:
+            with self.connection.transaction():
+                yield self
+        finally:
+            self._depth -= 1
+            if self._depth == 0:
+                self._release()
+
+    def commit(self):
+        if self._connection is not None:
+            self._connection.commit()
+        if not self._depth:
+            self._release()
+
+    def rollback(self):
+        if self._connection is not None:
+            self._connection.rollback()
+            if not self._depth:
+                self._release()
+
+    def close(self):
+        self.rollback()
+        self._release()
+
+    def add(self, obj):
+        from .operation import DBOperation
+        return DBOperation.add(obj, self)

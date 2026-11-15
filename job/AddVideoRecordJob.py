@@ -1,7 +1,7 @@
 import time
 from .Job import Job
 from service import Service, CodeError
-from queue import Queue
+from queue import Queue, Empty
 from db import Session
 from core import RecordNew
 from util import format_ts_ms, get_ts_s, ts_s_to_str
@@ -28,19 +28,22 @@ class AddVideoRecordJob(Job):
             self.duration_limit_due_ts_s = get_ts_s() + self.duration_limit_s
             self.logger.info(f'Duration limit due at {ts_s_to_str(self.duration_limit_due_ts_s)}.')
 
-        while not self.aid_queue.empty():
+        while True:
             if self.duration_limit_due_ts_s is not None and get_ts_s() >= self.duration_limit_due_ts_s:
                 self.logger.info(f'Duration limit reached. Now exit.')
                 break
 
-            aid = self.aid_queue.get()
+            try:
+                aid = self.aid_queue.get_nowait()
+            except Empty:
+                break
             self.logger.debug(f'Now start add video record. aid: {aid}')
             item_start = time.perf_counter()
 
             stage_stat = {}  # per-stage durations, filled by the task (http_ms, db_ms)
             try:
                 new_video_record = add_video_record_via_video_view(
-                    aid, self.service, self.session, out_stat=stage_stat)
+                    aid, self.service, out_stat=stage_stat)
             except CodeError as e:
                 if self.update_if_code_error:
                     self.logger.info(f'Code error occurred. Now start update video. aid: {aid}')

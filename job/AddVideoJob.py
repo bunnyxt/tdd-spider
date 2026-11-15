@@ -1,7 +1,7 @@
 import time
 from .Job import Job
 from service import Service
-from queue import Queue
+from queue import Queue, Empty
 from db import Session
 from util import format_ts_ms
 from task import add_video, AlreadyExistError
@@ -18,8 +18,11 @@ class AddVideoJob(Job):
         self.test_exist = test_exist
 
     def process(self):
-        while not self.aid_queue.empty():
-            aid = self.aid_queue.get()
+        while True:
+            try:
+                aid = self.aid_queue.get_nowait()
+            except Empty:
+                break
             self.logger.debug(f'Now start add video. aid: {aid}')
             item_start = time.perf_counter()
 

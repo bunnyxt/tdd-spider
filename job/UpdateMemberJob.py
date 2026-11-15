@@ -1,5 +1,4 @@
 from .Job import Job
-from db import Session
 from service import ContentError, RateLimitError, Service
 from queue import Queue, Empty
 from task import update_member
@@ -29,7 +28,6 @@ class UpdateMemberJob(Job):
         self.mid_queue = mid_queue
         self.service = service
         self.poll_timeout_s = poll_timeout_s
-        self.session = Session()
 
     def process(self):
         while True:
@@ -44,7 +42,7 @@ class UpdateMemberJob(Job):
             item_start = time.perf_counter()
 
             try:
-                tdd_member_logs = update_member(mid, self.service, self.session)
+                tdd_member_logs = update_member(mid, self.service)
             except RateLimitError as e:
                 self.logger.warning(
                     f'Member API rate limited; sleep {RATE_LIMIT_SLEEP_S}s before next member. '
@@ -57,12 +55,6 @@ class UpdateMemberJob(Job):
                     f'mid: {mid}, error: {e}')
                 self.stat.condition['empty_card'] += 1
             except Exception as e:
-                # roll back, else the failed transaction poisons this session
-                # and every subsequent mid on this worker fails too
-                try:
-                    self.session.rollback()
-                except Exception:
-                    pass
                 self.logger.error(f'Fail to update member info. mid: {mid}, error: {e}')
                 self.stat.condition['update_exception'] += 1
             else:
@@ -77,6 +69,3 @@ class UpdateMemberJob(Job):
                               f'mid: {mid}, duration: {format_ts_ms(duration_ms)}')
             self.stat.total_count += 1
             self.stat.total_duration_ms += duration_ms
-
-    def cleanup(self):
-        self.session.close()

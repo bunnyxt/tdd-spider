@@ -6,14 +6,6 @@ from job import JobStat, UpdateMemberJob
 from service import ContentError, MemberCard
 
 
-class FakeSession:
-    def __init__(self):
-        self.rollback_count = 0
-
-    def rollback(self):
-        self.rollback_count += 1
-
-
 class UpdateMemberJobEmptyCardTest(TestCase):
     def test_rejected_card_is_counted_apart_and_the_run_continues(self):
         mid_queue = Queue()
@@ -25,7 +17,6 @@ class UpdateMemberJobEmptyCardTest(TestCase):
         job.mid_queue = mid_queue
         job.service = object()
         job.poll_timeout_s = 0.01
-        job.session = FakeSession()
         job.stat = JobStat()
         job.logger = logging.getLogger('test.UpdateMemberJob')
 
@@ -40,12 +31,10 @@ class UpdateMemberJobEmptyCardTest(TestCase):
             job.process()
 
         self.assertEqual(update.call_args_list, [
-            mock.call(123, job.service, job.session),
-            mock.call(456, job.service, job.session),
+            mock.call(123, job.service),
+            mock.call(456, job.service),
         ])
         self.assertEqual(job.stat.total_count, 2)
         self.assertEqual(job.stat.condition['empty_card'], 1)
         self.assertEqual(job.stat.condition['0_update'], 1)
         self.assertEqual(job.stat.condition['update_exception'], 0)
-        # nothing was written, so there is no poisoned transaction to undo
-        self.assertEqual(job.session.rollback_count, 0)
