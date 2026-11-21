@@ -57,7 +57,9 @@ class VideoView(NamedTuple):
     attribute: Optional[int]
     forward: Optional[int]
     staff: Optional[list[VideoViewStaffItem]]
-    present_fields: frozenset[str] = frozenset({'attribute', 'forward'})
+    # Parser flags distinguish omitted optional fields from explicit NULL values.
+    response_has_attribute: bool = True
+    response_has_forward: bool = True
 
 
 # minimal view payload for stat-record jobs: exactly what VideoRecord needs.

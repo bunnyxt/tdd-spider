@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import tempfile
 
-from .basic import engine, Session
+from .basic import engine
 from .models import Row
 from .write import trial_run_id
 
@@ -65,18 +65,16 @@ def execute_write(function, *args, connection_factory=None, **kwargs):
     run_id = trial_run_id()
 
     def callback(connection):
-        session = Session(connection)
-        session._depth = 1
-        session.run_id = run_id
-        return function(session, *args, **kwargs)
+        return function(connection, *args, run_id=run_id, **kwargs)
 
     try:
         return run_transaction(connection_factory or engine.connection, callback, run_id=run_id)
     except Exception as error:
         operation = getattr(function, '__name__', type(function).__name__)
         try:
-            arguments = inspect.signature(function).bind(None, *args, **kwargs).arguments
-            arguments.pop('session', None)
+            signature = inspect.signature(function)
+            arguments = signature.bind(None, *args, **kwargs).arguments
+            arguments.pop(next(iter(signature.parameters)), None)
             path = _save_failure(operation, arguments, run_id, error)
         except Exception:
             logger.error('Database write failed; failure input could not be saved. '

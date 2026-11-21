@@ -1,6 +1,5 @@
 import time
 from .Job import Job
-from db import Session
 from service import Service
 from queue import Queue, Empty
 from task import update_video
@@ -41,7 +40,6 @@ class UpdateVideoJob(Job):
         self.duration_limit_s = duration_limit_s
         self.duration_limit_due_ts_s = None
         self.poll_timeout_s = poll_timeout_s
-        self.session = Session()
 
     def process(self):
         if self.duration_limit_s is not None:
@@ -72,14 +70,8 @@ class UpdateVideoJob(Job):
             item_start = time.perf_counter()
 
             try:
-                tdd_video_logs = update_video(aid, self.service, self.session)
+                tdd_video_logs = update_video(aid, self.service)
             except Exception as e:
-                # roll back, else the failed transaction poisons this session
-                # and every subsequent aid on this worker fails too
-                try:
-                    self.session.rollback()
-                except Exception:
-                    pass
                 self.logger.error(f'Fail to update video info. aid: {aid}, error: {e}')
                 self.stat.condition['update_exception'] += 1
             else:
@@ -94,6 +86,3 @@ class UpdateVideoJob(Job):
                               f'aid: {aid}, duration: {format_ts_ms(duration_ms)}')
             self.stat.total_count += 1
             self.stat.total_duration_ms += duration_ms
-
-    def cleanup(self):
-        self.session.close()

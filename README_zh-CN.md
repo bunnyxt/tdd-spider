@@ -27,7 +27,7 @@
 1. 下载代码，`git clone https://github.com/bunnyxt/tdd-spider.git && cd tdd-spider`。
 2. 使用 Python 3.12 创建虚拟环境，运行 `pip install -r requirements.txt` 安装锁定依赖。
 3. 将 `conf/conf.ini.example` 复制为 `conf/conf.ini`，填写 PostgreSQL 连接配置；将 `service/endpoints.json.example` 复制为 `service/endpoints.json`，配置自己的 HTTP worker。
-4. 确认目标数据库已安装业务表、分区、维护 trigger 和 `db/ingest.sql` 中的观察回执辅助表。配置及失败观察重放方式见 [PostgreSQL 运行说明](docs/postgresql.md)。
+4. 确认目标数据库已安装业务表、分区、维护 trigger 和 `db/ingest.sql` 中的写入控制辅助表。配置及失败留档、人工核对方式见 [PostgreSQL 运行说明](docs/postgresql.md)。写入失败后会尽力保存本次输入；如果提交状态不确定，操作者须先核对数据库，再决定是否重新提交。
 
 ## 运行
 

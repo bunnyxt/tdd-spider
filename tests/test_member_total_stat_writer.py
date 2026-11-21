@@ -45,21 +45,21 @@ class MemberTotalStatWriterTest(unittest.TestCase):
         for count in (0,1,999,1000,1001):
             with self.subTest(count=count):
                 session = Session()
-                patcher = mock.patch('util.member_total_stat_writer.insert_objects',side_effect=observe_for(session))
+                patcher = mock.patch('util.member_total_stat_writer.insert_member_total_stat_records',side_effect=observe_for(session))
                 writer = patcher.start()
                 self.addCleanup(patcher.stop)
-                self.assertEqual(write_member_stats(session,iter(records(count)),LOG),count)
+                self.assertEqual(write_member_stats(iter(records(count)),LOG),count)
                 self.assertEqual(len(session.committed),count)
                 self.assertEqual([len(batch) for batch in session.batches], [1000]*(count//1000) + ([count%1000] if count%1000 else []))
                 self.assertTrue(all(not call.kwargs for call in writer.call_args_list))
                 if count:
-                    self.assertEqual(session.committed[0].view,2147483648)
+                    self.assertEqual(session.committed[0]['view'],2147483648)
 
     def test_failed_second_batch_keeps_only_confirmed_prior_batch(self):
         session = Session(fail=2)
-        with mock.patch('util.member_total_stat_writer.insert_objects',side_effect=observe_for(session)):
+        with mock.patch('util.member_total_stat_writer.insert_member_total_stat_records',side_effect=observe_for(session)):
             with self.assertLogs(LOG,level='CRITICAL') as logs, self.assertRaisesRegex(RuntimeError,'unknown'):
-                write_member_stats(session,records(1001),LOG)
+                write_member_stats(records(1001),LOG)
             self.assertEqual(len(session.committed),1000)
             self.assertIn('confirmed_committed_rows=1000',logs.output[0])
             self.assertIn('failed_batch_rows=1',logs.output[0])
@@ -68,4 +68,4 @@ class MemberTotalStatWriterTest(unittest.TestCase):
     def test_invalid_batch_size_fails_before_opening_transaction(self):
         for size in (0,-1,True,1.5):
             with self.subTest(size=size), self.assertRaises(ValueError):
-                write_member_stats(Session(),[],LOG,size)
+                write_member_stats([],LOG,size)

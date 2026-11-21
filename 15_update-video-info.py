@@ -1,4 +1,4 @@
-from db import DBOperation, Session
+from db.queries import query_all_video_bvids
 from service import Service
 from runrecord import track
 from util import logging_init, get_week_day, fullname, b2a, get_ts_ms, format_duration_summary
@@ -17,11 +17,10 @@ def update_video_info():
     start_ts_ms = get_ts_ms()
 
     with track(script_fullname) as recorder:
-        session = Session()
         service = Service(mode='worker')
 
         # get all bvids
-        all_bvids: list[str] = DBOperation.query_all_video_bvids(session)
+        all_bvids: list[str] = query_all_video_bvids()
         logger.info(f'Total {len(all_bvids)} videos got.')
 
         # add latest 5000 bvids first
@@ -71,7 +70,6 @@ def update_video_info():
         logger.info(f'{job_num} job(s) started.')
         job_stat_merged = pool.join()
 
-        session.close()
 
         end_ts_ms = get_ts_ms()
 

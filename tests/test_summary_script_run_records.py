@@ -3,7 +3,7 @@ Per-entry-point verification that the six summary-reporting production
 scripts (12_/15_/16_/17_/62_/71_) open, populate and close a run record
 without changing their duration / JobStat summary behaviour.
 
-Each script is imported by file path and its collaborators (Service, Session,
+Each script is imported by file path and its collaborators (Service, DB queries,
 the Job classes / JobPool, ``requests``) are replaced with inert fakes, then
 the top-level work function is driven once for a normal run and once for a
 failing run. The assertions are:
@@ -90,14 +90,6 @@ class _FakeApiStats:
 class _FakeServiceWithApiStats:
     def __init__(self, *a, **kw):
         self.stats = _FakeApiStats()
-
-
-class _FakeSession:
-    def execute(self, *a, **kw):
-        return []
-
-    def close(self):
-        pass
 
 
 class _FakeJob:
@@ -201,9 +193,8 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         service = _FakeServiceWithApiStats()
 
         with mock.patch.object(m, 'Service', return_value=service), \
-             mock.patch.object(m, 'Session', _FakeSession), \
-             mock.patch.object(m.DBOperation, 'query_all_video_bvids',
-                               staticmethod(lambda s: [])), \
+             mock.patch.object(m, 'query_all_video_bvids',
+                               lambda: []), \
              mock.patch.object(m, 'JobPool', lambda *a, **kw: _FakePool(merged)), \
              mock.patch.object(m, 'b2a', lambda bv: 1):
             m.update_video_info()
@@ -226,9 +217,8 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         service = _FakeServiceWithApiStats()
 
         with mock.patch.object(m, 'Service', return_value=service), \
-             mock.patch.object(m, 'Session', _FakeSession), \
-             mock.patch.object(m.DBOperation, 'query_all_member_mids',
-                               staticmethod(lambda s: [])), \
+             mock.patch.object(m, 'query_all_member_mids',
+                               lambda: []), \
              mock.patch.object(m, 'JobPool', lambda *a, **kw: _FakePool(merged)):
             m.update_member_info()
 
@@ -248,8 +238,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         m = _load('16_update-member-info.py')
 
         with mock.patch.object(m, 'Service', _FakeService), \
-             mock.patch.object(m, 'Session', _FakeSession), \
-             mock.patch.object(m.DBOperation, 'query_all_member_mids',
+             mock.patch.object(m, 'query_all_member_mids',
                                side_effect=RuntimeError('boom')):
             with self.assertRaises(RuntimeError):
                 m.update_member_info()
@@ -267,9 +256,8 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         pools = iter([_FakePool(fetch), _FakePool(writer)])
 
         with mock.patch.object(m, 'Service', _FakeService), \
-             mock.patch.object(m, 'Session', _FakeSession), \
-             mock.patch.object(m.DBOperation, 'query_all_member_mids',
-                               staticmethod(lambda session: [])), \
+             mock.patch.object(m, 'query_all_member_mids',
+                               lambda: []), \
              mock.patch.object(m, 'JobPool', lambda *a, **kw: next(pools)):
             m.add_member_follower_record()
 
@@ -320,7 +308,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         stat = _stat(13, success=13, persisted=13)
 
         with mock.patch.object(m, 'Service', _FakeService), \
-             mock.patch.object(m, 'Session', _FakeSession), \
+             mock.patch.object(m, 'query_processing_sprint_aids', return_value=[]), \
              mock.patch.object(m, 'AddSprintVideoRecordJob',
                                lambda *a, **kw: _FakeJob(stat)):
             m.add_sprint_video_record()
@@ -334,7 +322,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         m = _load('71_add-sprint-video-record.py')
         stat = _stat(13, success=12, persisted=12, exception=1)
         with mock.patch.object(m, 'Service', _FakeService), \
-             mock.patch.object(m, 'Session', _FakeSession), \
+             mock.patch.object(m, 'query_processing_sprint_aids', return_value=[]), \
              mock.patch.object(m, 'AddSprintVideoRecordJob', lambda *a, **kw: _FakeJob(stat)):
             with self.assertRaisesRegex(RuntimeError, 'not all confirmed'):
                 m.add_sprint_video_record()

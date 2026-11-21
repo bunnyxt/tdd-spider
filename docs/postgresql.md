@@ -62,14 +62,21 @@ arguments. `db.write.insert_video_records()` and
 return complete keys only after commit. `db.profiles.update_video_profile()`
 and `update_member_profile()` lock and read stored snapshots, compare incoming
 values, and commit profile fields, staff, observation watermarks and logs
-together. Their SQL stays in the database layer. Aid lookups return a snapshot
-or `None`; query errors propagate.
+together. Their SQL stays in the database layer. Standalone queries borrow a
+pooled connection and release it before returning their result. Aid lookups
+return a snapshot or `None`; query errors propagate. An insert reports whether
+it inserted a row or found the expected business key already present, including
+a competing insert after a precheck. Tasks interpret these outcomes as success,
+`AlreadyExistError` or `NotExistError`. Unrelated constraint violations and
+connection errors remain database errors.
 
 The shared `execute_write()` helper calls a Python function inside one guarded
 transaction; it does not dispatch operation strings or import task code.
-Database-internal helpers receive the transaction's `Session`. Batch writers
-configure batch size and queue polling. A failed transaction is reported to its
-caller and is not automatically retried.
+Database-internal helpers receive the same psycopg connection, including the
+trial manifest writer. Tasks, jobs and numbered scripts do not own database
+connections or transactions. Batch writers configure batch size and queue
+polling. A failed transaction is reported to its caller and is not automatically
+retried.
 
 ## Failed writes
 

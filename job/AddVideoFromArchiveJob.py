@@ -1,6 +1,5 @@
 import time
 from .Job import Job
-from db import Session
 from service import Service, NewlistArchive
 from task import add_video, commit_video_record_via_newlist_archive_stat, AlreadyExistError
 from util import format_ts_ms
@@ -15,7 +14,6 @@ class AddVideoFromArchiveJob(Job):
         super().__init__(name)
         self.archive_video_queue = archive_video_queue
         self.service = service
-        self.session = Session()
 
     def process(self):
         while True:
@@ -29,7 +27,7 @@ class AddVideoFromArchiveJob(Job):
 
             try:
                 new_video = add_video(
-                    archive.aid, self.service, self.session, commit_video_record=False)
+                    archive.aid, self.service, commit_video_record=False)
             except AlreadyExistError:
                 self.logger.debug(
                     f'Video presented in archives already exist! archive: {archive}')
@@ -61,6 +59,3 @@ class AddVideoFromArchiveJob(Job):
                               f'archive: {archive}, duration: {format_ts_ms(duration_ms)}')
             self.stat.total_count += 1
             self.stat.total_duration_ms += duration_ms
-
-    def cleanup(self):
-        self.session.close()

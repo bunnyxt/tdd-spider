@@ -2,7 +2,6 @@ import argparse
 import datetime
 import logging
 import re
-from db import Session
 from service import Service
 from util import logging_init, fullname, get_ts_ms, format_duration_summary
 import requests

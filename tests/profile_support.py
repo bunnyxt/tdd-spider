@@ -1,16 +1,14 @@
-"""Execute profile SQL against an isolated transactional store in unit tests."""
+"""Exercise profile SQL with an isolated SQLite connection in unit tests."""
 from contextlib import contextmanager
-from datetime import datetime
 import sqlite3
 from unittest import mock
 
 from db import TddVideo,TddMember,TddVideoStaff,TddVideoLog,TddMemberLog
-from db.basic import Result,ResultRow
 from db.values import epoch
+from db.profiles import _query_video, _query_member
 
 
-class ProfileSession:
-    _depth = 1
+class ProfileConnection:
     def __init__(self):
         self.db = sqlite3.connect(':memory:')
         self.statements = []
@@ -19,19 +17,15 @@ class ProfileSession:
                         '(entity_kind TEXT NOT NULL,entity_id INTEGER NOT NULL,observed_at INTEGER NOT NULL,'
                         'PRIMARY KEY(entity_kind,entity_id))')
         for model in (TddVideo,TddMember,TddVideoStaff,TddVideoLog,TddMemberLog):
-            fields = ','.join('"'+field+'"'+(' INTEGER PRIMARY KEY' if field == 'id' else '') for field in model.fields)
-            unique = ', UNIQUE(aid,mid)' if model is TddVideoStaff else ', UNIQUE(mid)' if model is TddMember else ''
+            fields = ','.join('"'+field+'"'+(' INTEGER PRIMARY KEY' if field == 'id' else ' NOT NULL' if model is TddVideo and field == 'title' else '') for field in model.fields)
+            unique = ', UNIQUE(aid,mid)' if model is TddVideoStaff else ', UNIQUE(mid)' if model is TddMember else ', UNIQUE(aid)' if model is TddVideo else ''
             self.db.execute('CREATE TABLE ' + model.table + '('+fields+unique+')')
         self.db.commit()
 
     def execute(self,statement,params=None):
         self.statements.append((statement,params))
         params = tuple(epoch(v) for v in params) if params is not None else ()
-        cursor = self.db.execute(statement.replace(' FOR UPDATE','').replace('%s','?'),params)
-        if not cursor.description:
-            return Result()
-        names = [col[0] for col in cursor.description]
-        return Result(ResultRow(zip(names,row)) for row in cursor.fetchall())
+        return self.db.execute(statement.replace(' FOR UPDATE','').replace('%s','?'),params)
 
     @contextmanager
     def transaction(self):
@@ -42,19 +36,24 @@ class ProfileSession:
         self.db.close()
 
     def seed(self,obj):
-        from db import DBOperation
-        DBOperation.add(obj,self)
+        self.append(self,[obj])
         self.db.commit()
         return obj
 
-    def append(self,session,objects):
+    def append(self,conn,objects,*,run_id=None):
         for obj in objects:
             fields = [field for field in obj.fields if field != 'id']
             row = self.execute('INSERT INTO '+obj.table+' ('+','.join('"'+f+'"' for f in fields)+') VALUES ('+
-                               ','.join(['%s']*len(fields))+') RETURNING id',tuple(getattr(obj,f) for f in fields)).first()
+                               ','.join(['%s']*len(fields))+') RETURNING id',tuple(getattr(obj,f) for f in fields)).fetchone()
             obj.id = row[0]
         return [(obj.id,) for obj in objects]
 
     def execute_write(self,function,*args,**kwargs):
-        with self.transaction(), mock.patch('db.profiles.append_objects',side_effect=self.append):
-            return function(self,*args,**kwargs)
+        with self.transaction(), mock.patch('db.profiles._append_objects',side_effect=self.append):
+            return function(self,*args,run_id=None,**kwargs)
+
+    def patch_task_reads(self,test):
+        for name,query in (('query_video_via_aid',_query_video),('query_member_via_mid',_query_member)):
+            patcher = mock.patch('task.task.'+name,side_effect=lambda key,query=query:query(self,key))
+            patcher.start()
+            test.addCleanup(patcher.stop)

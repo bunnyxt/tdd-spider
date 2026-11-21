@@ -29,7 +29,9 @@ See the structure below.
 ## Collector runtime
 
 The PostgreSQL collector uses Python 3.12 and parameterized SQL. See
-[setup, configuration and durable observation replay](docs/postgresql.md).
+[setup, configuration, and manual reconciliation of failed writes](docs/postgresql.md).
+Failed writes trigger a best-effort save of their input. If commit status is
+uncertain, an operator must check the database before resubmitting that input.
 
 ## Run records
 

@@ -1,7 +1,8 @@
-from db import Session, DBOperation, TddVideoRecordAbnormalChange
-from db.values import timestamp
-from db.ingest import guard_write_transaction
-from db.write import trial_run_id
+from db import TddVideoRecordAbnormalChange
+from db.queries import (query_all_update_video_aids, query_freq_update_video_aids,
+                        query_video_pubdate_all, query_video_records_of_given_aid_added_before_given_ts)
+from db.hourly import update_video_recent, update_video_activity, update_video_freq
+from db.write import insert_video_record_abnormal_change
 from threading import Thread
 from queue import Queue
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, \
@@ -33,20 +34,20 @@ RecordSpeedRatio = namedtuple('RecordSpeedRatio', [
     'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like', 'inf_magic_num'])
 
 
-def get_need_insert_aid_list(time_label, session):
+def get_need_insert_aid_list(time_label):
     # all in-scope videos (tdd_video, code == 0, state == 0); no tid filter --
     # c0/c30 were merged, the tid == 30 partition no longer means anything.
     if time_label == '04:00':
         # return total (daily full scan)
-        return DBOperation.query_all_update_video_aids(session)
+        return query_all_update_video_aids()
 
     # add 1 hour aids
-    aid_list = DBOperation.query_freq_update_video_aids(2, session)  # freq = 2
+    aid_list = query_freq_update_video_aids(2)  # freq = 2
 
     if time_label in ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00']:
         # add 4 hour aids
         # freq = 1
-        aid_list += DBOperation.query_freq_update_video_aids(1, session)
+        aid_list += query_freq_update_video_aids(1)
 
     return aid_list
 
@@ -215,11 +216,7 @@ class VideoRecordAcquisitionJob(Job):
             self.logger.exception('Acquisition failed')
 
     def process(self):
-        session = Session()
-        try:
-            need_insert_aid_list = get_need_insert_aid_list(self.time_label, session)
-        finally:
-            session.close()
+        need_insert_aid_list = get_need_insert_aid_list(self.time_label)
         self.logger.info(
             f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
@@ -268,7 +265,6 @@ class CheckedRunner(Thread):
     def __init__(self):
         super().__init__()
         self.error = None
-        self.session = None
 
     def run(self):
         try:
@@ -276,9 +272,6 @@ class CheckedRunner(Thread):
         except Exception as error:
             self.error = error
             self.logger.exception('Downstream stage failed')
-        finally:
-            if self.session is not None:
-                self.session.close()
 
 
 class RecordsSaveToFileRunner(CheckedRunner):
@@ -515,9 +508,8 @@ class RecentRecordsAnalystRunner(CheckedRunner):
             total_records, len(aid_recent_records_dict.keys()), self.recent_file_num))
 
         # get video aid pubdate dict, since the following check process requires
-        session = self.session = Session()
         self.logger.info('Now get pubdate of all videos from db...')
-        aid_pubdate_list = DBOperation.query_video_pubdate_all(session)
+        aid_pubdate_list = query_video_pubdate_all()
         if not aid_pubdate_list:
             self.logger.error('Fail to get pubdate of all videos from db!')
             return
@@ -561,8 +553,8 @@ class RecentRecordsAnalystRunner(CheckedRunner):
                 if is_all_zero_record(record):
                     if idx2 == 0:
                         # check if this is the first record of video
-                        if len(DBOperation.query_video_records_of_given_aid_added_before_given_ts(
-                                aid, record.added, session)) > 0:
+                        if len(query_video_records_of_given_aid_added_before_given_ts(
+                                aid, record.added)) > 0:
                             # has records of this video added before this record
                             continue
                     self.logger.warning('Abnormal all zero record %s of video aid %d detected, continue' % (
@@ -640,8 +632,7 @@ class RecentRecordsAnalystRunner(CheckedRunner):
             # commit changes
             try:
                 for change_obj in record_abnormal_change_list:
-                    session.add(change_obj)
-                    session.commit()
+                    insert_video_record_abnormal_change(change_obj)
             except Exception as e:
                 self.logger.error('Fail to add abnormal change of video aid %d to db. Exception caught. Detail: %s' % (
                     aid, e))
@@ -653,7 +644,6 @@ class RecentRecordsAnalystRunner(CheckedRunner):
         self.logger.info(
             '%d / %d done' % (len(aid_recent_records_dict), len(aid_recent_records_dict)))
 
-        session.close()
         self.logger.info('Finish analyzing recent records! %s' %
                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
 
@@ -664,30 +654,19 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
         self.time_task = time_task
         self.time_label = time_task[-5:]
         self.records = records
-        self.run_id = trial_run_id()
         self.metrics = {}  # activity counts, written into the run record by the caller
         self.logger = logging.getLogger('RecentActivityFreqUpdateRunner')
 
-    def _update_recent(self, session):
+    def _update_recent(self):
         self.logger.info('Now start update recent field...')
         try:
-            now_ts = get_ts_s()
-            last_1d_ts = now_ts - 1 * 24 * 60 * 60
-            last_7d_ts = now_ts - 7 * 24 * 60 * 60
-            with session.transaction():
-                guard_write_transaction(session.connection, self.run_id)
-                session.execute('update tdd_video set recent = 0 where added < %s',
-                                (timestamp(last_7d_ts),))
-                session.execute('update tdd_video set recent = 1 where added >= %s AND added < %s',
-                                (timestamp(last_7d_ts), timestamp(last_1d_ts)))
-                session.execute('update tdd_video set recent = 2 where added >= %s',
-                                (timestamp(last_1d_ts),))
+            update_video_recent(get_ts_s())
             self.logger.info('Finish update recent field!')
         except Exception as e:
             self.logger.error('Fail to update recent field. Exception caught. Detail: %s' % e)
             raise
 
-    def _update_activity(self, session, active_threshold=1000, hot_threshold=5000):
+    def _update_activity(self, active_threshold=1000, hot_threshold=5000):
         self.logger.info('Now start update activity field...')
         try:
             last_path = full_scan_snapshot_path(time_task_days_before(self.time_task, 7))
@@ -727,19 +706,7 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
                     active += activity == 1
                     desired[activity].append(aid)
 
-            with session.transaction():
-                guard_write_transaction(session.connection, self.run_id)
-                current = {row['aid']: row['activity'] for row in session.execute(
-                    'select aid, activity from tdd_video where activity != 0')}
-                changes = defaultdict(list)  # new activity -> aids
-                for activity, aids in desired.items():
-                    changes[activity] = [aid for aid in aids if current.get(aid, 0) != activity]
-                for activity, aids in sorted(changes.items()):
-                    for i in range(0, len(aids), 1000):
-                        session.execute('update tdd_video set activity = %s where aid = ANY(%s)',
-                                        (activity, aids[i:i + 1000]))
-
-            changed = sum(len(aids) for aids in changes.values())
+            changed = update_video_activity(dict(desired))
             self.metrics.update(activity_paired=paired, activity_hot=hot, activity_active=active,
                                 activity_changed=changed)
             self.logger.info('Finish update activity field! %d paired, %d hot, %d active, %d changed.' % (
@@ -748,14 +715,10 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
             self.logger.error('Fail to update activity field. Exception caught. Detail: %s' % e)
             raise
 
-    def _update_freq(self, session):
+    def _update_freq(self):
         self.logger.info('Now start update freq field...')
         try:
-            with session.transaction():
-                guard_write_transaction(session.connection, self.run_id)
-                session.execute('update tdd_video set freq = 0')
-                session.execute('update tdd_video set freq = 1 where activity = 1')
-                session.execute('update tdd_video set freq = 2 where activity = 2 OR recent = 1')
+            update_video_freq()
             self.logger.info('Finish update freq field!')
         except Exception as e:
             self.logger.error('Fail to update freq field. Exception caught. Detail: %s' % e)
@@ -764,14 +727,10 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
     def process(self):
         self.logger.info(
             'Now start updating recent, activity, freq fields of video...')
-        session = self.session = Session()
-        try:
-            self._update_recent(session)
-            if self.time_label == '04:00':
-                self._update_activity(session)
-            self._update_freq(session)
-        finally:
-            session.close()
+        self._update_recent()
+        if self.time_label == '04:00':
+            self._update_activity()
+        self._update_freq()
         self.logger.info(
             'Finish update recent, activity, freq fields of video!')
 

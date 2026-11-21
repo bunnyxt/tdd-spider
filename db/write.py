@@ -1,4 +1,4 @@
-"""Append records with the shared business transaction and trial complete-key manifest."""
+"""Append records inside their owner's transaction and trial complete-key manifest."""
 import os
 from uuid import UUID
 from .values import database_value
@@ -11,18 +11,18 @@ def trial_run_id():
     return UUID(value) if value else None
 
 
-def append_video_records(session, records):
+def append_video_records(conn, records, *, run_id=None):
     """Bind collected records directly and return (aid, added, id) keys in order."""
     if not records:
         return []
     from .ingest import append_rows
     rows = [tuple(database_value(field, getattr(record, field)) for field in VIDEO_RECORD_COLUMNS)
             for record in records]
-    return append_rows(session.connection, 'tdd_video_record', VIDEO_RECORD_COLUMNS, rows,
-                       run_id=session.run_id if hasattr(session, 'run_id') else trial_run_id())
+    return append_rows(conn, 'tdd_video_record', VIDEO_RECORD_COLUMNS, rows, run_id=run_id)
 
 
-def append_objects(session, objects):
+def _append_objects(conn, objects, *, run_id=None):
+    """Internal homogeneous append used by profile logs and legacy record writes."""
     if not objects:
         return []
     from .ingest import append_rows
@@ -31,14 +31,13 @@ def append_objects(session, objects):
         raise ValueError('An append batch must contain one row type')
     columns = tuple(field for field in model.fields if field != 'id')
     rows = [tuple(database_value(field, getattr(obj, field)) for field in columns) for obj in objects]
-    keys = append_rows(session.connection, model.table, columns, rows,
-                       run_id=session.run_id if hasattr(session,'run_id') else trial_run_id())
+    keys = append_rows(conn, model.table, columns, rows, run_id=run_id)
     for obj, key in zip(objects, keys):
         obj.id = key[-1]
     return keys
 
 
-def append_member_follower_records(session, records):
+def append_member_follower_records(conn, records, *, run_id=None):
     """Bind collected followers directly; retain independent same-second keys."""
     if not records:
         return []
@@ -46,8 +45,7 @@ def append_member_follower_records(session, records):
     columns = ('added', 'mid', 'follower')
     rows = [tuple(database_value(field, getattr(record, field)) for field in columns)
             for record in records]
-    return append_rows(session.connection, 'tdd_member_follower_record', columns, rows,
-                       run_id=session.run_id if hasattr(session, 'run_id') else trial_run_id())
+    return append_rows(conn, 'tdd_member_follower_record', columns, rows, run_id=run_id)
 
 
 def insert_video_records(records):
@@ -60,11 +58,23 @@ def insert_member_follower_records(records):
     return execute_write(append_member_follower_records, records)
 
 
-def insert_objects(objects):
+def insert_member_total_stat_records(records):
     from .observation import execute_write
-    return execute_write(_insert_objects, objects)
+    return execute_write(_insert_member_total_stat_records, records)
 
 
-def _insert_objects(session, objects):
-    append_objects(session, objects)
-    return objects
+def _insert_member_total_stat_records(conn, records, *, run_id=None):
+    from .ingest import append_rows
+    columns = ('added', 'mid', 'video_count') + VIDEO_RECORD_COLUMNS[2:]
+    rows = [tuple(database_value(field, record[field]) for field in columns) for record in records]
+    return append_rows(conn, 'tdd_member_total_stat_record', columns, rows, run_id=run_id)
+
+
+def insert_video_record_abnormal_change(change):
+    from .observation import execute_write
+    return execute_write(_insert_video_record_abnormal_change, change)
+
+
+def _insert_video_record_abnormal_change(conn, change, *, run_id=None):
+    _append_objects(conn, [change], run_id=run_id)
+    return change

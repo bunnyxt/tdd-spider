@@ -1,4 +1,4 @@
-from db import DBOperation, Session
+from db.queries import query_all_member_mids
 from service import Service
 from util import logging_init, fullname, get_ts_ms, format_duration_summary
 from runrecord import track
@@ -24,12 +24,10 @@ def add_member_follower_record():
         # ~40 min before 51_'s 12:00 run -- it runs to completion (no duration cap).
         job_num = 50
 
-        session = Session()
         service = Service(mode='worker', pool_maxsize=job_num + 32)
 
         # load all mids
-        mids: list[int] = DBOperation.query_all_member_mids(session=session)
-        session.close()
+        mids: list[int] = query_all_member_mids()
         logger.info(f'Total {len(mids)} members got.')
 
         # mid queue for the fetch pool

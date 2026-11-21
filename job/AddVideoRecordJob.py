@@ -2,7 +2,6 @@ import time
 from .Job import Job
 from service import Service, CodeError
 from queue import Queue, Empty
-from db import Session
 from core import VideoRecord
 from util import format_ts_ms, get_ts_s, ts_s_to_str
 from task import add_video_record_via_video_view, update_video
@@ -18,7 +17,6 @@ class AddVideoRecordJob(Job):
         self.aid_queue = aid_queue
         self.video_record_queue = video_record_queue
         self.service = service
-        self.session = Session()
         self.update_if_code_error = update_if_code_error
         self.duration_limit_s = duration_limit_s
         self.duration_limit_due_ts_s = None
@@ -48,15 +46,8 @@ class AddVideoRecordJob(Job):
                 if self.update_if_code_error:
                     self.logger.info(f'Code error occurred. Now start update video. aid: {aid}')
                     try:
-                        tdd_video_logs = update_video(aid, self.service, self.session)
+                        tdd_video_logs = update_video(aid, self.service)
                     except Exception as e2:
-                        # Recover the session so a failed DB op does not leave
-                        # it in an invalid-transaction state that would cascade
-                        # to every subsequent aid in this worker.
-                        try:
-                            self.session.rollback()
-                        except Exception:
-                            pass
                         self.logger.error(f'Fail to update video info. aid: {aid}, error: {e2}')
                         self.stat.condition['update_exception'] += 1
                     else:
@@ -69,12 +60,6 @@ class AddVideoRecordJob(Job):
                     self.logger.error(f'Fail to add video record. aid: {aid}, error: {e}')
                 self.stat.condition['code_error'] += 1
             except Exception as e:
-                # Recover the session so a failed DB op does not leave it in an
-                # invalid-transaction state that would cascade to subsequent aids.
-                try:
-                    self.session.rollback()
-                except Exception:
-                    pass
                 self.logger.error(f'Fail to add video record. aid: {aid}, error: {e}')
                 self.stat.condition['other_exception'] += 1
             else:
@@ -94,6 +79,3 @@ class AddVideoRecordJob(Job):
                 + f' total={duration_ms}ms')
             self.stat.total_count += 1
             self.stat.total_duration_ms += duration_ms
-
-    def cleanup(self):
-        self.session.close()

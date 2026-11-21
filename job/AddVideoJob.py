@@ -2,7 +2,6 @@ import time
 from .Job import Job
 from service import Service
 from queue import Queue, Empty
-from db import Session
 from util import format_ts_ms
 from task import add_video, AlreadyExistError
 
@@ -14,7 +13,6 @@ class AddVideoJob(Job):
         super().__init__(name)
         self.aid_queue = aid_queue
         self.service = service
-        self.session = Session()
         self.test_exist = test_exist
 
     def process(self):
@@ -28,7 +26,7 @@ class AddVideoJob(Job):
 
             try:
                 new_video = add_video(
-                    aid, self.service, self.session, self.test_exist)
+                    aid, self.service, test_exist=self.test_exist)
             except AlreadyExistError:
                 self.logger.info(
                     f'Video already exist! aid: {aid}')
@@ -47,6 +45,3 @@ class AddVideoJob(Job):
                               f'aid: {aid}, duration: {format_ts_ms(duration_ms)}')
             self.stat.total_count += 1
             self.stat.total_duration_ms += duration_ms
-
-    def cleanup(self):
-        self.session.close()

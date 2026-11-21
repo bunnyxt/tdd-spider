@@ -28,8 +28,7 @@ class CandidateRotationTest(unittest.TestCase):
                 with self.subTest(script=filename,weekday=weekday), tempfile.TemporaryDirectory() as directory, \
                      mock.patch.dict('os.environ',{'TDD_RUN_RECORD_DB':directory+'/runs.sqlite3'}), \
                      mock.patch.object(script,'Service',return_value=service), \
-                     mock.patch.object(script,'Session',return_value=mock.Mock()), \
-                     mock.patch.object(script.DBOperation,query,return_value=candidates), \
+                     mock.patch.object(script,query,return_value=candidates), \
                      mock.patch.object(script,jobname,side_effect=job), \
                      mock.patch.object(script,'JobPool',return_value=pool), \
                      mock.patch.object(script,'get_week_day',return_value=weekday):

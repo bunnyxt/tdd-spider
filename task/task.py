@@ -3,9 +3,10 @@ import logging
 import time
 
 from service import Service, ServiceError, CodeError
-from db import DBOperation, TddVideo, TddMember, TddSprintVideoRecord
+from db import TddVideo, TddMember, TddSprintVideoRecord
+from db.queries import query_video_via_aid, query_member_via_mid
 from db.write import insert_video_records, insert_member_follower_records
-from db.profiles import insert_video, update_video_profile, insert_member, update_member_profile, ensure_members, commit_staff
+from db.profiles import insert_video, update_video_profile, insert_member, update_member_profile, ensure_members
 from db.sprint import insert_sprint_video_record
 from db.values import clean_text
 from util import get_ts_s, a2b
@@ -17,7 +18,7 @@ STAT_FIELDS = ('view','danmaku','reply','favorite','coin','share','like')
 __all__ = ['add_video_record_via_video_view','fetch_video_record_via_video_view','commit_video_records_batch',
            'commit_video_record_via_video_view','commit_video_record_via_newlist_archive_stat',
            'add_sprint_video_record_via_video_view','add_video','update_video','add_member','update_member',
-           'commit_staff','add_member_follower_record','fetch_member_follower_record',
+           'add_member_follower_record','fetch_member_follower_record',
            'commit_member_follower_records_batch','get_video_tags_str']
 
 
@@ -79,13 +80,13 @@ def _member_object(mid, card, added):
 
 
 
-def _prepare_members(aid, mids, service, session, strict=False):
+def _prepare_members(aid, mids, service, strict=False):
     prepared = {}
     for mid in sorted(set(mids), key=lambda value: str(value)):
         if type(mid) is not int or mid <= 0:
             logger.warning('Skip invalid video member: aid=%s, mid=%r', aid,mid)
             continue
-        if DBOperation.query_member_via_mid(mid,session) is not None:
+        if query_member_via_mid(mid) is not None:
             continue
         try:
             prepared[mid] = _member_object(mid, service.get_member_card(
@@ -98,8 +99,8 @@ def _prepare_members(aid, mids, service, session, strict=False):
 
 
 
-def add_video(aid, service, session, test_exist=True, commit_video_record=True):
-    if test_exist and DBOperation.query_video_via_aid(aid,session) is not None:
+def add_video(aid, service, test_exist=True, commit_video_record=True):
+    if test_exist and query_video_via_aid(aid) is not None:
         raise AlreadyExistError(table='tdd_video',params={'aid':aid})
     view = service.get_video_view({'aid':aid})
     if view.title is None:
@@ -108,7 +109,7 @@ def add_video(aid, service, session, test_exist=True, commit_video_record=True):
     added = get_ts_s()
     tags = get_video_tags_str(aid,service)
     staff = view.staff or []
-    members = _prepare_members(aid,[view.owner.mid] + [s.mid for s in staff],service,session,strict=True)
+    members = _prepare_members(aid,[view.owner.mid] + [s.mid for s in staff],service,strict=True)
     video = TddVideo(added=added, aid=aid, bvid=view.bvid.removeprefix('BV'), mid=view.owner.mid,
                      code=0, tags=tags, recent=2, hasstaff=1 if view.staff is not None else 0,
                      **{field:clean_text(getattr(view,field)) for field in
@@ -116,11 +117,14 @@ def add_video(aid, service, session, test_exist=True, commit_video_record=True):
     if any(tag.upper() == 'VOCALOID中文曲' for tag in tags.split(';')):
         video.isvc = 2
     record = VideoRecord(added=added,aid=aid,bvid=view.bvid.removeprefix('BV'),**_stats(view.stat)) if commit_video_record else None
-    return insert_video(video,view.staff,list(members.values()),record)
+    inserted = insert_video(video,view.staff,list(members.values()),record)
+    if inserted is None:
+        raise AlreadyExistError(table='tdd_video',params={'aid':aid})
+    return inserted
 
 
 
-def update_video(aid, service, session, out_context=None):
+def update_video(aid, service, out_context=None):
     # Fetch can be slow. No database write lock is held while waiting for HTTP.
     code_error, view = None, None
     try:
@@ -136,29 +140,35 @@ def update_video(aid, service, session, out_context=None):
     members = {}
     if view is not None:
         mids = [view.owner.mid] + [s.mid for s in (view.staff or [])]
-        members = _prepare_members(aid,mids,service,session)
+        members = _prepare_members(aid,mids,service)
         try:
             tags = get_video_tags_str(aid,service)
         except ServiceError as error:
             logger.warning('Skip tags update (view changes kept). aid: %s, error: %s',aid,error)
-    return update_video_profile(aid,view,None if code_error is None else code_error.code,
+    logs = update_video_profile(aid,view,None if code_error is None else code_error.code,
                                 tags,list(members.values()),added)
+    if logs is None:
+        raise NotExistError(table='tdd_video',params={'aid':aid})
+    return logs
 
 
 
-def ensure_video_member(aid, mid, service, session):
-    prepared = _prepare_members(aid,[mid],service,session)
+def ensure_video_member(aid, mid, service):
+    prepared = _prepare_members(aid,[mid],service)
     return ensure_members(list(prepared.values()))
 
 
 
-def add_member(mid, service, session, test_exist=True):
+def add_member(mid, service, test_exist=True):
     if type(mid) is not int or mid <= 0:
         raise ValueError(f'Member mid must be a positive integer: {mid!r}')
-    if test_exist and DBOperation.query_member_via_mid(mid,session) is not None:
+    if test_exist and query_member_via_mid(mid) is not None:
         raise AlreadyExistError(table='member',params={'mid':mid})
     member = _member_object(mid,service.get_member_card({'mid':mid},timeout=1.5,colddown_factor=0.1),get_ts_s())
-    return insert_member(member)
+    inserted = insert_member(member)
+    if inserted is None:
+        raise AlreadyExistError(table='member',params={'mid':mid})
+    return inserted
 
 
 
@@ -170,7 +180,10 @@ def update_member(mid, service):
         if error.code != -404:
             raise
         code = error.code
-    return update_member_profile(mid,card,code,get_ts_s())
+    logs = update_member_profile(mid,card,code,get_ts_s())
+    if logs is None:
+        raise NotExistError(table='tdd_member',params={'mid':mid})
+    return logs
 
 
 

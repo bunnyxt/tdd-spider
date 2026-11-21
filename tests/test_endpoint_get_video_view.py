@@ -66,17 +66,19 @@ class GetVideoViewEndpointTest(unittest.TestCase):
         self.assertIsNone(result.staff)
         self.assertIsNone(result.stat.vt)
         self.assertIsNone(result.stat.vv)
-        self.assertEqual(result.present_fields, frozenset())
+        self.assertFalse(result.response_has_attribute)
+        self.assertFalse(result.response_has_forward)
 
     def test_presence_tracks_only_optional_scalar_keys(self):
         for field, other in (('attribute', 'forward'), ('forward', 'attribute')):
-            for value in (None, 42):
+            for value in (None, 0, 42):
                 with self.subTest(field=field, value=value):
                     response = valid_response()
                     response['data'][field] = value
                     del response['data'][other]
                     result = get_video_view.get(lambda *args, **kwargs: response)
-                    self.assertEqual(result.present_fields, frozenset({field}))
+                    self.assertTrue(getattr(result, 'response_has_' + field))
+                    self.assertFalse(getattr(result, 'response_has_' + other))
                     self.assertEqual(getattr(result, field), value)
                     self.assertIsNone(getattr(result, other))
 

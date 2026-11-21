@@ -1,6 +1,5 @@
 import time
 from .Job import Job
-from db import Session
 from service import Service, NewlistArchive
 from queue import Queue
 from util import format_ts_ms, get_ts_s
@@ -16,7 +15,6 @@ class GetNewlistArchiveJob(Job):
         self.page_num_queue = page_num_queue
         self.archive_video_queue = archive_video_queue
         self.service = service
-        self.session = Session()
 
     def process(self):
         while not self.page_num_queue.empty():
@@ -47,6 +45,3 @@ class GetNewlistArchiveJob(Job):
                               f'page_num: {page_num}, duration: {format_ts_ms(duration_ms)}')
             self.stat.total_count += 1
             self.stat.total_duration_ms += duration_ms
-
-    def cleanup(self):
-        self.session.close()

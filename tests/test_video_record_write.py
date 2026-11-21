@@ -97,8 +97,7 @@ class VideoRecordWriteTest(unittest.TestCase):
                     f'{added},7,1AbCdEfGhJ,{view},1,2,3,4,5,6\n')
             runner = script.RecentRecordsAnalystRunner([record], '2026-01-01 03:00',
                                                        data_folder=directory + '/')
-            with mock.patch.object(script, 'Session'), \
-                    mock.patch.object(script.DBOperation, 'query_video_pubdate_all', return_value=[(7, 0)]), \
+            with mock.patch.object(script, 'query_video_pubdate_all', return_value=[(7, 0)]), \
                     mock.patch.object(runner, '_calc_record_speed', wraps=runner._calc_record_speed) as speed:
                 runner.process()
         self.assertEqual(speed.call_count, 4)

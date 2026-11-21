@@ -8,17 +8,17 @@ import unittest
 from unittest import mock
 from uuid import uuid4
 
-from db import TddVideoRecord
+from db import TddVideoRecordAbnormalChange
 from db.observation import execute_write
-from db.write import insert_objects
+from db.write import insert_video_record_abnormal_change
 from service import MemberCard
 
 
-def save_member(session, card, record, present):
+def save_member(conn, card, record, present, *, run_id=None):
     return card
 
 
-def unsupported(session, value):
+def unsupported(conn, value, *, run_id=None):
     return value
 
 
@@ -33,15 +33,15 @@ class ObservationTest(unittest.TestCase):
         self.addCleanup(environment.stop)
 
     def test_success_returns_original_result_without_encoding_or_filesystem_work(self):
-        record = TddVideoRecord(added=123, aid=1, view=100)
+        record = TddVideoRecordAbnormalChange(added=123, aid=1, speed_now=100)
         def run(factory, callback, *, run_id):
             return callback(mock.Mock())
         with mock.patch('db.ingest.run_transaction', side_effect=run), \
-             mock.patch('db.write.append_objects') as append, \
+             mock.patch('db.write._append_objects') as append, \
              mock.patch('db.observation.encode', side_effect=AssertionError('must not encode')), \
              mock.patch('db.observation._save_failure') as save:
-            result = insert_objects([record])
-        self.assertIs(result[0], record)
+            result = insert_video_record_abnormal_change(record)
+        self.assertIs(result, record)
         append.assert_called_once()
         save.assert_not_called()
         self.assertFalse(self.directory.exists())
@@ -49,7 +49,7 @@ class ObservationTest(unittest.TestCase):
     def test_failure_is_saved_after_one_attempt_and_preserves_input_types(self):
         run_id = uuid4()
         payload = {'card': MemberCard(7, 'name', None, '', 'sign'),
-                   'record': TddVideoRecord(added=123, aid=1, view=100),
+                   'record': TddVideoRecordAbnormalChange(added=123, aid=1, speed_now=100),
                    'present': frozenset(('name', 'sign'))}
         error = RuntimeError('COMMIT outcome unknown')
         def fail(*args, **kwargs):
@@ -68,7 +68,7 @@ class ObservationTest(unittest.TestCase):
                          ('save_member', str(run_id), 'unconfirmed'))
         self.assertEqual(data['payload']['card']['values']['face'], '')
         self.assertIsNone(data['payload']['card']['values']['sex'])
-        self.assertEqual(data['payload']['record']['values']['view'], 100)
+        self.assertEqual(data['payload']['record']['values']['speed_now'], 100)
         self.assertEqual(data['payload']['present']['set_values'], ['name', 'sign'])
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(self.directory.stat().st_mode), 0o700)
@@ -79,10 +79,10 @@ class ObservationTest(unittest.TestCase):
              self.assertLogs('db.observation', level='ERROR'):
             for aid in (1, 2):
                 with self.assertRaises(RuntimeError):
-                    insert_objects([TddVideoRecord(added=1, aid=aid)])
+                    insert_video_record_abnormal_change(TddVideoRecordAbnormalChange(added=1, aid=aid))
         files = list(self.directory.glob('*.json'))
         self.assertEqual(len(files), 2)
-        self.assertEqual({json.loads(path.read_text())['payload']['objects'][0]['values']['aid']
+        self.assertEqual({json.loads(path.read_text())['payload']['change']['values']['aid']
                           for path in files}, {1, 2})
 
     def test_archive_failure_does_not_mask_database_exception(self):
@@ -91,7 +91,7 @@ class ObservationTest(unittest.TestCase):
              mock.patch('db.observation._save_failure', side_effect=OSError('disk full')), \
              self.assertLogs('db.observation', level='ERROR') as logs:
             with self.assertRaises(RuntimeError) as caught:
-                insert_objects([])
+                insert_video_record_abnormal_change(TddVideoRecordAbnormalChange())
         self.assertIs(caught.exception, original)
         self.assertIn('could not be saved', logs.output[0])
 

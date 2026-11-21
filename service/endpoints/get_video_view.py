@@ -79,4 +79,5 @@ def get(request: Callable[..., dict], params: Optional[dict] = None,
             dislike=data['stat']['dislike'], vt=data['stat'].get('vt'),
             vv=data['stat'].get('vv')),
         attribute=data.get('attribute'), forward=data.get('forward'), staff=staff,
-        present_fields=frozenset(field for field in ('attribute', 'forward') if field in data))
+        response_has_attribute='attribute' in data,
+        response_has_forward='forward' in data)

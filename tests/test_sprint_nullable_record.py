@@ -22,7 +22,7 @@ class SprintNullableRecordTest(unittest.TestCase):
         record = TddSprintVideoRecord(added=123,aid=10,view=None,danmaku=None,reply=None,
                                      favorite=None,coin=None,share=None,like=None)
         session = mock.Mock()
-        with mock.patch('db.sprint.append_objects') as append:
+        with mock.patch('db.sprint._append_objects') as append:
             self.assertIs(_insert_sprint_video_record(session,record),record)
         append.assert_called_once()
         self.assertIsNone(append.call_args.args[1][0].view)

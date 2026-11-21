@@ -18,8 +18,8 @@ class FetchVideoRecordJob(Job):
     the bulk counterpart of AddVideoRecordJob (which stays the right choice for
     small aid batches).
 
-    Fetchers touch NO DB, at all -- they do not even import Session. An aid whose
-    view call returns a CodeError (deleted / hidden / -403) is pushed to
+    Fetchers touch no database. An aid whose view call returns a CodeError
+    (deleted / hidden / -403) is pushed to
     code_error_aid_queue for a bounded UpdateVideoJob pool to refresh, instead of
     the fetcher running update_video itself. Doing it inline meant any of the 250
     fetchers could grab a pooled connection (and, before that, pin one for its

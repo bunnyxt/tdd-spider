@@ -27,4 +27,4 @@ class Job(Thread):
         self.logger.debug('Override this method for customizing job process.')
 
     def cleanup(self):
-        self.logger.debug('Override this method for customizing clean up, e.g. close session.')
+        self.logger.debug('Override this method for customizing clean up.')

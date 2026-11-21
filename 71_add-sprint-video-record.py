@@ -1,4 +1,4 @@
-from db import Session
+from db.queries import query_processing_sprint_aids
 from job import AddSprintVideoRecordJob
 from service import Service
 from runrecord import track
@@ -17,15 +17,10 @@ def add_sprint_video_record():
     start_ts_ms = get_ts_ms()
 
     with track(script_fullname) as recorder:
-        session = Session()
         service = Service(mode='worker')
 
         # load processing video aids from db
-        try:
-            result = session.execute('select aid from tdd_sprint_video where status = %s', ('processing',))
-            aids = [r['aid'] for r in result]
-        finally:
-            session.close()
+        aids = query_processing_sprint_aids()
         logger.info(f'Total {len(aids)} videos got.')
 
         # put aid into queue
