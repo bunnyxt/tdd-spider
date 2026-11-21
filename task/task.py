@@ -3,7 +3,7 @@ import logging
 import time
 
 from service import Service, ServiceError, CodeError
-from db import TddVideo, TddMember, TddSprintVideoRecord
+from db import TddMember, TddSprintVideoRecord
 from db.queries import query_video_via_aid, query_member_via_mid
 from db.write import insert_video_records, insert_member_follower_records
 from db.profiles import insert_video, update_video_profile, insert_member, update_member_profile, ensure_members
@@ -19,7 +19,7 @@ __all__ = ['add_video_record_via_video_view','fetch_video_record_via_video_view'
            'commit_video_record_via_video_view','commit_video_record_via_newlist_archive_stat',
            'add_sprint_video_record_via_video_view','add_video','update_video','add_member','update_member',
            'add_member_follower_record','fetch_member_follower_record',
-           'commit_member_follower_records_batch','get_video_tags_str']
+           'commit_member_follower_records_batch']
 
 
 def _stats(stat):
@@ -102,22 +102,25 @@ def _prepare_members(aid, mids, service, strict=False):
 def add_video(aid, service, test_exist=True, commit_video_record=True):
     if test_exist and query_video_via_aid(aid) is not None:
         raise AlreadyExistError(table='tdd_video',params={'aid':aid})
-    view = service.get_video_view({'aid':aid})
-    if view.title is None:
+    video_view = service.get_video_view({'aid':aid})
+    if video_view.title is None:
         logger.warning('Reject new video with null title: aid=%s',aid)
         raise ValueError('New video title must not be null')
     added = get_ts_s()
-    tags = get_video_tags_str(aid,service)
-    staff = view.staff or []
-    members = _prepare_members(aid,[view.owner.mid] + [s.mid for s in staff],service,strict=True)
-    video = TddVideo(added=added, aid=aid, bvid=view.bvid.removeprefix('BV'), mid=view.owner.mid,
-                     code=0, tags=tags, recent=2, hasstaff=1 if view.staff is not None else 0,
-                     **{field:clean_text(getattr(view,field)) for field in
-                        ('videos','tid','tname','copyright','pic','title','pubdate','desc','attribute','state','forward')})
-    if any(tag.upper() == 'VOCALOID中文曲' for tag in tags.split(';')):
-        video.isvc = 2
-    record = VideoRecord(added=added,aid=aid,bvid=view.bvid.removeprefix('BV'),**_stats(view.stat)) if commit_video_record else None
-    inserted = insert_video(video,view.staff,list(members.values()),record)
+    tags = _get_video_tags_str(aid,service)
+    staff = video_view.staff or []
+    members = _prepare_members(aid,[video_view.owner.mid] + [s.mid for s in staff],service,strict=True)
+    isvc = 2 if any(tag.upper() == 'VOCALOID中文曲' for tag in tags.split(';')) else -1
+    record = VideoRecord(added=added,aid=aid,bvid=video_view.bvid.removeprefix('BV'),
+                         **_stats(video_view.stat)) if commit_video_record else None
+    inserted = insert_video(
+        added=added, aid=aid, bvid=video_view.bvid.removeprefix('BV'), mid=video_view.owner.mid,
+        videos=video_view.videos, tid=video_view.tid, tname=video_view.tname,
+        copyright=video_view.copyright, pic=video_view.pic, title=video_view.title,
+        pubdate=video_view.pubdate, desc=video_view.desc, tags=tags,
+        attribute=video_view.attribute, state=video_view.state, forward=video_view.forward,
+        hasstaff=1 if video_view.staff is not None else 0, isvc=isvc,
+        staff=video_view.staff, members=list(members.values()), record=record)
     if inserted is None:
         raise AlreadyExistError(table='tdd_video',params={'aid':aid})
     return inserted
@@ -142,7 +145,7 @@ def update_video(aid, service, out_context=None):
         mids = [view.owner.mid] + [s.mid for s in (view.staff or [])]
         members = _prepare_members(aid,mids,service)
         try:
-            tags = get_video_tags_str(aid,service)
+            tags = _get_video_tags_str(aid,service)
         except ServiceError as error:
             logger.warning('Skip tags update (view changes kept). aid: %s, error: %s',aid,error)
     logs = update_video_profile(aid,view,None if code_error is None else code_error.code,
@@ -211,5 +214,5 @@ def commit_member_follower_records_batch(records, out_stat=None):
     return keys
 
 
-def get_video_tags_str(aid, service):
+def _get_video_tags_str(aid, service):
     return ''.join(clean_text(tag.tag_name) + ';' for tag in service.get_video_tags({'aid':aid}).tags)

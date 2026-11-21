@@ -117,7 +117,7 @@ class ProfileObservationOrderTest(unittest.TestCase):
             now[0] = 300
             return ''
         with mock.patch('task.task.get_ts_s',side_effect=lambda:now[0]), \
-             mock.patch('task.task.get_video_tags_str',side_effect=tags):
+             mock.patch('task.task._get_video_tags_str',side_effect=tags):
             update_video(self.aid,self.service)
         self.assertEqual(self.watermark('video',self.aid),100)
 

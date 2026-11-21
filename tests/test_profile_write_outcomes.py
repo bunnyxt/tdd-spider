@@ -50,10 +50,10 @@ class ProfileWriteOutcomesTest(unittest.TestCase):
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_member').fetchone()[0], 0)
 
     def test_unrelated_not_null_constraint_is_not_an_existing_aid_outcome(self):
-        invalid = TddVideo(added=1, aid=self.view.aid,
-                           bvid=self.view.bvid.removeprefix('BV'), title=None, code=0)
         with self.assertRaises(sqlite3.IntegrityError):
-            insert_video(invalid, [], [], record=None)
+            insert_video(added=1, aid=self.view.aid,
+                         bvid=self.view.bvid.removeprefix('BV'), mid=self.view.owner.mid,
+                         title=None, pubdate=self.view.pubdate, staff=[], members=[])
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_video').fetchone()[0], 0)
 
     def test_database_reports_absence_and_duplicate_without_task_errors(self):

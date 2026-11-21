@@ -2,7 +2,7 @@
 import unittest
 from unittest import mock
 from db import TddVideo,TddVideoStaff,TddMember
-from service import FormatError
+from service import FormatError, ServiceError
 from service.endpoints import get_video_view
 from task.task import update_video
 from test_endpoint_get_video_view import expected_result,valid_response
@@ -34,7 +34,7 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.conn.seed(TddVideoStaff(added=1,aid=view.aid,bvid='1234567890',mid=10,title='producer'))
 
     def refresh(self,tags=''):
-        with mock.patch('task.task.get_video_tags_str',return_value=tags):
+        with mock.patch('task.task._get_video_tags_str',return_value=tags):
             logs = update_video(self.view.aid,self.service)
         return {log.attr:(log.oldval,log.newval) for log in logs}
 
@@ -194,6 +194,40 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         staff = _query_staff(self.conn,self.view.aid)
         self.assertEqual([(item.mid,item.title) for item in staff],[(10,'first')])
 
+    def test_new_video_tags_failure_aborts_before_database_writes(self):
+        from task.task import add_video
+        error = ServiceError()
+        self.service.get_video_tags.side_effect = error
+        with self.assertRaises(ServiceError) as caught:
+            add_video(self.view.aid,self.service)
+        self.assertIs(caught.exception,error)
+        self.assertIsNone(_query_video(self.conn,self.view.aid))
+        self.assertEqual(_query_staff(self.conn,self.view.aid),[])
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_ingest.profile_observation').fetchone()[0],0)
+        self.service.get_member_card.assert_not_called()
+
+    def test_new_video_creation_values_preserve_tag_classification_and_defaults(self):
+        from task.task import add_video
+        for aid,tag,isvc in ((7,'vocaloid中文曲',2),(9,'other',-1)):
+            with self.subTest(tag=tag):
+                self.service.get_video_view.return_value = self.view._replace(aid=aid,staff=None)
+                self.service.get_video_tags.return_value.tags = [mock.Mock(tag_name=tag)]
+                video = add_video(aid,self.service,commit_video_record=False)
+                self.assertEqual((video.code,video.recent,video.freq,video.activity),(0,2,0,0))
+                self.assertEqual((video.solo,video.original,video.employed,video.engine),(-1,-1,-1,-1))
+                self.assertEqual((video.hasstaff,video.isvc,video.tags),(0,isvc,tag+';'))
+                self.assertEqual(vars(video),vars(_query_video(self.conn,aid)))
+
+    def test_refresh_tags_failure_preserves_tags_and_updates_other_fields(self):
+        self.seed(title='old title',tags='stored tags;')
+        self.service.get_video_tags.side_effect = ServiceError()
+        with self.assertLogs('task',level='WARNING'):
+            logs = update_video(self.view.aid,self.service)
+        current = _query_video(self.conn,self.view.aid)
+        self.assertEqual((current.tags,current.title),('stored tags;',self.view.title))
+        self.assertEqual({log.attr:(log.oldval,log.newval) for log in logs},
+                         {'title':('old title',self.view.title)})
+
     def test_refresh_repeated_existing_and_new_staff_preserves_first_logs_and_other_changes(self):
         from service import VideoViewStaffItem
         self.seed()
@@ -202,7 +236,7 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.service.get_video_view.return_value = self.view._replace(title='changed',staff=[
             VideoViewStaffItem(10,'first-existing','',''),VideoViewStaffItem(10,'second-existing','',''),
             VideoViewStaffItem(11,'first-new','',''),VideoViewStaffItem(11,'second-new','','')])
-        with mock.patch('task.task.get_video_tags_str',return_value=''),self.assertLogs('db.profiles',level='WARNING'):
+        with mock.patch('task.task._get_video_tags_str',return_value=''),self.assertLogs('db.profiles',level='WARNING'):
             logs = update_video(self.view.aid,self.service)
         self.assertEqual(_query_video(self.conn,self.view.aid).title,'changed')
         staff = _query_staff(self.conn,self.view.aid)

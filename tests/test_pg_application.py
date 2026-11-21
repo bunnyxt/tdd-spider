@@ -88,9 +88,14 @@ class PostgresApplicationTest(unittest.TestCase):
                          staff=[VideoViewStaffItem(mid+1,'作\x00曲','staff','')] if staff else None)
 
     def test_profile_relationship_log_and_derived_reference_share_one_transaction(self):
-        add_video(self.aid,self.service)
+        inserted = add_video(self.aid,self.service)
         video = query_video_via_aid(self.aid)
+        self.assertIsInstance(inserted,TddVideo)
+        self.assertEqual(vars(inserted),vars(video))
         self.assertEqual((video.title,video.desc,video.added),('title','desc\\u0000',ADDED))
+        self.assertEqual((video.code,video.recent,video.freq,video.activity),(0,2,0,0))
+        self.assertEqual((video.solo,video.original,video.employed,video.isvc,video.engine),(-1,-1,-1,-1,-1))
+        self.assertEqual((video.hasstaff,video.attribute,video.forward),(1,0,None))
         for mid in (self.mid,self.mid+1):
             self.assertEqual(query_member_via_mid(mid).last_video_aid,self.aid)
         self.assertEqual(read_value('SELECT added FROM tdd_video_record_latest WHERE aid=%s',(self.aid,)),ADDED)
@@ -122,6 +127,23 @@ class PostgresApplicationTest(unittest.TestCase):
         history = read_value('SELECT count(*) FROM tdd_video_record WHERE aid=%s',(self.aid,))
         self.expected_manifest({'tdd_video_log':len(rows),'tdd_video_record':history})
 
+    def test_first_stats_failure_rolls_back_new_video_members_staff_and_watermarks(self):
+        with mock.patch('db.profiles.append_video_records',side_effect=RuntimeError('injected first stats failure')):
+            with self.assertRaisesRegex(RuntimeError,'injected first stats failure'):
+                add_video(self.aid,self.service)
+        self.assertIsNone(query_video_via_aid(self.aid))
+        self.assertEqual(read_staff(self.aid),[])
+        for mid in (self.mid,self.mid+1):
+            self.assertIsNone(query_member_via_mid(mid))
+        self.assertEqual(read_value('SELECT count(*) FROM tdd_ingest.profile_observation '
+                                    'WHERE (entity_kind=%s AND entity_id=%s) '
+                                    'OR (entity_kind=%s AND entity_id=ANY(%s))',
+                                    ('video',self.aid,'member',[self.mid,self.mid+1])),0)
+        self.assertEqual(read_value('SELECT count(*) FROM tdd_video_record WHERE aid=%s',(self.aid,)),0)
+        self.assertEqual(read_value('SELECT count(*) FROM tdd_video_record_latest WHERE aid=%s',(self.aid,)),0)
+        self.assertEqual(len(list(Path(self.directory.name).glob('*.json'))),1)
+        self.expected_manifest({})
+
     def test_code_403_does_not_invalidate_video_and_optional_keys_do_not_clear(self):
         add_video(self.aid,self.service)
         self.service.get_video_view.side_effect = CodeError('get_video_view',VideoView,{'aid':self.aid},{},-403)
@@ -138,8 +160,8 @@ class PostgresApplicationTest(unittest.TestCase):
         self.expected_manifest({'tdd_video_record':1,'tdd_video_log':1})
 
     def test_member_null_empty_optional_missing_and_late_profile(self):
-        insert_video(TddVideo(added=ADDED,aid=self.aid,bvid=a2b(self.aid),mid=self.mid,
-                              code=0,state=0,title='late profile',pubdate=100),[],[])
+        insert_video(added=ADDED,aid=self.aid,bvid=a2b(self.aid),mid=self.mid,
+                     state=0,title='late profile',pubdate=100,staff=[],members=[])
         add_member(self.mid,self.service)
         self.assertEqual(query_member_via_mid(self.mid).last_video_aid,self.aid)
         self.service.get_member_card.side_effect = None

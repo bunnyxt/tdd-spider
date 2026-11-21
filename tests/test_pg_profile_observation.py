@@ -175,13 +175,13 @@ class PostgresProfileObservationTest(unittest.TestCase):
         from db.profiles import insert_video
         from task import add_video, AlreadyExistError
         aid = self.aid+1
-        video = TddVideo(added=1,aid=aid,bvid=a2b(aid),mid=self.mid,
-                         code=0,state=0,title='first',pubdate=100)
+        video_values = dict(added=1,aid=aid,bvid=a2b(aid),mid=self.mid,
+                            state=0,title='first',pubdate=100,staff=[],members=[])
         service = mock.Mock()
 
         def fetch_after_competing_insert(params):
             with ThreadPoolExecutor(max_workers=1) as executor:
-                self.assertIsNotNone(executor.submit(insert_video,video,[],[]).result(timeout=10))
+                self.assertIsNotNone(executor.submit(insert_video,**video_values).result(timeout=10))
             return self.view._replace(aid=aid,bvid='BV'+a2b(aid),title='second')
 
         service.get_video_view.side_effect = fetch_after_competing_insert
@@ -194,5 +194,5 @@ class PostgresProfileObservationTest(unittest.TestCase):
         self.assertEqual(list(self.directory.glob('*.json')),[])
         # A required-field violation is not an expected aid conflict.
         with self.assertRaises(NotNullViolation):
-            insert_video(TddVideo(**{**vars(video),'id':None,'aid':aid+1,'title':None}),[],[])
+            insert_video(**{**video_values,'aid':aid+1,'title':None})
         self.assertIsNone(query_video_via_aid(aid+1))

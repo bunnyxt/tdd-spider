@@ -8,20 +8,37 @@ from util import a2b, same_pic_url
 
 logger = logging.getLogger('db.profiles')
 
-def insert_video(video, staff, members, record=None):
-    """Return the inserted video, or None when its aid already exists."""
-    return execute_write(_insert_video, video, staff, members, record)
+def insert_video(*, added, aid, bvid, mid, title, pubdate, staff, members,
+                 videos=None, tid=None, tname=None, copyright=None, pic=None, desc=None,
+                 tags=None, attribute=None, state=0, forward=None, hasstaff=0, isvc=-1,
+                 record=None):
+    """Create a video and return its stored snapshot, or None for an existing aid."""
+    return execute_write(
+        _insert_video, added=added, aid=aid, bvid=bvid, mid=mid, title=title, pubdate=pubdate,
+        staff=staff, members=members, videos=videos, tid=tid, tname=tname, copyright=copyright,
+        pic=pic, desc=desc, tags=tags, attribute=attribute, state=state, forward=forward,
+        hasstaff=hasstaff, isvc=isvc, record=record)
 
-def _insert_video(conn, video, staff, members, record, *, run_id=None):
-    aid, added = video.aid, video.added
-    fields = tuple(field for field in video.fields if field != 'id')
+
+def _insert_video(conn, *, added, aid, bvid, mid, title, pubdate, staff, members,
+                  videos, tid, tname, copyright, pic, desc, tags, attribute, state,
+                  forward, hasstaff, isvc, record, run_id=None):
+    # New-video business values are explicit rather than inherited from a row object.
     row = conn.execute(
-        'INSERT INTO tdd_video (' + ','.join('"'+f+'"' for f in fields) + ') VALUES (' +
-        ','.join(['%s']*len(fields)) + ') ON CONFLICT (aid) DO NOTHING RETURNING id',
-        tuple(database_value(field,getattr(video,field)) for field in fields)).fetchone()
+        'INSERT INTO tdd_video '
+        '(added,aid,bvid,videos,tid,tname,copyright,pic,title,pubdate,"desc",tags,mid,'
+        'code,attribute,state,forward,hasstaff,solo,original,employed,isvc,engine,freq,activity,recent) '
+        'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'
+        '0,%s,%s,%s,%s,-1,-1,-1,%s,-1,0,0,2) '
+        'ON CONFLICT (aid) DO NOTHING '
+        'RETURNING id,added,aid,bvid,videos,tid,tname,copyright,pic,title,pubdate,"desc",tags,mid,'
+        'code,attribute,state,forward,hasstaff,solo,original,employed,isvc,engine,freq,activity,recent',
+        (database_value('added',added),aid,clean_text(bvid),videos,tid,clean_text(tname),
+         copyright,clean_text(pic),clean_text(title),pubdate,clean_text(desc),clean_text(tags),mid,
+         attribute,state,forward,hasstaff,isvc)).fetchone()
     if row is None:
         return None
-    video.id = row[0]
+    video = TddVideo(**dict(zip(TddVideo.fields,map(epoch,row))))
     _insert_prepared_members(members,conn)
     _claim_profile_observation('video',aid,added,conn)
     for item in staff or []:
