@@ -24,6 +24,13 @@ use an owner/maintenance role for that job, never grant this to the collector.
 An administrator can use separate libpq services for pool and partition jobs.
 These jobs need no permission to change control.
 
+Pool refresh and partition precreation are permanent maintenance jobs. Their
+`require-active-run.sql` include and trial-ID handling are migration-only:
+keep them even in formal mode until the migration wrap-up window is explicitly
+closed, then remove them together with the collector control checks. Follow
+the [retirement checklist](../../docs/postgresql.md#retiring-migration-tooling);
+do not delete the scheduled jobs or their database functions during that cleanup.
+
 From the checkout root (the wrapper resolves its SQL independently of the
 working directory):
 

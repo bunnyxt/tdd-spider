@@ -12,7 +12,7 @@ class VideoMemberProfilesTest(unittest.TestCase):
         self.session = ProfileSession()
         self.addCleanup(self.session.close)
         self.service = mock.Mock()
-        patcher = mock.patch('task.task.observe',side_effect=self.session.observe)
+        patcher = mock.patch('db.profiles.execute_write',side_effect=self.session.execute_write)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -32,15 +32,31 @@ class VideoMemberProfilesTest(unittest.TestCase):
         self.assertEqual(DBOperation.query_member_via_mid(10,self.session).name,'name')
         self.assertEqual(self.service.get_member_card.call_count,2)
 
-    def test_missing_optional_fields_preserve_old_and_explicit_empty_clears(self):
+    def test_member_snapshot_is_unchanged_and_null_empty_values_persist(self):
         self.session.seed(TddMember(added=1,mid=10,name='name',face='',sex='old',sign='old',code=0))
-        self.service.get_member_card.return_value = MemberCard(10,'name',None,'',None,frozenset(('mid','name','face')))
-        self.assertEqual(update_member(10,self.service),[])
+        snapshot = DBOperation.query_member_via_mid(10,self.session)
+        before = vars(snapshot).copy()
         self.service.get_member_card.return_value = MemberCard(10,'name',None,'','\x00')
-        logs = update_member(10,self.service)
+        with mock.patch.object(DBOperation,'query_member_via_mid',return_value=snapshot) as read:
+            logs = update_member(10,self.service)
+        read.assert_called_once_with(10,self.session,lock=True)
+        self.assertEqual(vars(snapshot),before)
         self.assertEqual({log.attr:(log.oldval,log.newval) for log in logs},{'sex':('old',None),'sign':('old','')})
         member = DBOperation.query_member_via_mid(10,self.session)
-        self.assertEqual((member.sex,member.sign),(None,''))
+        self.assertEqual((member.sex,member.sign,member.added),(None,'',1))
+
+    def test_member_log_failure_rolls_back_profile_and_watermark_without_mutating_snapshot(self):
+        self.session.seed(TddMember(added=1,mid=10,name='old',face='',sex='',sign='',code=0))
+        snapshot = DBOperation.query_member_via_mid(10,self.session)
+        before = vars(snapshot).copy()
+        self.service.get_member_card.return_value = MemberCard(10,'new','','','')
+        with mock.patch.object(DBOperation,'query_member_via_mid',return_value=snapshot), \
+             mock.patch.object(self.session,'append',side_effect=RuntimeError('log failed')):
+            with self.assertRaisesRegex(RuntimeError,'log failed'):
+                update_member(10,self.service)
+        self.assertEqual(vars(snapshot),before)
+        self.assertEqual(DBOperation.query_member_via_mid(10,self.session).name,'old')
+        self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_ingest.profile_observation')[0][0],0)
 
     def test_query_failure_propagates_without_fetch_or_insert(self):
         with mock.patch.object(self.session,'execute',side_effect=RuntimeError('query failed')):

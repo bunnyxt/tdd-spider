@@ -78,4 +78,5 @@ def get(request: Callable[..., dict], params: Optional[dict] = None,
             his_rank=data['stat']['his_rank'], like=data['stat']['like'],
             dislike=data['stat']['dislike'], vt=data['stat'].get('vt'),
             vv=data['stat'].get('vv')),
-        attribute=data.get('attribute'), forward=data.get('forward'), staff=staff, present_fields=None if {'attribute','forward','staff'}.issubset(data) else frozenset(data))
+        attribute=data.get('attribute'), forward=data.get('forward'), staff=staff,
+        present_fields=frozenset(field for field in ('attribute', 'forward') if field in data))

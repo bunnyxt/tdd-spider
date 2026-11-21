@@ -5,6 +5,7 @@ from db import DBOperation,TddMember,TddVideo
 from service import MemberCard,VideoViewStaffItem
 from task.task import add_member,add_video,ensure_video_member,update_video
 from profile_support import ProfileSession
+from db.profiles import update_video_profile, update_member_profile
 from test_endpoint_get_video_view import expected_result
 
 
@@ -24,7 +25,7 @@ class ProfileObservationOrderTest(unittest.TestCase):
                   ('videos','tid','tname','copyright','pic','title','pubdate','desc','state','attribute','forward')}
         self.session.seed(TddVideo(added=1,aid=self.aid,bvid='1234567890',mid=self.mid,code=-404,
                                   hasstaff=0,tags='',**values))
-        patcher = mock.patch('task.task.observe',side_effect=self.session.observe)
+        patcher = mock.patch('db.profiles.execute_write',side_effect=self.session.execute_write)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -35,8 +36,8 @@ class ProfileObservationOrderTest(unittest.TestCase):
     def member_payload(self,added,*,card=None,code=0):
         return dict(mid=self.mid,card=card,code=code,added=added)
 
-    def apply(self,operation,payload):
-        return self.session.observe(operation,payload)
+    def apply(self,function,payload):
+        return function(**payload)
 
     def watermark(self,kind,key):
         row = self.session.execute('SELECT observed_at FROM tdd_ingest.profile_observation '
@@ -44,29 +45,29 @@ class ProfileObservationOrderTest(unittest.TestCase):
         return row[0] if row else None
 
     def test_older_invalid_status_cannot_undo_newer_success(self):
-        self.apply('video-update',self.video_payload(200))
+        self.apply(update_video_profile,self.video_payload(200))
         before = self.session.execute('SELECT count(*) FROM tdd_video_log')[0][0]
-        with self.assertLogs('task',level='WARNING') as warning:
-            self.assertEqual(self.apply('video-update',self.video_payload(100,code=-404)),[])
+        with self.assertLogs('db.profiles',level='WARNING') as warning:
+            self.assertEqual(self.apply(update_video_profile,self.video_payload(100,code=-404)),[])
         self.assertIn('Skip stale profile observation',warning.output[0])
         self.assertEqual(DBOperation.query_video_via_aid(self.aid,self.session).code,0)
         self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_video_log')[0][0],before)
         self.assertEqual(self.watermark('video',self.aid),200)
 
     def test_older_success_cannot_undo_newer_invalid_status(self):
-        self.apply('video-update',self.video_payload(200,code=62002))
-        with self.assertLogs('task',level='WARNING'):
-            self.assertEqual(self.apply('video-update',self.video_payload(100)),[])
+        self.apply(update_video_profile,self.video_payload(200,code=62002))
+        with self.assertLogs('db.profiles',level='WARNING'):
+            self.assertEqual(self.apply(update_video_profile,self.video_payload(100)),[])
         video = DBOperation.query_video_via_aid(self.aid,self.session)
         self.assertEqual((video.code,video.title),(62002,self.view.title))
 
     def test_older_success_keeps_newer_title_owner_and_staff(self):
         newer = self.view._replace(title='new title',owner=self.view.owner._replace(mid=self.mid+1),
                                   staff=[VideoViewStaffItem(self.mid+2,'new role','','')])
-        self.apply('video-update',self.video_payload(200,view=newer,tags='new tags'))
+        self.apply(update_video_profile,self.video_payload(200,view=newer,tags='new tags'))
         before = self.session.execute('SELECT count(*) FROM tdd_video_log')[0][0]
-        with self.assertLogs('task',level='WARNING'):
-            self.apply('video-update',self.video_payload(100))
+        with self.assertLogs('db.profiles',level='WARNING'):
+            self.apply(update_video_profile,self.video_payload(100))
         video = DBOperation.query_video_via_aid(self.aid,self.session)
         self.assertEqual((video.title,video.mid,video.tags,video.added),('new title',self.mid+1,'new tags',1))
         self.assertEqual([(item.mid,item.title) for item in DBOperation.query_video_staff_via_aid(self.aid,self.session)],
@@ -75,37 +76,37 @@ class ProfileObservationOrderTest(unittest.TestCase):
 
     def test_older_member_card_or_error_keeps_newer_member(self):
         newest = MemberCard(self.mid,'new name','new sex','new face','new sign')
-        self.apply('member-update',self.member_payload(200,card=newest))
+        self.apply(update_member_profile,self.member_payload(200,card=newest))
         for payload in (self.member_payload(100,code=-404),
                         self.member_payload(150,card=MemberCard(self.mid,'old','','',''))):
-            with self.subTest(payload=payload),self.assertLogs('task',level='WARNING'):
-                self.assertEqual(self.apply('member-update',payload),[])
+            with self.subTest(payload=payload),self.assertLogs('db.profiles',level='WARNING'):
+                self.assertEqual(self.apply(update_member_profile,payload),[])
         member = DBOperation.query_member_via_mid(self.mid,self.session)
         self.assertEqual((member.code,member.name,member.sign,member.added),(0,'new name','new sign',1))
         self.assertEqual(self.watermark('member',self.mid),200)
 
     def test_equal_second_independent_inputs_keep_last_write(self):
-        self.apply('video-update',self.video_payload(200,view=self.view._replace(title='first')))
-        self.apply('video-update',self.video_payload(200,view=self.view._replace(title='second')))
+        self.apply(update_video_profile,self.video_payload(200,view=self.view._replace(title='first')))
+        self.apply(update_video_profile,self.video_payload(200,view=self.view._replace(title='second')))
         self.assertEqual(DBOperation.query_video_via_aid(self.aid,self.session).title,'second')
-        self.apply('member-update',self.member_payload(200,card=MemberCard(self.mid,'first','','','')))
-        self.apply('member-update',self.member_payload(200,card=MemberCard(self.mid,'second','','','')))
+        self.apply(update_member_profile,self.member_payload(200,card=MemberCard(self.mid,'first','','','')))
+        self.apply(update_member_profile,self.member_payload(200,card=MemberCard(self.mid,'second','','','')))
         self.assertEqual(DBOperation.query_member_via_mid(self.mid,self.session).name,'second')
 
     def test_failed_transaction_does_not_advance_watermark(self):
-        self.apply('video-update',self.video_payload(100))
+        self.apply(update_video_profile,self.video_payload(100))
         with mock.patch.object(self.session,'append',side_effect=RuntimeError('log failure')):
             with self.assertRaisesRegex(RuntimeError,'log failure'):
-                self.apply('video-update',self.video_payload(300,view=self.view._replace(title='failed')))
+                self.apply(update_video_profile,self.video_payload(300,view=self.view._replace(title='failed')))
         self.assertEqual(self.watermark('video',self.aid),100)
-        self.apply('video-update',self.video_payload(200,view=self.view._replace(title='accepted')))
+        self.apply(update_video_profile,self.video_payload(200,view=self.view._replace(title='accepted')))
         self.assertEqual(DBOperation.query_video_via_aid(self.aid,self.session).title,'accepted')
 
     def test_ignored_403_does_not_block_older_valid_metadata(self):
-        self.apply('video-update',self.video_payload(100))
-        self.assertEqual(self.apply('video-update',self.video_payload(300,code=-403)),[])
+        self.apply(update_video_profile,self.video_payload(100))
+        self.assertEqual(self.apply(update_video_profile,self.video_payload(300,code=-403)),[])
         self.assertEqual(self.watermark('video',self.aid),100)
-        self.apply('video-update',self.video_payload(200,view=self.view._replace(title='valid')))
+        self.apply(update_video_profile,self.video_payload(200,view=self.view._replace(title='valid')))
         self.assertEqual(DBOperation.query_video_via_aid(self.aid,self.session).title,'valid')
 
     def test_view_observation_time_precedes_slow_enrichment(self):
@@ -128,19 +129,19 @@ class ProfileObservationOrderTest(unittest.TestCase):
                 else:
                     ensure_video_member(self.aid,mid,self.service,self.session)
             old = dict(mid=mid,card=None,code=-404,added=100)
-            with self.subTest(operation=operation),self.assertLogs('task',level='WARNING'):
-                self.assertEqual(self.apply('member-update',old),[])
+            with self.subTest(operation=operation),self.assertLogs('db.profiles',level='WARNING'):
+                self.assertEqual(self.apply(update_member_profile,old),[])
             member = DBOperation.query_member_via_mid(mid,self.session)
             self.assertEqual((member.name,member.code),('fresh',0))
             self.assertEqual(self.watermark('member',mid),200)
 
     def test_ignored_prepared_existing_member_does_not_poison_watermark(self):
-        from task.task import _insert_prepared_members
-        self.apply('member-update',self.member_payload(100))
+        from db.profiles import _insert_prepared_members
+        self.apply(update_member_profile,self.member_payload(100))
         with self.session.transaction():
-            _insert_prepared_members({self.mid:TddMember(added=300,mid=self.mid,name='ignored',face='',code=-404)},self.session)
+            _insert_prepared_members([TddMember(added=300,mid=self.mid,name='ignored',face='',code=-404)],self.session)
         self.assertEqual(self.watermark('member',self.mid),100)
-        self.apply('member-update',self.member_payload(200,card=MemberCard(self.mid,'accepted','','','')))
+        self.apply(update_member_profile,self.member_payload(200,card=MemberCard(self.mid,'accepted','','','')))
         self.assertEqual(DBOperation.query_member_via_mid(self.mid,self.session).name,'accepted')
 
     def test_new_video_starts_with_observation_watermark(self):
@@ -150,16 +151,16 @@ class ProfileObservationOrderTest(unittest.TestCase):
             add_video(aid,self.service,self.session,commit_video_record=False)
         payload = self.video_payload(100,code=-404)
         payload['aid'] = aid
-        with self.assertLogs('task',level='WARNING'):
-            self.assertEqual(self.apply('video-update',payload),[])
+        with self.assertLogs('db.profiles',level='WARNING'):
+            self.assertEqual(self.apply(update_video_profile,payload),[])
         self.assertEqual(DBOperation.query_video_via_aid(aid,self.session).code,0)
         self.assertEqual(self.watermark('video',aid),200)
 
     def test_baseline_cutoff_fence_rejects_unknown_older_input(self):
         self.session.execute('INSERT INTO tdd_ingest.profile_observation VALUES (%s,%s,%s)',('video',self.aid,200))
         self.session.db.commit()
-        with self.assertLogs('task',level='WARNING'):
-            self.assertEqual(self.apply('video-update',self.video_payload(100)),[])
+        with self.assertLogs('db.profiles',level='WARNING'):
+            self.assertEqual(self.apply(update_video_profile,self.video_payload(100)),[])
         self.assertEqual(DBOperation.query_video_via_aid(self.aid,self.session).code,-404)
-        self.apply('video-update',self.video_payload(300))
+        self.apply(update_video_profile,self.video_payload(300))
         self.assertEqual(DBOperation.query_video_via_aid(self.aid,self.session).code,0)

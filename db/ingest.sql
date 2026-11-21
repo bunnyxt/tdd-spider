@@ -6,6 +6,9 @@
 BEGIN;
 CREATE SCHEMA IF NOT EXISTS tdd_ingest;
 REVOKE ALL ON SCHEMA tdd_ingest FROM PUBLIC;
+-- Migration-only guard: retain through trials, cutover and the explicitly
+-- closed migration wrap-up window, including formal collection in that window.
+-- Formal mode alone does not retire it. See docs/postgresql.md for removal.
 CREATE TABLE IF NOT EXISTS tdd_ingest.control (
     singleton boolean PRIMARY KEY CHECK (singleton IS TRUE),
     deployment_id uuid NOT NULL,
@@ -17,12 +20,14 @@ CREATE TABLE IF NOT EXISTS tdd_ingest.control (
 -- Mutable profiles have immutable creation times in their business tables.
 -- Keep the most recent observed second separately so delayed observations
 -- cannot replace a newer code, profile field, or staff relationship.
+-- This is permanent application state; retain it when retiring migration tools.
 CREATE TABLE IF NOT EXISTS tdd_ingest.profile_observation (
     entity_kind text NOT NULL CHECK (entity_kind IN ('video', 'member')),
     entity_id bigint NOT NULL,
     observed_at bigint NOT NULL,
     PRIMARY KEY (entity_kind, entity_id)
 );
+-- Migration-only trial cleanup keys; retire after the wrap-up window closes.
 CREATE TABLE IF NOT EXISTS tdd_ingest.manifest (
     batch_id uuid NOT NULL,
     ordinal integer NOT NULL CHECK (ordinal >= 0),

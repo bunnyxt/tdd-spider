@@ -33,10 +33,10 @@ class Session:
 
 
 def observe_for(session):
-    def observe(operation,payload,**kwargs):
+    def observe(objects):
         with session.transaction():
-            session.active.extend(payload['objects'])
-        return payload['objects']
+            session.active.extend(objects)
+        return objects
     return observe
 
 
@@ -45,7 +45,7 @@ class MemberTotalStatWriterTest(unittest.TestCase):
         for count in (0,1,999,1000,1001):
             with self.subTest(count=count):
                 session = Session()
-                patcher = mock.patch('util.member_total_stat_writer.observe',side_effect=observe_for(session))
+                patcher = mock.patch('util.member_total_stat_writer.insert_objects',side_effect=observe_for(session))
                 writer = patcher.start()
                 self.addCleanup(patcher.stop)
                 self.assertEqual(write_member_stats(session,iter(records(count)),LOG),count)
@@ -57,7 +57,7 @@ class MemberTotalStatWriterTest(unittest.TestCase):
 
     def test_failed_second_batch_keeps_only_confirmed_prior_batch(self):
         session = Session(fail=2)
-        with mock.patch('util.member_total_stat_writer.observe',side_effect=observe_for(session)):
+        with mock.patch('util.member_total_stat_writer.insert_objects',side_effect=observe_for(session)):
             with self.assertLogs(LOG,level='CRITICAL') as logs, self.assertRaisesRegex(RuntimeError,'unknown'):
                 write_member_stats(session,records(1001),LOG)
             self.assertEqual(len(session.committed),1000)

@@ -16,7 +16,7 @@ import shutil
 import sys
 from collections import namedtuple, defaultdict, Counter
 from typing import Optional
-from core import Record
+from core import VideoRecord
 from service import Service
 from job import FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool
 from runrecord import RunRecorder
@@ -194,7 +194,7 @@ class VideoRecordAcquisitionJob(Job):
     WRITER_LABEL = 'record-db-writer'
     UPDATE_LABEL = 'record-video-update'
 
-    def __init__(self, time_task: str, record_queue: Queue[Record]):
+    def __init__(self, time_task: str, record_queue: Queue[VideoRecord]):
         super().__init__('acquisition')
         self.time_task = time_task      # full stamp, ex: '2026-07-14 08:00'
         self.time_label = time_task[-5:]  # hour only, ex: '08:00'
@@ -372,8 +372,8 @@ class RecentRecordsAnalystRunner(CheckedRunner):
         self.recent_file_num = recent_file_num
         self.logger = logging.getLogger('RecentRecordsAnalystRunner')
 
-    def _calc_record_speed(self, record_start, record_end, per_seconds=3600):
-        # record_start and record_end should be namedtuple Record
+    def _calc_record_speed(self, record_start: VideoRecord, record_end: VideoRecord,
+                           per_seconds=3600) -> RecordSpeed:
         timespan = record_end.added - record_start.added
         if timespan == 0:
             raise ZeroDivisionError(
@@ -398,8 +398,8 @@ class RecentRecordsAnalystRunner(CheckedRunner):
             like=(record_end.like - record_start.like) / timespan * per_seconds
         )
 
-    def _calc_record_speed_ratio(self, record_speed_start, record_speed_end, inf_magic_num=99999999):
-        # record_speed_start and record_speed_end should be namedtuple RecordSpeedRatio
+    def _calc_record_speed_ratio(self, record_speed_start: RecordSpeed, record_speed_end: RecordSpeed,
+                                 inf_magic_num=99999999) -> RecordSpeedRatio:
         return RecordSpeedRatio(
             view=(record_speed_end.view - record_speed_start.view) /
             record_speed_start.view
@@ -493,8 +493,8 @@ class RecentRecordsAnalystRunner(CheckedRunner):
                     try:
                         line_arr = line.rstrip('\n').split(',')
                         # Existing CSV files are read by column position. Keep the
-                        # ten-column core.Record order when writing and reading them.
-                        record = Record(int(line_arr[0]), int(line_arr[1]), line_arr[2],
+                        # ten-column core.VideoRecord order when writing and reading them.
+                        record = VideoRecord(int(line_arr[0]), int(line_arr[1]), line_arr[2],
                                         int(line_arr[3]), int(line_arr[4]), int(
                                             line_arr[5]), int(line_arr[6]),
                                         int(line_arr[7]), int(line_arr[8]), int(line_arr[9]))
@@ -541,7 +541,7 @@ class RecentRecordsAnalystRunner(CheckedRunner):
                     'Fail to get pubdate of video aid %d, continue' % aid)
                 result_status_dict['no_valid_pubdate'].append(aid)
                 continue
-            pubdate_record = Record(
+            pubdate_record = VideoRecord(
                 pubdate, aid, a2b(aid), 0, 0, 0, 0, 0, 0, 0)
 
             records.sort(key=lambda r: r.added)  # sort by added
@@ -784,7 +784,7 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     # upstream data acquisition: one merged pipeline over all in-scope videos
     logger.info('Now start upstream data acquisition pipeline...')
 
-    records_queue: Queue[Record] = Queue()
+    records_queue: Queue[VideoRecord] = Queue()
 
     acquisition_runner = VideoRecordAcquisitionJob(time_task, records_queue)
     acquisition_runner.start()

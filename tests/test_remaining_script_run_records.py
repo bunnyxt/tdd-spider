@@ -129,14 +129,14 @@ class _MemberStatSession:
 class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
     def setUp(self):
         super().setUp()
-        patcher = mock.patch('util.member_total_stat_writer.observe', side_effect=self._observe)
+        patcher = mock.patch('util.member_total_stat_writer.insert_objects', side_effect=self._observe)
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _observe(self,operation,payload,**kwargs):
+    def _observe(self,objects):
         with self.session.transaction():
-            self.session.added.extend(payload['objects'])
-        return payload['objects']
+            self.session.added.extend(objects)
+        return objects
 
     def test_normal_run_records_succeeded_with_counts(self):
         m = _load('18_member-total-stat-update.py')
@@ -276,12 +276,13 @@ class AddSprintDailyRunRecordTest(_RunRecordTestBase):
         session = _SprintSession(_sprint_responder(m.get_ts_s()))
 
         with mock.patch.object(m, 'Session', lambda: session), \
-                mock.patch.object(m, 'observe') as observe:
+                mock.patch.object(m, 'insert_sprint_daily_record') as insert_record, \
+                mock.patch.object(m, 'insert_sprint_daily_summary') as insert_summary:
             m.add_sprint_daily()
 
-        self.assertEqual([call.args[0] for call in observe.call_args_list],
-                         ['sprint-daily-record', 'sprint-daily-record', 'sprint-daily-summary'])
-        payloads = [call.args[1] for call in observe.call_args_list]
+        self.assertEqual(insert_record.call_count,2)
+        insert_summary.assert_called_once()
+        payloads = [call.kwargs for call in insert_record.call_args_list + insert_summary.call_args_list]
         self.assertTrue(all(isinstance(payload['date'], str) and len(payload['date']) == 8 for payload in payloads))
         self.assertTrue(all(isinstance(payload['added'], int) for payload in payloads))
         self.assertTrue(all('`' not in sql and '&&' not in sql for sql, _ in session.statements))

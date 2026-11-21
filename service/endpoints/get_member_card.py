@@ -29,7 +29,7 @@ def get(request: Callable[..., dict], params: Optional[dict] = None,
     if type(response['data']['card']) != dict:
         raise FormatError(ENDPOINT, RESULT_TYPE, params, response,
                           'Response data card should be a dict.')
-    for key in ['mid', 'name', 'face']:
+    for key in ['mid', 'name', 'sex', 'face', 'sign']:
         if key not in response['data']['card']:
             raise FormatError(ENDPOINT, RESULT_TYPE, params, response,
                               f'Response data card should contain key {key}.')
@@ -38,9 +38,10 @@ def get(request: Callable[..., dict], params: Optional[dict] = None,
     if response['data']['card']['name'] == '':
         raise ContentError(ENDPOINT, RESULT_TYPE, params, response,
                            'Response data card name should not be empty.')
+    # PostgreSQL allows NULL for sex and sign; the keys remain required.
     return MemberCard(
         mid=response['data']['card']['mid'],
         name=response['data']['card']['name'],
-        sex=response['data']['card'].get('sex'),
+        sex=response['data']['card']['sex'],
         face=response['data']['card']['face'],
-        sign=response['data']['card'].get('sign'), present_fields=None if {'sex','sign'}.issubset(response['data']['card']) else frozenset(response['data']['card']))
+        sign=response['data']['card']['sign'])

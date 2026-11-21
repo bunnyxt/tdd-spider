@@ -7,7 +7,7 @@ from unittest import mock
 from db import TddSprintVideoRecord
 from job import AddSprintVideoRecordJob
 from service.endpoints import get_video_view_trimmed
-from task.task import apply_observation
+from db.sprint import _insert_sprint_video_record
 from test_endpoint_get_video_view_trimmed import valid_response
 
 
@@ -22,8 +22,8 @@ class SprintNullableRecordTest(unittest.TestCase):
         record = TddSprintVideoRecord(added=123,aid=10,view=None,danmaku=None,reply=None,
                                      favorite=None,coin=None,share=None,like=None)
         session = mock.Mock()
-        with mock.patch('task.task.append_objects') as append:
-            self.assertIs(apply_observation('sprint-observe',{'record':record},session),record)
+        with mock.patch('db.sprint.append_objects') as append:
+            self.assertIs(_insert_sprint_video_record(session,record),record)
         append.assert_called_once()
         self.assertIsNone(append.call_args.args[1][0].view)
         session.execute.assert_not_called()

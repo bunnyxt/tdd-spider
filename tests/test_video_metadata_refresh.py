@@ -2,6 +2,7 @@
 import unittest
 from unittest import mock
 from db import DBOperation,TddVideo,TddVideoStaff,TddMember
+from service import FormatError
 from service.endpoints import get_video_view
 from task.task import update_video
 from test_endpoint_get_video_view import expected_result,valid_response
@@ -18,7 +19,7 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.service.get_video_tags.return_value.tags = []
         self.session.seed(TddMember(added=1,mid=8,name='owner',face='',code=0))
         self.session.seed(TddMember(added=1,mid=10,name='staff',face='',code=0))
-        patcher = mock.patch('task.task.observe',side_effect=self.session.observe)
+        patcher = mock.patch('db.profiles.execute_write',side_effect=self.session.execute_write)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -64,6 +65,38 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.assertEqual((current.hasstaff,current.attribute,current.forward),(0,16,17))
         # Existing relationship handling is separate from the response flag.
         self.assertEqual(len(DBOperation.query_video_staff_via_aid(7,self.session)),1)
+
+    def test_optional_scalars_omit_null_and_value_through_parser_and_update(self):
+        self.seed()
+        response = valid_response()
+        del response['data']['attribute']
+        response['data']['forward'] = None
+        self.use_api_response(response)
+        self.assertEqual(self.refresh(), {'forward': ('17', None)})
+        stored = DBOperation.query_video_via_aid(7, self.session)
+        self.assertEqual((stored.attribute, stored.forward), (16, None))
+
+        response['data']['attribute'] = None
+        del response['data']['forward']
+        self.assertEqual(self.refresh(), {'attribute': ('16', None)})
+        stored = DBOperation.query_video_via_aid(7, self.session)
+        self.assertEqual((stored.attribute, stored.forward), (None, None))
+
+        response['data'].update(attribute=18, forward=19)
+        self.assertEqual(self.refresh(), {'attribute': (None, '18'), 'forward': (None, '19')})
+        stored = DBOperation.query_video_via_aid(7, self.session)
+        self.assertEqual((stored.attribute, stored.forward), (18, 19))
+
+    def test_explicit_null_staff_fails_before_any_database_change(self):
+        self.seed()
+        response = valid_response()
+        response['data'].update(title='should not persist', staff=None)
+        self.use_api_response(response)
+        with self.assertRaises(FormatError):
+            self.refresh()
+        self.assertEqual(DBOperation.query_video_via_aid(7, self.session).title, self.view.title)
+        self.assertEqual(len(DBOperation.query_video_staff_via_aid(7, self.session)), 1)
+        self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_video_log')[0][0], 0)
 
     def test_missing_staff_resolves_unknown_flag_and_only_logs_actual_change(self):
         self.seed(hasstaff=-1)
@@ -167,7 +200,7 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.service.get_video_view.return_value = self.view._replace(title='changed',staff=[
             VideoViewStaffItem(10,'first-existing','',''),VideoViewStaffItem(10,'second-existing','',''),
             VideoViewStaffItem(11,'first-new','',''),VideoViewStaffItem(11,'second-new','','')])
-        with mock.patch('task.task.get_video_tags_str',return_value=''),self.assertLogs('task',level='WARNING'):
+        with mock.patch('task.task.get_video_tags_str',return_value=''),self.assertLogs('db.profiles',level='WARNING'):
             logs = update_video(self.view.aid,self.service,self.session)
         self.assertEqual(DBOperation.query_video_via_aid(self.view.aid,self.session).title,'changed')
         staff = DBOperation.query_video_staff_via_aid(self.view.aid,self.session)

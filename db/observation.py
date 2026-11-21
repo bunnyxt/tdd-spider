@@ -4,6 +4,7 @@ Failure files are diagnostics for manual reconciliation. They are not a durable
 queue or proof that a transaction rolled back: a lost COMMIT acknowledgement may
 leave the data committed. No input is automatically retried or replayed.
 """
+import inspect
 import json
 import logging
 import os
@@ -56,35 +57,27 @@ def _save_failure(operation, payload, run_id, error):
     return path
 
 
-def _dispatch(operation, payload, session):
-    if operation == 'video-records':
-        from .write import append_video_records
-        return append_video_records(session, payload['records'])
-    if operation == 'append':
-        from .write import append_objects
-        objects = payload['objects']
-        append_objects(session, objects)
-        return objects
-    from task.task import apply_observation
-    return apply_observation(operation, payload, session)
-
-
-def observe(operation, payload, *, connection_factory=None):
-    """Attempt one business transaction and propagate any unconfirmed failure."""
+def execute_write(function, *args, connection_factory=None, **kwargs):
+    """Call named database work once, inside a guarded business transaction."""
     from .ingest import run_transaction
+    if not callable(function):
+        raise TypeError('Database work must be a callable')
     run_id = trial_run_id()
 
     def callback(connection):
         session = Session(connection)
         session._depth = 1
         session.run_id = run_id
-        return _dispatch(operation, payload, session)
+        return function(session, *args, **kwargs)
 
     try:
         return run_transaction(connection_factory or engine.connection, callback, run_id=run_id)
     except Exception as error:
+        operation = getattr(function, '__name__', type(function).__name__)
         try:
-            path = _save_failure(operation, payload, run_id, error)
+            arguments = inspect.signature(function).bind(None, *args, **kwargs).arguments
+            arguments.pop('session', None)
+            path = _save_failure(operation, arguments, run_id, error)
         except Exception:
             logger.error('Database write failed; failure input could not be saved. '
                          'operation=%s. Commit status is unconfirmed; reconcile manually '

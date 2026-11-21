@@ -1,9 +1,9 @@
 from typing import NamedTuple
 
-__all__ = ['Record', 'MemberFollowerRecordNew']
+__all__ = ['VideoRecord', 'MemberFollowerRecord']
 
 
-class Record(NamedTuple):
+class VideoRecord(NamedTuple):
     added: int
     aid: int
     bvid: str
@@ -16,7 +16,7 @@ class Record(NamedTuple):
     like: int
 
 
-class MemberFollowerRecordNew(NamedTuple):
+class MemberFollowerRecord(NamedTuple):
     added: int
     mid: int
     follower: int

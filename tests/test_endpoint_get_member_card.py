@@ -90,6 +90,20 @@ class GetMemberCardEndpointTest(unittest.TestCase):
 
         self.assertEqual(result, MemberCard(7, 'name', '保密', '', ''))
 
+    def test_sex_and_sign_keys_remain_required(self):
+        for field in ('sex', 'sign'):
+            with self.subTest(field=field):
+                response = valid_response()
+                del response['data']['card'][field]
+                with self.assertRaises(FormatError):
+                    get_member_card.get(lambda *args, **kwargs: response)
+
+    def test_explicit_null_sex_and_sign_are_preserved(self):
+        response = valid_response()
+        response['data']['card'].update(sex=None, sign=None)
+        result = get_member_card.get(lambda *args, **kwargs: response)
+        self.assertEqual(result, MemberCard(7, 'name', None, 'face-url', None))
+
     def test_service_public_method_delegates_to_the_adapter(self):
         service = Service(mode='direct', endpoints={})
         service._get = mock.Mock(return_value=valid_response())

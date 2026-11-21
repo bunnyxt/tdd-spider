@@ -36,3 +36,35 @@ def append_objects(session, objects):
     for obj, key in zip(objects, keys):
         obj.id = key[-1]
     return keys
+
+
+def append_member_follower_records(session, records):
+    """Bind collected followers directly; retain independent same-second keys."""
+    if not records:
+        return []
+    from .ingest import append_rows
+    columns = ('added', 'mid', 'follower')
+    rows = [tuple(database_value(field, getattr(record, field)) for field in columns)
+            for record in records]
+    return append_rows(session.connection, 'tdd_member_follower_record', columns, rows,
+                       run_id=session.run_id if hasattr(session, 'run_id') else trial_run_id())
+
+
+def insert_video_records(records):
+    from .observation import execute_write
+    return execute_write(append_video_records, records)
+
+
+def insert_member_follower_records(records):
+    from .observation import execute_write
+    return execute_write(append_member_follower_records, records)
+
+
+def insert_objects(objects):
+    from .observation import execute_write
+    return execute_write(_insert_objects, objects)
+
+
+def _insert_objects(session, objects):
+    append_objects(session, objects)
+    return objects

@@ -20,8 +20,8 @@ class DBOperation:
             if session._depth:
                 append_objects(session, [obj])
             else:
-                from .observation import observe
-                persisted = observe('append', {'objects':[obj]})
+                from .write import insert_objects
+                persisted = insert_objects([obj])
                 obj.id = persisted[0].id
         return obj
 
@@ -58,10 +58,6 @@ class DBOperation:
         return [TddVideoStaff(**r) for r in session.execute('SELECT * FROM tdd_video_staff WHERE aid = %s', (aid,))]
 
     @classmethod
-    def delete_video_staff_via_aid_mid(cls, aid, mid, session):
-        session.execute('DELETE FROM tdd_video_staff WHERE aid = %s AND mid = %s', (aid,mid))
-
-    @classmethod
     def delete_video_staff_via_id(cls, id, session):
         session.execute('DELETE FROM tdd_video_staff WHERE id = %s', (id,))
 
@@ -69,10 +65,6 @@ class DBOperation:
     def query_all_video_bvids(cls, session):
         # Preserve the existing candidate enumeration; no implicit regrouping.
         return [r[0] for r in session.execute('SELECT bvid FROM tdd_video')]
-
-    @classmethod
-    def query_member_mids(cls, offset, size, session):
-        return [r[0] for r in session.execute('SELECT mid FROM tdd_member LIMIT %s OFFSET %s', (size,offset))]
 
     @classmethod
     def query_all_member_mids(cls, session):
@@ -96,10 +88,6 @@ class DBOperation:
     @classmethod
     def query_freq_update_video_aids(cls, freq, session, is_tid_30=None):
         return cls._aids(session, freq, is_tid_30)
-
-    @classmethod
-    def query_403_video_aids(cls, session):
-        return [r[0] for r in session.execute('SELECT aid FROM tdd_video WHERE code = %s', (-403,))]
 
     @classmethod
     def query_video_pubdate_all(cls, session):

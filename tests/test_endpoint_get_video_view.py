@@ -66,6 +66,29 @@ class GetVideoViewEndpointTest(unittest.TestCase):
         self.assertIsNone(result.staff)
         self.assertIsNone(result.stat.vt)
         self.assertIsNone(result.stat.vv)
+        self.assertEqual(result.present_fields, frozenset())
+
+    def test_presence_tracks_only_optional_scalar_keys(self):
+        for field, other in (('attribute', 'forward'), ('forward', 'attribute')):
+            for value in (None, 42):
+                with self.subTest(field=field, value=value):
+                    response = valid_response()
+                    response['data'][field] = value
+                    del response['data'][other]
+                    result = get_video_view.get(lambda *args, **kwargs: response)
+                    self.assertEqual(result.present_fields, frozenset({field}))
+                    self.assertEqual(getattr(result, field), value)
+                    self.assertIsNone(getattr(result, other))
+
+    def test_staff_omission_empty_and_null_remain_distinct(self):
+        response = valid_response()
+        del response['data']['staff']
+        self.assertIsNone(get_video_view.get(lambda *args, **kwargs: response).staff)
+        response['data']['staff'] = []
+        self.assertEqual(get_video_view.get(lambda *args, **kwargs: response).staff, [])
+        response['data']['staff'] = None
+        with self.assertRaises(FormatError):
+            get_video_view.get(lambda *args, **kwargs: response)
 
     def test_nonzero_api_code_keeps_the_existing_business_error(self):
         response = valid_response()

@@ -57,10 +57,10 @@ class VideoView(NamedTuple):
     attribute: Optional[int]
     forward: Optional[int]
     staff: Optional[list[VideoViewStaffItem]]
-    present_fields: Optional[frozenset] = None
+    present_fields: frozenset[str] = frozenset({'attribute', 'forward'})
 
 
-# minimal view payload for stat-record jobs: exactly what Record needs.
+# minimal view payload for stat-record jobs: exactly what VideoRecord needs.
 # Served by the trimmed video_view worker (service/workers/video_view/), whose
 # response is a strict subset of the full view -- so the same parser also
 # accepts the full API response (direct mode / full worker).
@@ -85,7 +85,6 @@ class MemberCard(NamedTuple):
     sex: str
     face: str
     sign: str
-    present_fields: Optional[frozenset] = None
 
 
 class MemberRelation(NamedTuple):

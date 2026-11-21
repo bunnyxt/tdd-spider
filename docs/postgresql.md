@@ -8,11 +8,26 @@ python3.12 -m venv .venv
 cp conf/conf.ini.example conf/conf.ini
 ```
 
-Configure `[db_postgresql]` in `conf/conf.ini`, or use `PGHOST`, `PGPORT`,
-`PGDATABASE`, `PGUSER`, `PGPASSWORD` and `PGSSLMODE`. `TDD_CONFIG_PATH` selects
-another configuration file. Connections open only when needed; all collector
-threads share a pool capped at four database connections. HTTP fetchers keep
-their existing worker configuration in `service/endpoints.json`.
+Configure `[db_postgresql]` in `conf/conf.ini`. `TDD_CONFIG_PATH` selects a
+different INI file; that selected file is the only source of Python collector
+database settings. `dbname`, `user` and `password` must be nonempty. The defaults
+are host `127.0.0.1`, port `5432`, SSL mode `prefer`, no separate `hostaddr`, and
+connection timeout 10 seconds (configurable as `connect_timeout`, 1–300 seconds).
+SSL settings and connection `options` also belong in this section. Protect the
+file because it contains credentials.
+
+`PGHOST`, `PGHOSTADDR`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGOPTIONS` and the
+other environment values do not override configured/defaulted collector
+settings. If an additional libpq environment variable would supply an
+unspecified setting, configuration fails with its name; unset it or configure
+that setting in the INI. Named libpq services are not used by the collector:
+unset `PGSERVICE` and do not add `service` to this section. This restriction is
+for the Python collector; the separate `psql` maintenance commands retain
+their documented authentication setup.
+
+Connections open only when needed; all collector threads share a pool capped
+at four database connections. HTTP fetchers keep their existing worker
+configuration in `service/endpoints.json`.
 
 The database must already contain the compatible business tables, partitions
 and maintenance triggers. Install `db/ingest.sql` as the database owner before
@@ -31,21 +46,30 @@ remain distinct. The database maintains the three statistics latest tables and
 
 Database connections apply bounded startup deadlines to ordinary reads as well
 as writes: lock wait 10,000 ms, statement 60,000 ms, transaction 120,000 ms, and
-idle time within a transaction 60,000 ms. Override the first three with
-`TDD_DB_LOCK_TIMEOUT_MS`, `TDD_DB_STATEMENT_TIMEOUT_MS` and
-`TDD_DB_TRANSACTION_TIMEOUT_MS`; each must be an integer from 1 through
-300,000. Zero does not disable a deadline. Application limits are appended after
-existing connection `options` or `PGOPTIONS`, so an earlier zero cannot override
-them. Observation transactions also set the first three with `SET LOCAL` on
-each transaction; those transaction-local settings do not replace the connection
-bounds used by other queries.
+idle time within a transaction 60,000 ms. Configure the first three as
+`lock_timeout_ms`, `statement_timeout_ms` and `transaction_timeout_ms` in the
+selected `[db_postgresql]` section; each must be an integer from 1 through
+300,000. Zero does not disable a deadline. Connection startup and write
+transactions use the same parser, defaults and validation. Application limits
+are appended after the INI's connection `options`, so an earlier zero cannot
+override them. Write transactions also apply the first three locally on each
+transaction; those settings do not replace the connection bounds used by other
+queries. The former `TDD_DB_*_TIMEOUT_MS` environment overrides are ignored.
 
-Observation entry points, including the video/follower batch writers, call
-`observe()` to acquire their connection and own the complete write transaction.
-They do not accept a caller's `Session`. Sessions passed to profile-preparation
-queries or internal transactional helpers remain scoped to those operations.
-Batch writers configure batch size and queue polling. A failed transaction is
-reported to its caller and is not automatically retried.
+Tasks fetch HTTP input before calling named database functions with explicit
+arguments. `db.write.insert_video_records()` and
+`insert_member_follower_records()` accept the collected lightweight records and
+return complete keys only after commit. `db.profiles.update_video_profile()`
+and `update_member_profile()` lock and read stored snapshots, compare incoming
+values, and commit profile fields, staff, observation watermarks and logs
+together. Their SQL stays in the database layer. Aid lookups return a snapshot
+or `None`; query errors propagate.
+
+The shared `execute_write()` helper calls a Python function inside one guarded
+transaction; it does not dispatch operation strings or import task code.
+Database-internal helpers receive the transaction's `Session`. Batch writers
+configure batch size and queue polling. A failed transaction is reported to its
+caller and is not automatically retried.
 
 ## Failed writes
 
@@ -118,7 +142,13 @@ keys. Formal collection must not set a trial run ID and adds no trial manifest
 entries. Sprint daily summaries and details remain separately committed
 observations.
 
-## Deployment and run control
+## Migration-period deployment and run control
+
+This guard is temporary migration tooling. Retain the per-transaction check
+through trials, cutover and the migration wrap-up protection window, including
+formal collection during that window. Setting `mode='formal'` does not close
+the window or remove this protection. The deployment owner must explicitly
+close the window before following the retirement checklist below.
 
 The owner or a separate maintenance role configures the single row in
 `tdd_ingest.control`; collectors can only read it. `singleton` must be true,
@@ -179,6 +209,53 @@ log completion only after commit. Install the required database functions and
 verify the scheduler timezone and a natural run before enabling the jobs.
 Collectors do not create partitions or refresh the random pools themselves.
 
+## Retiring migration tooling
+
+The long-term collector uses named database operations, explicit transactions
+and ordinary PostgreSQL concurrency controls. It must eventually run without
+consulting `tdd_ingest.control` on every write. Migration completion includes
+removing the temporary implementation, not leaving a permanently enabled
+bypass flag or an empty control table.
+
+| Keep for normal operation | Remove after the migration wrap-up window closes |
+| --- | --- |
+| Connection pool, selected INI settings, timeout validation and transaction handling | Deployment/run control lookup, trial UUID configuration and unmanaged-test bypass |
+| Direct batch inserts and explicit generated-key returns | Trial-only manifest insertion, complete-key cleanup tables and migration-specific tests |
+| Profile snapshots, explicit field differences, row locks and observation watermarks | Baseline reset/import tools and the migration-wide shared/exclusive advisory-lock protocol |
+| Best-effort failure diagnostics and manual reconciliation of uncertain commits | Obsolete receipt/pending replay compatibility and migration-only installers |
+| Latest/last-video triggers, random-pool refresh and partition maintenance | Maintenance jobs' `require-active-run.sql` include and trial/control bindings |
+
+Retirement is a separate reviewed change, after the operator records that the
+wrap-up window has closed. No automatic transition is tied to elapsed days or
+the `formal` flag:
+
+1. Record the accepted data baseline, backups and deployed versions. Permanently
+   revoke trial reset/import authority; remove scheduled starts and access for
+   obsolete collectors and migration tools. An old restored configuration must
+   not regain cleanup authority.
+2. Stop and drain all current writers and maintenance jobs. Remove run-control
+   queries, trial-manifest writes, trial arguments/environment settings and the
+   migration-only advisory-lock protocol from every active path, including
+   hourly derived updates and the maintenance wrapper. Keep normal business
+   transactions, profile row locks and maintenance functions' own locks.
+3. Remove the temporary code, tests, grants and install/upgrade instructions.
+   Retire `tdd_ingest.control` and `tdd_ingest.manifest` only after no live caller
+   needs them; archive required migration evidence before deleting temporary
+   migration database objects and runtime files. Do not `DROP SCHEMA ... CASCADE`:
+   `tdd_ingest.profile_observation` and its permissions are permanent state.
+4. Verify the resulting collector against an isolated database with no control
+   or manifest tables: profile refresh, video/follower batches, hourly derived
+   writes and scheduled maintenance must succeed. Check failure propagation,
+   uncertain-commit handling and watermark ordering still work. Confirm no
+   active code/configuration references the retired objects or trial flags.
+5. Deploy the reviewed steady-state version, resume schedules and verify actual
+   writes and logs. If recovery uses an old backup, keep writers disabled until
+   current code and permanent cleanup revocation are reapplied; do not revive
+   obsolete trial tools from that backup.
+
+The current implementation still requires the migration guard. The checklist
+does not authorize dropping its tables while these collectors are running.
+
 ## Checks
 
 ```sh
@@ -186,11 +263,12 @@ Collectors do not create partitions or refresh the random pools themselves.
 ```
 
 PostgreSQL integration tests require an explicitly selected disposable database
-with the same schema and writer permissions. They append synthetic fixtures
-and never call an HTTP endpoint:
+with the same schema and writer permissions. Put its connection settings in a
+separate restricted INI file and select it with `TDD_CONFIG_PATH`. They append
+synthetic fixtures and never call an HTTP endpoint:
 
 ```sh
-TDD_ALLOW_UNMANAGED_INGEST=1 TDD_PG_INTEGRATION=1 .venv/bin/python -m unittest discover -s tests -p 'test_pg_*.py'
+TDD_CONFIG_PATH=/path/to/disposable.ini TDD_ALLOW_UNMANAGED_INGEST=1 TDD_PG_INTEGRATION=1 .venv/bin/python -m unittest discover -s tests -p 'test_pg_*.py'
 ```
 
 The command above explicitly selects empty-control compatibility because these

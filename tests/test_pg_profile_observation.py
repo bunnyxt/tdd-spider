@@ -16,8 +16,7 @@ from uuid import uuid4
 from db import DBOperation,Session,TddMember,TddVideo
 from db.basic import engine
 from db.ingest import guard_write_transaction
-from db.observation import observe
-from task.task import apply_observation
+from db.profiles import update_video_profile, update_member_profile, _update_video_profile
 from test_endpoint_get_video_view import expected_result
 from util import a2b
 
@@ -55,23 +54,23 @@ class PostgresProfileObservationTest(unittest.TestCase):
     def apply_in_transaction(self,payload):
         with self.session.transaction():
             guard_write_transaction(self.session.connection,self.run_id)
-            return apply_observation('video-update',payload,self.session)
+            return _update_video_profile(self.session,**payload)
 
     def test_delayed_old_status_cannot_undo_newer_video_or_member(self):
         with mock.patch('db.ingest.run_transaction',side_effect=RuntimeError('injected offline')):
             with self.assertRaisesRegex(RuntimeError,'injected offline'):
-                observe('video-update',self.payload(100,code=-404))
-        observe('video-update',self.payload(200,title='fresh'))
+                update_video_profile(**self.payload(100,code=-404))
+        update_video_profile(**self.payload(200,title='fresh'))
         before = self.session.execute('SELECT count(*) FROM tdd_video_log WHERE aid=%s',(self.aid,))[0][0]
-        with self.assertLogs('task',level='WARNING'):
-            self.assertEqual(observe('video-update',self.payload(100,code=-404)),[])
+        with self.assertLogs('db.profiles',level='WARNING'):
+            self.assertEqual(update_video_profile(**self.payload(100,code=-404)),[])
         video = DBOperation.query_video_via_aid(self.aid,self.session)
         self.assertEqual((video.code,video.title,video.added),(0,'fresh',1))
         self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_video_log WHERE aid=%s',(self.aid,))[0][0],before)
         from service import MemberCard
-        observe('member-update',dict(mid=self.mid,card=MemberCard(self.mid,'fresh','','',''),code=0,added=200))
-        with self.assertLogs('task',level='WARNING'):
-            observe('member-update',dict(mid=self.mid,card=None,code=-404,added=100))
+        update_member_profile(**dict(mid=self.mid,card=MemberCard(self.mid,'fresh','','',''),code=0,added=200))
+        with self.assertLogs('db.profiles',level='WARNING'):
+            update_member_profile(**dict(mid=self.mid,card=None,code=-404,added=100))
         member = DBOperation.query_member_via_mid(self.mid,self.session)
         self.assertEqual((member.code,member.name),(0,'fresh'))
 
@@ -84,13 +83,13 @@ class PostgresProfileObservationTest(unittest.TestCase):
                 with session.transaction():
                     guard_write_transaction(connection,self.run_id)
                     pid_queue.put(connection.info.backend_pid)
-                    return apply_observation('video-update',second,session)
+                    return _update_video_profile(session,**second)
         with ThreadPoolExecutor(max_workers=1) as executor:
             with engine.connection() as connection:
                 session = Session(connection)
                 with session.transaction():
                     guard_write_transaction(connection,self.run_id)
-                    apply_observation('video-update',first,session)
+                    _update_video_profile(session,**first)
                     future = executor.submit(waiting_writer)
                     waiting_pid = pid_queue.get(timeout=5)
                     deadline = time.monotonic()+5
@@ -105,7 +104,7 @@ class PostgresProfileObservationTest(unittest.TestCase):
             return future.result(timeout=10)
 
     def test_concurrent_first_watermark_rejects_older_waiter_after_newer_commit(self):
-        with self.assertLogs('task',level='WARNING'):
+        with self.assertLogs('db.profiles',level='WARNING'):
             result = self.concurrent(self.payload(200,title='fresh'),self.payload(100,title='stale'))
         self.assertEqual(result,[])
         video = DBOperation.query_video_via_aid(self.aid,self.session)
@@ -118,7 +117,7 @@ class PostgresProfileObservationTest(unittest.TestCase):
         self.assertEqual(DBOperation.query_video_via_aid(self.aid,self.session).title,'fresh')
 
     def test_profile_failure_rolls_back_first_watermark_before_older_observation(self):
-        with mock.patch('task.task.append_objects',side_effect=RuntimeError('injected log failure')):
+        with mock.patch('db.profiles.append_objects',side_effect=RuntimeError('injected log failure')):
             with self.assertRaisesRegex(RuntimeError,'injected log failure'):
                 self.apply_in_transaction(self.payload(300,title='rolled back'))
         self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_ingest.profile_observation '

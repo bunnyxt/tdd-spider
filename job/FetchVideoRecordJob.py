@@ -2,7 +2,7 @@ import time
 from .Job import Job
 from service import Service, CodeError, RateLimitError
 from queue import Queue, Empty, Full
-from core import Record
+from core import VideoRecord
 from util import format_ts_ms, get_ts_s, ts_s_to_str
 from task import fetch_video_record_via_video_view
 from typing import Optional
@@ -12,7 +12,7 @@ __all__ = ['FetchVideoRecordJob']
 
 class FetchVideoRecordJob(Job):
     """
-    Fetch-only worker: HTTP fetch -> Record -> record_queue. Persisting is
+    Fetch-only worker: HTTP fetch -> VideoRecord -> record_queue. Persisting is
     left to a BatchInsertVideoRecordJob draining the queue, so fetch workers
     hold no DB connection and per-record commit contention disappears. This is
     the bulk counterpart of AddVideoRecordJob (which stays the right choice for
@@ -33,7 +33,7 @@ class FetchVideoRecordJob(Job):
     # duration limit normally ends the wait first)
     MAX_PUT_WAIT_S = 300.0
 
-    def __init__(self, name: str, aid_queue: Queue[int], record_queue: 'Queue[Optional[Record]]',
+    def __init__(self, name: str, aid_queue: Queue[int], record_queue: 'Queue[Optional[VideoRecord]]',
                  service: Service,
                  code_error_aid_queue: 'Optional[Queue[Optional[int]]]' = None,
                  duration_limit_s: Optional[int] = None,

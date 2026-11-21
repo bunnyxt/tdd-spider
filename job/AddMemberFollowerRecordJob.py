@@ -40,12 +40,12 @@ class AddMemberFollowerRecordJob(Job):
             item_start = time.perf_counter()
 
             try:
-                new_follower_record = add_member_follower_record(mid, self.service)
+                record_key = add_member_follower_record(mid, self.service)
             except Exception as e:
                 self.logger.error(f'Fail to add member follower record. mid: {mid}, error: {e}')
                 self.stat.condition['exception'] += 1
             else:
-                self.logger.debug(f'New member follower record {new_follower_record} added. mid: {mid}')
+                self.logger.debug(f'New follower record committed. key (mid, added, id): {record_key}')
                 self.stat.condition['success'] += 1
 
             duration_ms = int((time.perf_counter() - item_start) * 1000)

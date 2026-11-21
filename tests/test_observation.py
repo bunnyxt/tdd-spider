@@ -9,8 +9,17 @@ from unittest import mock
 from uuid import uuid4
 
 from db import TddVideoRecord
-from db.observation import observe
+from db.observation import execute_write
+from db.write import insert_objects
 from service import MemberCard
+
+
+def save_member(session, card, record, present):
+    return card
+
+
+def unsupported(session, value):
+    return value
 
 
 class ObservationTest(unittest.TestCase):
@@ -28,12 +37,12 @@ class ObservationTest(unittest.TestCase):
         def run(factory, callback, *, run_id):
             return callback(mock.Mock())
         with mock.patch('db.ingest.run_transaction', side_effect=run), \
-             mock.patch('db.observation._dispatch', return_value=[record]) as dispatch, \
+             mock.patch('db.write.append_objects') as append, \
              mock.patch('db.observation.encode', side_effect=AssertionError('must not encode')), \
              mock.patch('db.observation._save_failure') as save:
-            result = observe('append', {'objects': [record]})
+            result = insert_objects([record])
         self.assertIs(result[0], record)
-        dispatch.assert_called_once()
+        append.assert_called_once()
         save.assert_not_called()
         self.assertFalse(self.directory.exists())
 
@@ -50,13 +59,13 @@ class ObservationTest(unittest.TestCase):
              mock.patch('db.ingest.run_transaction', side_effect=fail) as runner, \
              self.assertLogs('db.observation', level='ERROR') as logs:
             with self.assertRaises(RuntimeError) as caught:
-                observe('member-update', payload)
+                execute_write(save_member, **payload)
         self.assertIs(caught.exception, error)
         runner.assert_called_once()
         path, = self.directory.glob('*.json')
         data = json.loads(path.read_text())
         self.assertEqual((data['operation'], data['run_id'], data['commit_status']),
-                         ('member-update', str(run_id), 'unconfirmed'))
+                         ('save_member', str(run_id), 'unconfirmed'))
         self.assertEqual(data['payload']['card']['values']['face'], '')
         self.assertIsNone(data['payload']['card']['values']['sex'])
         self.assertEqual(data['payload']['record']['values']['view'], 100)
@@ -70,7 +79,7 @@ class ObservationTest(unittest.TestCase):
              self.assertLogs('db.observation', level='ERROR'):
             for aid in (1, 2):
                 with self.assertRaises(RuntimeError):
-                    observe('append', {'objects': [TddVideoRecord(added=1, aid=aid)]})
+                    insert_objects([TddVideoRecord(added=1, aid=aid)])
         files = list(self.directory.glob('*.json'))
         self.assertEqual(len(files), 2)
         self.assertEqual({json.loads(path.read_text())['payload']['objects'][0]['values']['aid']
@@ -82,7 +91,7 @@ class ObservationTest(unittest.TestCase):
              mock.patch('db.observation._save_failure', side_effect=OSError('disk full')), \
              self.assertLogs('db.observation', level='ERROR') as logs:
             with self.assertRaises(RuntimeError) as caught:
-                observe('append', {'objects': []})
+                insert_objects([])
         self.assertIs(caught.exception, original)
         self.assertIn('could not be saved', logs.output[0])
 
@@ -90,9 +99,20 @@ class ObservationTest(unittest.TestCase):
         with mock.patch('db.ingest.run_transaction', side_effect=RuntimeError('offline')), \
              self.assertLogs('db.observation', level='ERROR'):
             with self.assertRaisesRegex(RuntimeError, 'offline'):
-                observe('invalid', {'unsupported': object()})
+                execute_write(unsupported, object())
         self.assertEqual(list(self.directory.iterdir()), [])
 
-    def test_caller_cannot_inject_an_old_receipt_id(self):
-        with self.assertRaises(TypeError):
-            observe('append', {'objects': []}, batch_id=uuid4())
+    def test_operation_strings_are_rejected_before_database_work(self):
+        with mock.patch('db.ingest.run_transaction') as run:
+            with self.assertRaisesRegex(TypeError, 'callable'):
+                execute_write('append', objects=[])
+        run.assert_not_called()
+
+    def test_callable_without_name_preserves_original_exception(self):
+        from functools import partial
+        original = RuntimeError('database failed')
+        with mock.patch('db.ingest.run_transaction', side_effect=original), \
+             self.assertLogs('db.observation', level='ERROR'):
+            with self.assertRaises(RuntimeError) as caught:
+                execute_write(partial(unsupported, value=123))
+        self.assertIs(caught.exception, original)

@@ -7,7 +7,6 @@ from unittest import mock
 from db import TddVideo,TddMember,TddVideoStaff,TddVideoLog,TddMemberLog
 from db.basic import Result,ResultRow
 from db.values import epoch
-from task.task import apply_observation
 
 
 class ProfileSession:
@@ -56,6 +55,6 @@ class ProfileSession:
             obj.id = row[0]
         return [(obj.id,) for obj in objects]
 
-    def observe(self,operation,payload,**kwargs):
-        with self.transaction(), mock.patch('task.task.append_objects',side_effect=self.append):
-            return apply_observation(operation,payload,self)
+    def execute_write(self,function,*args,**kwargs):
+        with self.transaction(), mock.patch('db.profiles.append_objects',side_effect=self.append):
+            return function(self,*args,**kwargs)

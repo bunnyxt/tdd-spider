@@ -1,7 +1,7 @@
 """Commit independent aggregate batches in explicit business transactions."""
 from itertools import islice
 from db import TddMemberTotalStatRecord
-from db.observation import observe
+from db.write import insert_objects
 from .member_total_stat import STAT_FIELDS
 
 FIELDS = ('added','mid','video_count') + STAT_FIELDS
@@ -16,7 +16,7 @@ def write_member_stats(session, records, logger, batch_size=1000):
         if not batch:
             return committed
         try:
-            observe('append',{'objects':[TddMemberTotalStatRecord(**record) for record in batch]})
+            insert_objects([TddMemberTotalStatRecord(**record) for record in batch])
         except Exception:
             logger.critical('Incomplete aggregate write: confirmed_committed_rows=%d, failed_batch_rows=%d, '
                             'Check the failure log and reconcile before retrying.',

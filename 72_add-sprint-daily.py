@@ -1,5 +1,5 @@
 from db import Session
-from db.observation import observe
+from db.sprint import insert_sprint_daily_record, insert_sprint_daily_summary
 from db.values import timestamp
 import datetime
 from runrecord import track
@@ -90,8 +90,8 @@ def add_sprint_daily():
                 # if no view incr, lday is 9999999
                 lday = math.floor((1000000 - end_view) / view_incr) if view_incr != 0 else 9999999
 
-                observe('sprint-daily-record', dict(added=added, date=date, aid=aid, view=end_view,
-                                                  viewincr=view_incr, pday=pday, lday=lday))
+                insert_sprint_daily_record(added=added, date=date, aid=aid, view=end_view,
+                                                  viewincr=view_incr, pday=pday, lday=lday)
                 logger.info(f'Add new daily record. '
                             f'added: {added}, date: {date}, aid: {aid}, end_view: {end_view}, view_incr: {view_incr}, '
                             f'pday: {pday}, lday: {lday}')
@@ -112,9 +112,9 @@ def add_sprint_daily():
             for aid in million_video_aids:
                 millvids_str += f'{aid};'
 
-            observe('sprint-daily-summary', dict(added=get_ts_s(), date=date, correct=1, vidnum=video_total,
+            insert_sprint_daily_summary(added=get_ts_s(), date=date, correct=1, vidnum=video_total,
                                                newvids=newvids_str, millvids=millvids_str, viewincr=view_incr_total,
-                                               viewincrincr=view_incr_incr, comment=''))
+                                               viewincrincr=view_incr_incr, comment='')
             logger.info(f'Add new daily summary. '
                         f'added: {get_ts_s()}, date: {date}, video_total: {video_total}, '
                         f'newvids_str: {newvids_str}, millvids_str: {millvids_str}, '

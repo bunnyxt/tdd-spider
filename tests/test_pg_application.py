@@ -1,6 +1,6 @@
 """Opt-in PostgreSQL application writes against a disposable database clone.
 
-Set TDD_PG_INTEGRATION=1 with PG* connection settings. These tests append
+Set TDD_PG_INTEGRATION=1 and select a database INI with TDD_CONFIG_PATH. Tests append
 synthetic observations and intentionally leave their manifests for inspection.
 They never contact an HTTP endpoint.
 """
@@ -15,13 +15,13 @@ import unittest
 from unittest import mock
 from uuid import uuid4
 
-from core import MemberFollowerRecordNew,Record
+from core import MemberFollowerRecord,VideoRecord
 from db import DBOperation,Session,TddVideo,TddMember,TddVideoStaff,TddVideoRecordAbnormalChange
-from db.observation import observe
+from db.write import insert_objects
 from db.values import timestamp
 from job import FetchMemberFollowerRecordJob,BatchInsertMemberFollowerRecordJob
 from service import CodeError,MemberCard,VideoView,VideoViewOwner,VideoViewStaffItem,VideoViewStat,VideoTags
-from task import add_video,update_video,add_member,update_member,commit_video_records_batch
+from task import add_video,update_video,add_member,update_member,commit_video_records_batch,commit_member_follower_records_batch
 from util import a2b
 from util.member_total_stat import aggregate_member_stats
 from util.member_total_stat_writer import write_member_stats
@@ -76,8 +76,8 @@ class PostgresApplicationTest(unittest.TestCase):
         for mid in (self.mid,self.mid+1):
             self.assertEqual(DBOperation.query_member_via_mid(mid,self.session).last_video_aid,self.aid)
         self.assertEqual(self.session.execute('SELECT added FROM tdd_video_record_latest WHERE aid=%s',(self.aid,))[0][0],ADDED)
-        self.service.get_video_view.return_value = self.view()._replace(title='changed',state=-4,staff=None)
-        with mock.patch('task.task.append_objects',side_effect=RuntimeError('injected log failure')):
+        self.service.get_video_view.return_value = self.view()._replace(title='changed',state=-4,staff=[])
+        with mock.patch('db.profiles.append_objects',side_effect=RuntimeError('injected log failure')):
             with self.assertRaisesRegex(RuntimeError,'injected log failure'):
                 update_video(self.aid,self.service,self.session)
         current = DBOperation.query_video_via_aid(self.aid,self.session)
@@ -111,7 +111,7 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual(DBOperation.query_video_via_aid(self.aid,self.session).code,0)
         self.service.get_video_view.side_effect = None
         self.service.get_video_view.return_value = self.view()._replace(staff=None,attribute=None,
-            present_fields=frozenset(('videos','tid','tname','copyright','pic','title','pubdate','desc','state')))
+            present_fields=frozenset())
         logs = update_video(self.aid,self.service,self.session)
         self.assertEqual({row.attr:(row.oldval,row.newval) for row in logs},{'hasstaff':('1','0')})
         current = DBOperation.query_video_via_aid(self.aid,self.session)
@@ -126,8 +126,6 @@ class PostgresApplicationTest(unittest.TestCase):
         add_member(self.mid,self.service,self.session)
         self.assertEqual(DBOperation.query_member_via_mid(self.mid,self.session).last_video_aid,self.aid)
         self.service.get_member_card.side_effect = None
-        self.service.get_member_card.return_value = MemberCard(self.mid,'member',None,'',None,frozenset(('mid','name','face')))
-        self.assertEqual(update_member(self.mid,self.service),[])
         self.service.get_member_card.return_value = MemberCard(self.mid,'member',None,'','\x00')
         logs = update_member(self.mid,self.service)
         self.assertEqual({r.attr:(r.oldval,r.newval) for r in logs},{'sex':('',None),'sign':('sign','')})
@@ -139,7 +137,7 @@ class PostgresApplicationTest(unittest.TestCase):
         add_video(self.aid,self.service,self.session)
         self.service.get_video_view.return_value = self.view(aid=self.aid+1,view=2147483647,staff=False)
         add_video(self.aid+1,self.service,self.session)
-        record = Record(ADDED,self.aid,a2b(self.aid),2147483647,1,2,3,4,5,6)
+        record = VideoRecord(ADDED,self.aid,a2b(self.aid),2147483647,1,2,3,4,5,6)
         first = commit_video_records_batch([record])
         independent = commit_video_records_batch([record])
         self.assertNotEqual(first[0][2],independent[0][2])
@@ -172,7 +170,7 @@ class PostgresApplicationTest(unittest.TestCase):
         self.service.get_video_view.return_value = self.view()._replace(title='changed',staff=[
             VideoViewStaffItem(self.mid+1,'first-existing','',''),VideoViewStaffItem(self.mid+1,'second-existing','',''),
             VideoViewStaffItem(self.mid+2,'first-new','',''),VideoViewStaffItem(self.mid+2,'second-new','','')])
-        with self.assertLogs('task',level='WARNING'):
+        with self.assertLogs('db.profiles',level='WARNING'):
             logs = update_video(self.aid,self.service,self.session)
         staff = DBOperation.query_video_staff_via_aid(self.aid,self.session)
         self.assertEqual({item.mid:item.title for item in staff},{self.mid+1:'first-existing',self.mid+2:'first-new'})
@@ -201,13 +199,13 @@ class PostgresApplicationTest(unittest.TestCase):
         from test_remaining_script_run_records import _load
         script = _load('51_hourly-video-record-add.py')
         add_video(self.aid,self.service,self.session)
-        records = [Record(ADDED-7200,self.aid,a2b(self.aid),1000,1,1,1,1,1,1),
-                   Record(ADDED-3600,self.aid,a2b(self.aid),1100,1,1,1,1,1,1),
-                   Record(ADDED,self.aid,a2b(self.aid),3000,1,1,1,1,1,1)]
+        records = [VideoRecord(ADDED-7200,self.aid,a2b(self.aid),1000,1,1,1,1,1,1),
+                   VideoRecord(ADDED-3600,self.aid,a2b(self.aid),1100,1,1,1,1,1,1),
+                   VideoRecord(ADDED,self.aid,a2b(self.aid),3000,1,1,1,1,1,1)]
         for record in records[:-1]:
             label = script.ts_s_to_str(record.added)[:13]+':00'
             path = Path(self.directory.name)/(label+'.csv')
-            path.write_text(','.join(Record._fields)+'\n'+','.join(map(str,record))+'\n')
+            path.write_text(','.join(VideoRecord._fields)+'\n'+','.join(map(str,record))+'\n')
         runner = script.RecentRecordsAnalystRunner(records[-1:],script.ts_s_to_str(ADDED)[:13]+':00',data_folder=self.directory.name)
         runner.process()
         actual = self.session.execute('SELECT * FROM tdd_video_record_abnormal_change WHERE aid=%s',(self.aid,))
@@ -221,7 +219,7 @@ class PostgresApplicationTest(unittest.TestCase):
     def test_sprint_million_status_and_daily_legacy_windows_and_sentinels(self):
         import datetime
         from db import TddSprintVideoRecord
-        from db.observation import observe
+        from db.write import insert_objects
         from job import AddSprintVideoRecordJob
         from test_remaining_script_run_records import _load
         cst = datetime.timezone(datetime.timedelta(hours=8))
@@ -234,9 +232,9 @@ class PostgresApplicationTest(unittest.TestCase):
                                      (timestamp(start),aid,'sprint',end-3*86400,'processing'))
         def record(aid,added,view):
             return TddSprintVideoRecord(added=added,aid=aid,view=view,danmaku=1,reply=1,favorite=1,coin=1,share=1,like=1)
-        observe('append',{'objects':[record(aids[0],start+60,1000),record(aids[0],end+60,1000),
+        insert_objects([record(aids[0],start+60,1000),record(aids[0],end+60,1000),
                                      record(aids[1],end-3600,200),record(aids[1],end+60,500),
-                                     record(aids[2],start+60,999000)]})
+                                     record(aids[2],start+60,999000)])
         queue = Queue()
         queue.put(aids[2])
         self.service.get_video_view_trimmed.return_value = self.view(aid=aids[2],view=1000000)
@@ -336,4 +334,10 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual(writer.stat.condition['persisted'],3)
         actual = self.session.execute('SELECT mid,follower FROM tdd_member_follower_record_latest WHERE mid=ANY(%s)',([self.mid,self.mid+1,self.mid+2],))
         self.assertEqual({r['mid']:r['follower'] for r in actual},{mid:mid%1000 for mid in (self.mid,self.mid+1,self.mid+2)})
-        self.expected_manifest({'tdd_member_follower_record':3})
+        record = MemberFollowerRecord(ADDED,self.mid,123)
+        keys = commit_member_follower_records_batch([record,record])
+        self.assertEqual([key[:2] for key in keys],[(self.mid,timestamp(ADDED))]*2)
+        self.assertNotEqual(keys[0][2],keys[1][2])
+        self.assertEqual(self.session.execute('SELECT id FROM tdd_member_follower_record_latest WHERE mid=%s',
+                                             (self.mid,))[0][0],keys[1][2])
+        self.expected_manifest({'tdd_member_follower_record':5})

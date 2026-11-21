@@ -9,7 +9,7 @@ import unittest
 from unittest import mock
 from uuid import uuid4
 
-from core import Record
+from core import VideoRecord
 from db.write import VIDEO_RECORD_COLUMNS
 from job import BatchInsertVideoRecordJob
 from task import commit_video_records_batch, fetch_video_record_via_video_view
@@ -20,7 +20,7 @@ from test_remaining_script_run_records import _load
 
 class VideoRecordWriteTest(unittest.TestCase):
     def record(self):
-        return Record(123, 7, '1AbCdEfGhJ', 100, 1, 2, 3, 4, 5, 6)
+        return VideoRecord(123, 7, '1AbCdEfGhJ', 100, 1, 2, 3, 4, 5, 6)
 
     def test_batch_binds_fields_and_returns_independent_keys_without_mutating_input(self):
         record = self.record()
@@ -41,7 +41,7 @@ class VideoRecordWriteTest(unittest.TestCase):
         query, rows = cursors[0].executemany.call_args.args
         self.assertNotIn('bvid', query.as_string())
         self.assertEqual(rows, [(added, 7, 100, 1, 2, 3, 4, 5, 6)] * 2)
-        self.assertEqual(tuple(VIDEO_RECORD_COLUMNS), Record._fields[:2] + Record._fields[3:])
+        self.assertEqual(tuple(VIDEO_RECORD_COLUMNS), VideoRecord._fields[:2] + VideoRecord._fields[3:])
         self.assertEqual([row[4].obj['id'] for row in cursors[1].executemany.call_args.args[1]], [10, 11])
         self.assertIs(records[0], record)
         self.assertEqual(record.bvid, '1AbCdEfGhJ')
@@ -55,7 +55,7 @@ class VideoRecordWriteTest(unittest.TestCase):
         service.get_video_view_trimmed.return_value = view
         with mock.patch('task.task.get_ts_s', return_value=123):
             record = fetch_video_record_via_video_view(7, service)
-        self.assertIs(type(record), Record)
+        self.assertIs(type(record), VideoRecord)
         self.assertEqual((record.added, record.aid, record.bvid, record.view),
                          (123, 7, view.bvid.removeprefix('BV'), -1))
 
@@ -69,7 +69,7 @@ class VideoRecordWriteTest(unittest.TestCase):
                 commit_video_records_batch([record])
             path, = Path(directory).glob('*.json')
             saved = json.loads(path.read_text())
-        self.assertEqual(saved['operation'], 'video-records')
+        self.assertEqual(saved['operation'], 'append_video_records')
         self.assertEqual(saved['payload']['records'][0]['values'], record._asdict())
         self.assertEqual(saved['commit_status'], 'unconfirmed')
 
@@ -103,6 +103,6 @@ class VideoRecordWriteTest(unittest.TestCase):
                 runner.process()
         self.assertEqual(speed.call_count, 4)
         for call in speed.call_args_list:
-            self.assertTrue(all(type(item) is Record for item in call.args[:2]))
-        self.assertEqual(speed.call_args_list[-1].args[0], Record(0, 7, script.a2b(7), 0, 0, 0, 0, 0, 0, 0))
+            self.assertTrue(all(type(item) is VideoRecord for item in call.args[:2]))
+        self.assertEqual(speed.call_args_list[-1].args[0], VideoRecord(0, 7, script.a2b(7), 0, 0, 0, 0, 0, 0, 0))
         self.assertIs(speed.call_args_list[-1].args[1], record)
