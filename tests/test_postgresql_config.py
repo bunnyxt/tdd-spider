@@ -6,6 +6,7 @@ import unittest
 from unittest import mock
 
 from conf.conf import get_db_args
+from db.ingest import _set_transaction_limits
 
 
 def option_settings(options):
@@ -54,3 +55,30 @@ class PostgreSQLConfigTest(unittest.TestCase):
             for value in ('0','-1','300001','1.5','invalid',''):
                 with self.subTest(name=name,value=value),self.assertRaises(ValueError):
                     self.args({'TDD_DB_'+name+'_TIMEOUT_MS':value})
+
+    def test_connection_and_transaction_share_default_and_override_policy(self):
+        for environment in ({}, {'TDD_DB_LOCK_TIMEOUT_MS': '1',
+                                 'TDD_DB_STATEMENT_TIMEOUT_MS': '300000',
+                                 'TDD_DB_TRANSACTION_TIMEOUT_MS': '120001'}):
+            with self.subTest(environment=environment):
+                settings = option_settings(self.args(environment)['options'])
+                conn = mock.Mock()
+                with mock.patch.dict(os.environ, environment, clear=True):
+                    _set_transaction_limits(conn)
+                query, values = conn.execute.call_args.args
+                self.assertEqual(query,
+                                 "SELECT set_config('lock_timeout',%s,true),"
+                                 "set_config('statement_timeout',%s,true),"
+                                 "set_config('transaction_timeout',%s,true)")
+                self.assertEqual(values, [settings[name] + 'ms' for name in
+                                         ('lock_timeout', 'statement_timeout', 'transaction_timeout')])
+
+    def test_invalid_transaction_deadline_fails_before_sql(self):
+        for name in ('LOCK', 'STATEMENT', 'TRANSACTION'):
+            for value in ('0', '-1', '300001', '1.5', 'invalid', ''):
+                with self.subTest(name=name, value=value):
+                    conn = mock.Mock()
+                    with mock.patch.dict(os.environ, {'TDD_DB_' + name + '_TIMEOUT_MS': value}, clear=True):
+                        with self.assertRaises(ValueError):
+                            _set_transaction_limits(conn)
+                    conn.execute.assert_not_called()

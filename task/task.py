@@ -3,13 +3,13 @@ import logging
 import time
 
 from service import Service, ServiceError, CodeError
-from db import DBOperation, TddVideo, TddVideoRecord, TddVideoLog, TddVideoStaff, TddMember, \
+from db import DBOperation, TddVideo, TddVideoLog, TddVideoStaff, TddMember, \
     TddMemberFollowerRecord, TddMemberLog, TddSprintVideoRecord
-from db.write import append_objects
-from db.values import clean_text
+from db.write import append_objects, append_video_records
+from db.values import clean_text, database_value
 from db.observation import observe
 from util import get_ts_s, a2b, same_pic_url
-from core import RecordNew, MemberFollowerRecordNew
+from core import Record, MemberFollowerRecordNew
 from .error import AlreadyExistError, NotExistError
 
 logger = logging.getLogger('task')
@@ -31,7 +31,7 @@ def fetch_video_record_via_video_view(aid, service, out_stat=None):
     view = service.get_video_view_trimmed({'aid': aid})
     if out_stat is not None:
         out_stat['http_ms'] = int((time.perf_counter() - start) * 1000)
-    return RecordNew(added=get_ts_s(), aid=aid, bvid=view.bvid.removeprefix('BV'), **_stats(view.stat))
+    return Record(added=get_ts_s(), aid=aid, bvid=view.bvid.removeprefix('BV'), **_stats(view.stat))
 
 
 def add_video_record_via_video_view(aid, service, out_stat=None):
@@ -49,19 +49,24 @@ def _commit_objects(objects, out_stat=None):
 
 
 def commit_video_records_batch(records, out_stat=None):
-    return _commit_objects([TddVideoRecord(added=r.added, aid=r.aid,
-                           **{field:getattr(r,field) for field in STAT_FIELDS}) for r in records],
-                           out_stat)
+    """Persist collected records and return their complete (aid, added, id) keys."""
+    start = time.perf_counter()
+    keys = observe('video-records', {'records': records})
+    if out_stat is not None:
+        out_stat['db_ms'] = int((time.perf_counter() - start) * 1000)
+    return keys
 
 
 def commit_video_record_via_video_view(video_view, added):
-    obj = TddVideoRecord(added=added, aid=video_view.aid, **_stats(video_view.stat))
-    return _commit_objects([obj])[0]
+    record = Record(added=added, aid=video_view.aid, bvid=video_view.bvid.removeprefix('BV'),
+                    **_stats(video_view.stat))
+    return commit_video_records_batch([record])[0]
 
 
 def commit_video_record_via_newlist_archive_stat(stat, added, aid):
-    obj = TddVideoRecord(added=added, aid=stat.aid if stat.aid != 0 else aid, **_stats(stat))
-    return _commit_objects([obj])[0]
+    aid = stat.aid if stat.aid != 0 else aid
+    record = Record(added=added, aid=aid, bvid=a2b(aid), **_stats(stat))
+    return commit_video_records_batch([record])[0]
 
 
 def add_sprint_video_record_via_video_view(aid, service):
@@ -168,7 +173,8 @@ def _apply_video_add(payload,session):
         except AlreadyExistError:
             logger.debug('Video staff relationship already exists: aid=%s, mid=%s',aid,item.mid)
     if commit_video_record:
-        append_objects(session,[TddVideoRecord(added=added,aid=aid,**_stats(view.stat))])
+        append_video_records(session, [Record(added=added, aid=aid,
+                             bvid=view.bvid.removeprefix('BV'), **_stats(view.stat))])
     return video
 
 
@@ -218,10 +224,15 @@ def _apply_video_update(payload,session):
         return []
     if not _claim_profile_observation('video',aid,added,session):
         return []
-    changed = []
+    changes = {}
     def change(field,new):
-        if _change(current,field,new,logs,added,{'aid':aid},TddVideoLog):
-            changed.append(field)
+        old, new = clean_text(getattr(current,field)), clean_text(new)
+        if old == new:
+            return
+        changes[field] = (old,new)
+        logs.append(TddVideoLog(added,aid,attr=field,
+                               oldval=None if old is None else str(old),
+                               newval=None if new is None else str(new)))
     if code_error is not None:
         if code_error != -403:
             change('code',code_error)
@@ -254,8 +265,8 @@ def _apply_video_update(payload,session):
                     logs.append(TddVideoLog(added,aid,attr='staff',newval=f'mid: {new_staff.mid}; title: {title}'))
                 elif clean_text(old.title) != title:
                     logs.append(TddVideoLog(added,aid,attr='staff',oldval=f'mid: {old.mid}; title: {clean_text(old.title)}',newval=f'mid: {item.mid}; title: {title}'))
-                    old.title = title
-                    DBOperation.update(old,['title'],session)
+                    session.execute('UPDATE tdd_video_staff SET title = %s WHERE id = %s',
+                                    (title,old.id))
             for mid,item in existing.items():
                 if mid not in remaining:
                     continue
@@ -264,7 +275,10 @@ def _apply_video_update(payload,session):
         if tags is not None:
             if sorted(tags.split(';')) != sorted((clean_text(current.tags) or '').split(';')):
                 change('tags',tags)
-    DBOperation.update(current,changed,session)
+    if changes:
+        assignments = ', '.join('"' + field + '" = %s' for field in changes)
+        session.execute('UPDATE tdd_video SET ' + assignments + ' WHERE id = %s',
+                        tuple(database_value(field,new) for field,(_,new) in changes.items()) + (current.id,))
     append_objects(session,logs)
     return logs
 

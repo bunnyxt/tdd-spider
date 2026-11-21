@@ -1,5 +1,7 @@
 import time
-from queue import Empty
+from queue import Empty, Queue
+from typing import Optional
+from core import Record
 from .Job import Job
 from task import commit_video_records_batch
 
@@ -12,13 +14,13 @@ def _short(error, limit=300):
 
 class BatchInsertVideoRecordJob(Job):
     """One bounded-queue writer; only confirmed batches reach analysis."""
-    def __init__(self, name, record_queue, downstream_queue, batch_size=1000,
+    def __init__(self, name, record_queue: Queue[Optional[Record]], downstream_queue: Queue[Record], batch_size=1000,
                  poll_timeout_s=1.0):
         super().__init__(name)
         self.record_queue, self.downstream_queue = record_queue, downstream_queue
         self.batch_size, self.poll_timeout_s = batch_size, poll_timeout_s
 
-    def _flush(self, batch):
+    def _flush(self, batch: list[Record]):
         if not batch:
             return
         start = time.perf_counter()

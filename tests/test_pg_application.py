@@ -15,7 +15,7 @@ import unittest
 from unittest import mock
 from uuid import uuid4
 
-from core import MemberFollowerRecordNew,RecordNew
+from core import MemberFollowerRecordNew,Record
 from db import DBOperation,Session,TddVideo,TddMember,TddVideoStaff,TddVideoRecordAbnormalChange
 from db.observation import observe
 from db.values import timestamp
@@ -139,11 +139,11 @@ class PostgresApplicationTest(unittest.TestCase):
         add_video(self.aid,self.service,self.session)
         self.service.get_video_view.return_value = self.view(aid=self.aid+1,view=2147483647,staff=False)
         add_video(self.aid+1,self.service,self.session)
-        record = RecordNew(ADDED,self.aid,a2b(self.aid),2147483647,1,2,3,4,5,6)
+        record = Record(ADDED,self.aid,a2b(self.aid),2147483647,1,2,3,4,5,6)
         first = commit_video_records_batch([record])
         independent = commit_video_records_batch([record])
-        self.assertNotEqual(first[0].id,independent[0].id)
-        self.assertEqual(self.session.execute('SELECT id FROM tdd_video_record_latest WHERE aid=%s',(self.aid,))[0][0],independent[0].id)
+        self.assertNotEqual(first[0][2],independent[0][2])
+        self.assertEqual(self.session.execute('SELECT id FROM tdd_video_record_latest WHERE aid=%s',(self.aid,))[0][0],independent[0][2])
         rows = self.session.execute('SELECT v.aid,v.mid AS owner_mid,r.view,r.danmaku,r.reply,r.favorite,r.coin,r.share,r.like,'
                                     's.mid AS staff_mid,v.code,v.state,r.id FROM tdd_video v '
                                     'JOIN tdd_video_record_latest r ON v.aid=r.aid '
@@ -201,13 +201,13 @@ class PostgresApplicationTest(unittest.TestCase):
         from test_remaining_script_run_records import _load
         script = _load('51_hourly-video-record-add.py')
         add_video(self.aid,self.service,self.session)
-        records = [RecordNew(ADDED-7200,self.aid,a2b(self.aid),1000,1,1,1,1,1,1),
-                   RecordNew(ADDED-3600,self.aid,a2b(self.aid),1100,1,1,1,1,1,1),
-                   RecordNew(ADDED,self.aid,a2b(self.aid),3000,1,1,1,1,1,1)]
+        records = [Record(ADDED-7200,self.aid,a2b(self.aid),1000,1,1,1,1,1,1),
+                   Record(ADDED-3600,self.aid,a2b(self.aid),1100,1,1,1,1,1,1),
+                   Record(ADDED,self.aid,a2b(self.aid),3000,1,1,1,1,1,1)]
         for record in records[:-1]:
             label = script.ts_s_to_str(record.added)[:13]+':00'
             path = Path(self.directory.name)/(label+'.csv')
-            path.write_text(','.join(RecordNew._fields)+'\n'+','.join(map(str,record))+'\n')
+            path.write_text(','.join(Record._fields)+'\n'+','.join(map(str,record))+'\n')
         runner = script.RecentRecordsAnalystRunner(records[-1:],script.ts_s_to_str(ADDED)[:13]+':00',data_folder=self.directory.name)
         runner.process()
         actual = self.session.execute('SELECT * FROM tdd_video_record_abnormal_change WHERE aid=%s',(self.aid,))

@@ -60,7 +60,7 @@ class VideoView(NamedTuple):
     present_fields: Optional[frozenset] = None
 
 
-# minimal view payload for stat-record jobs: exactly what RecordNew needs.
+# minimal view payload for stat-record jobs: exactly what Record needs.
 # Served by the trimmed video_view worker (service/workers/video_view/), whose
 # response is a strict subset of the full view -- so the same parser also
 # accepts the full API response (direct mode / full worker).

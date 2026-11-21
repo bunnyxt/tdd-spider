@@ -4,7 +4,7 @@ from threading import Lock
 from conf import get_db_args
 from .values import epoch
 
-__all__ = ['engine', 'Session', 'update_engine']
+__all__ = ['Session']
 
 
 class ResultRow(dict):
@@ -51,10 +51,6 @@ class Engine:
 
 
 engine = Engine()
-
-
-def update_engine():
-    engine.dispose()
 
 
 class Session:

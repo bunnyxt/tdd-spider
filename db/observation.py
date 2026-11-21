@@ -57,6 +57,9 @@ def _save_failure(operation, payload, run_id, error):
 
 
 def _dispatch(operation, payload, session):
+    if operation == 'video-records':
+        from .write import append_video_records
+        return append_video_records(session, payload['records'])
     if operation == 'append':
         from .write import append_objects
         objects = payload['objects']

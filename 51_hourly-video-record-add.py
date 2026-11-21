@@ -16,7 +16,7 @@ import shutil
 import sys
 from collections import namedtuple, defaultdict, Counter
 from typing import Optional
-from core import RecordNew
+from core import Record
 from service import Service
 from job import FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool
 from runrecord import RunRecorder
@@ -27,9 +27,6 @@ script_name = 'hourly-video-record-add'
 script_fullname = fullname(script_id, script_name)
 logger = logging.getLogger(script_id)
 
-# TODO: remove old record
-Record = namedtuple('Record', [
-    'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
 RecordSpeed = namedtuple('RecordSpeed', [
     'start_ts', 'end_ts', 'timespan', 'per_seconds', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
 RecordSpeedRatio = namedtuple('RecordSpeedRatio', [
@@ -197,7 +194,7 @@ class VideoRecordAcquisitionJob(Job):
     WRITER_LABEL = 'record-db-writer'
     UPDATE_LABEL = 'record-video-update'
 
-    def __init__(self, time_task: str, record_queue: Queue[RecordNew]):
+    def __init__(self, time_task: str, record_queue: Queue[Record]):
         super().__init__('acquisition')
         self.time_task = time_task      # full stamp, ex: '2026-07-14 08:00'
         self.time_label = time_task[-5:]  # hour only, ex: '08:00'
@@ -495,7 +492,8 @@ class RecentRecordsAnalystRunner(CheckedRunner):
                 for line in f:
                     try:
                         line_arr = line.rstrip('\n').split(',')
-                        # 'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'
+                        # Existing CSV files are read by column position. Keep the
+                        # ten-column core.Record order when writing and reading them.
                         record = Record(int(line_arr[0]), int(line_arr[1]), line_arr[2],
                                         int(line_arr[3]), int(line_arr[4]), int(
                                             line_arr[5]), int(line_arr[6]),
@@ -786,7 +784,7 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     # upstream data acquisition: one merged pipeline over all in-scope videos
     logger.info('Now start upstream data acquisition pipeline...')
 
-    records_queue: Queue[RecordNew] = Queue()
+    records_queue: Queue[Record] = Queue()
 
     acquisition_runner = VideoRecordAcquisitionJob(time_task, records_queue)
     acquisition_runner.start()

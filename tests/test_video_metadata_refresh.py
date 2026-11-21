@@ -113,13 +113,40 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.assertEqual(changes['attribute'],('16',None))
         self.assertNotIn('\x00',str(self.session.execute('SELECT oldval,newval FROM tdd_video_log')))
 
+    def test_refresh_keeps_locked_profile_and_staff_snapshots_unchanged(self):
+        self.seed(title='old',desc='old description')
+        snapshot = DBOperation.query_video_via_aid(self.view.aid,self.session)
+        staff = DBOperation.query_video_staff_via_aid(self.view.aid,self.session)
+        before = vars(snapshot).copy()
+        staff_before = [vars(item).copy() for item in staff]
+        self.service.get_video_view.return_value = self.view._replace(
+            desc=None,staff=[self.view.staff[0]._replace(title='new role')])
+        with mock.patch.object(DBOperation,'query_video_via_aid',return_value=snapshot) as read, \
+             mock.patch.object(DBOperation,'query_video_staff_via_aid',return_value=staff):
+            changes = self.refresh()
+        read.assert_called_once_with(self.view.aid,self.session,lock=True)
+        self.assertEqual(vars(snapshot),before)
+        self.assertEqual([vars(item) for item in staff],staff_before)
+        self.assertEqual(changes,{'title':('old',self.view.title),'desc':('old description',None),
+                                  'staff':('mid: 10; title: producer','mid: 10; title: new role')})
+        stored = DBOperation.query_video_via_aid(self.view.aid,self.session)
+        self.assertEqual((stored.title,stored.desc,stored.added),(self.view.title,None,1))
+        self.assertEqual(DBOperation.query_video_staff_via_aid(self.view.aid,self.session)[0].title,'new role')
+
     def test_log_failure_rolls_back_profile_and_staff(self):
         self.seed(title='old')
+        snapshot = DBOperation.query_video_via_aid(self.view.aid,self.session)
+        before = vars(snapshot).copy()
+        self.service.get_video_view.return_value = self.view._replace(staff=[])
         def fail(*args,**kwargs):
             raise RuntimeError('log insert failed')
-        with mock.patch.object(self.session,'append',side_effect=fail), self.assertRaisesRegex(RuntimeError,'log insert'):
+        with mock.patch.object(DBOperation,'query_video_via_aid',return_value=snapshot), \
+             mock.patch.object(self.session,'append',side_effect=fail), self.assertRaisesRegex(RuntimeError,'log insert'):
             self.refresh()
+        self.assertEqual(vars(snapshot),before)
         self.assertEqual(DBOperation.query_video_via_aid(7,self.session).title,'old')
+        self.assertEqual(len(DBOperation.query_video_staff_via_aid(7,self.session)),1)
+        self.assertEqual(self.session.execute('SELECT count(*) FROM tdd_ingest.profile_observation')[0][0],0)
 
     def test_new_video_repeated_staff_keeps_first_title_and_commits_video(self):
         from task.task import add_video

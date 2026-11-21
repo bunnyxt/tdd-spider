@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
+from conf import get_db_timeouts
 
 _STATS = ('view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like')
 _BASE = ('added', 'aid') + _STATS
@@ -69,16 +70,12 @@ def guard_write_transaction(conn, run_id=None):
 
 
 def _set_transaction_limits(conn):
-    limits = []
-    for name, default in (('lock_timeout', 10000), ('statement_timeout', 60000),
-                          ('transaction_timeout', 120000)):
-        value = int(os.environ.get('TDD_DB_' + name.upper() + '_MS', default))
-        if not 1 <= value <= 300000:
-            raise ValueError('Database transaction timeouts must be 1..300000 milliseconds')
-        limits.append(str(value) + 'ms')
+    limits = get_db_timeouts()
     conn.execute("SELECT set_config('lock_timeout',%s,true),"
                  "set_config('statement_timeout',%s,true),"
-                 "set_config('transaction_timeout',%s,true)", limits).fetchone()
+                 "set_config('transaction_timeout',%s,true)",
+                 [str(limits[name]) + 'ms' for name in
+                  ('lock_timeout', 'statement_timeout', 'transaction_timeout')]).fetchone()
 
 
 def append_rows(conn, table, columns, rows, *, run_id=None):

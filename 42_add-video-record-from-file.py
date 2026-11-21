@@ -2,7 +2,7 @@ import argparse
 from job import AddVideoRecordJob
 from util import logging_init, fullname, get_ts_ms, format_duration_summary
 from service import Service
-from db import TddVideoRecord
+from core import Record
 from job import JobStat
 from queue import Queue
 import logging
@@ -42,7 +42,7 @@ def add_video_record_from_file(file_path: str):
         aid_queue.put(aid)
 
     # create video record queue
-    video_record_queue: Queue[TddVideoRecord] = Queue()
+    video_record_queue: Queue[Record] = Queue()
 
     # create jobs
     job_num = 50

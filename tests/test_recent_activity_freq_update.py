@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from psycopg.pq import TransactionStatus
 
-from core import RecordNew
+from core import Record
 from runrecord._sqlite import sqlite3
 
 from test_remaining_script_run_records import _DEPS, _load
@@ -20,7 +20,7 @@ s51 = _load('51_hourly-video-record-add.py') if _DEPS else None
 
 
 def _rec(aid, view):
-    return RecordNew(1789243200, aid, f'BV{aid}', view, 1, 2, 3, 4, 5, 6)
+    return Record(1789243200, aid, f'BV{aid}', view, 1, 2, 3, 4, 5, 6)
 
 
 class FakeSession:

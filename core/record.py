@@ -1,10 +1,9 @@
 from typing import NamedTuple
 
-__all__ = ['RecordNew', 'MemberFollowerRecordNew']
+__all__ = ['Record', 'MemberFollowerRecordNew']
 
 
-class RecordNew(NamedTuple):
-    """Session-independent observation; CSV carries exactly these ten fields."""
+class Record(NamedTuple):
     added: int
     aid: int
     bvid: str
