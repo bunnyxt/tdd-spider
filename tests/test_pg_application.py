@@ -330,7 +330,7 @@ class PostgresApplicationTest(unittest.TestCase):
 
     def test_sprint_failure_after_record_manifest_and_status_rolls_back_together(self):
         from db.sprint import _insert_sprint_video_record
-        from task import add_sprint_video_record_via_video_view
+        from task import commit_sprint_video_record, fetch_video_record_via_video_view
 
         with engine.connection() as conn, conn.transaction():
             conn.execute('INSERT INTO tdd_sprint_video (added,aid,title,created,status) '
@@ -352,7 +352,8 @@ class PostgresApplicationTest(unittest.TestCase):
         with mock.patch('db.sprint._insert_sprint_video_record',new=insert_then_fail), \
                 self.assertLogs('db.transaction',level='ERROR'), \
                 self.assertRaisesRegex(RuntimeError,'after sprint status update'):
-            add_sprint_video_record_via_video_view(self.aid,self.service)
+            fetched = fetch_video_record_via_video_view(self.aid,self.service)
+            commit_sprint_video_record(fetched)
 
         self.service.get_video_view_trimmed.assert_called_once_with({'aid':self.aid})
         self.assertEqual(len(completed),1)

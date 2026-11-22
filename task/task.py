@@ -17,7 +17,7 @@ from .error import AlreadyExistError, NotExistError
 logger = logging.getLogger('task')
 STAT_FIELDS = ('view','danmaku','reply','favorite','coin','share','like')
 __all__ = ['add_video_record_via_video_view','fetch_video_record_via_video_view','commit_video_records_batch',
-           'add_sprint_video_record_via_video_view','commit_sprint_video_record','add_video','update_video','update_member',
+           'commit_sprint_video_record','add_video','update_video','update_member',
            'fetch_member_follower_record',
            'commit_member_follower_records_batch']
 
@@ -56,10 +56,6 @@ def commit_video_records_batch(records: Sequence[VideoRecord],
         out_stat['db_ms'] = int((time.perf_counter() - start) * 1000)
     return keys
 
-
-
-def add_sprint_video_record_via_video_view(aid: int, service: Service) -> TddSprintVideoRecord:
-    return commit_sprint_video_record(fetch_video_record_via_video_view(aid, service))
 
 
 def commit_sprint_video_record(record: VideoRecord) -> TddSprintVideoRecord:

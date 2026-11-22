@@ -19,7 +19,7 @@ from job import AddSprintVideoRecordJob
 from service import Service
 from service.endpoints import get_video_view_trimmed
 from db.sprint import _insert_sprint_video_record, insert_sprint_video_record
-from task import add_sprint_video_record_via_video_view
+from task import commit_sprint_video_record, fetch_video_record_via_video_view
 from test_endpoint_get_video_view_trimmed import valid_response
 from test_ingest_manifest import connection
 
@@ -51,7 +51,8 @@ class SprintNullableRecordTest(unittest.TestCase):
                         mock.patch('db.transaction.engine.connection', return_value=nullcontext(conn)), \
                         mock.patch('db.migration.before_write', return_value={'run_id': None}), \
                         mock.patch('db.transaction._save_failure') as save:
-                    record = add_sprint_video_record_via_video_view(10, service)
+                    fetched = fetch_video_record_via_video_view(10, service)
+                    record = commit_sprint_video_record(fetched)
                 request.assert_called_once_with('get_video_view_trimmed', params={'aid': 10},
                                                 headers=None, retry=None, timeout=None,
                                                 colddown_factor=None)
