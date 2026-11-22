@@ -13,6 +13,7 @@ import unittest
 from unittest import mock
 from uuid import uuid4
 
+from core import NewMember, NewVideo
 from db import TddMember,TddVideo
 from db.queries import query_video_via_aid, query_member_via_mid
 from db.values import database_value
@@ -166,22 +167,22 @@ class PostgresProfileObservationTest(unittest.TestCase):
             with self.assertRaises(AlreadyExistError):
                 future.result(timeout=10)
         self.assertEqual(query_member_via_mid(mid).name,'first')
-        ensure_members([TddMember(added=2,mid=mid,name='ignored',face='',sex='',sign='',code=0)])
+        ensure_members([NewMember(added=2,mid=mid,name='ignored',face='',sex='',sign='',code=0)])
         self.assertEqual(query_member_via_mid(mid).name,'first')
         self.assertEqual(list(self.directory.glob('*.json')),[])
 
     def test_video_insert_race_and_unrelated_constraint_are_distinct(self):
         from psycopg.errors import NotNullViolation
-        from db.profiles import insert_video
+        from db.profiles import create_video
         from task import add_video, AlreadyExistError
         aid = self.aid+1
-        video_values = dict(added=1,aid=aid,bvid=a2b(aid),mid=self.mid,
-                            state=0,title='first',pubdate=100,staff=[],members=[])
+        video = NewVideo(added=1,aid=aid,bvid=a2b(aid),mid=self.mid,
+                         state=0,title='first',pubdate=100)
         service = mock.Mock()
 
         def fetch_after_competing_insert(params):
             with ThreadPoolExecutor(max_workers=1) as executor:
-                self.assertIsNotNone(executor.submit(insert_video,**video_values).result(timeout=10))
+                self.assertIsNotNone(executor.submit(create_video,video,staff=[],new_members=[]).result(timeout=10))
             return self.view._replace(aid=aid,bvid='BV'+a2b(aid),title='second')
 
         service.get_video_view.side_effect = fetch_after_competing_insert
@@ -194,5 +195,5 @@ class PostgresProfileObservationTest(unittest.TestCase):
         self.assertEqual(list(self.directory.glob('*.json')),[])
         # A required-field violation is not an expected aid conflict.
         with self.assertRaises(NotNullViolation):
-            insert_video(**{**video_values,'aid':aid+1,'title':None})
+            create_video(video._replace(aid=aid+1,title=None),staff=[],new_members=[])
         self.assertIsNone(query_video_via_aid(aid+1))

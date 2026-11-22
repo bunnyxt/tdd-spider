@@ -7,19 +7,21 @@ They never contact an HTTP endpoint.
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from queue import Queue
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
 from uuid import uuid4
 
-from core import MemberFollowerRecord,VideoRecord
+from core import MemberFollowerRecord,VideoRecord,NewVideo,NewMember
 from db import TddVideo, TddVideoStaff
 from db.basic import engine
 from db.queries import query_video_via_aid, query_member_via_mid
-from db.profiles import insert_video
+from db.profiles import create_video
 from psycopg.rows import dict_row
 from db.values import timestamp, epoch
 from job import FetchMemberFollowerRecordJob,BatchInsertMemberFollowerRecordJob
@@ -128,9 +130,19 @@ class PostgresApplicationTest(unittest.TestCase):
         self.expected_manifest({'tdd_video_log':len(rows),'tdd_video_record':history})
 
     def test_first_stats_failure_rolls_back_new_video_members_staff_and_watermarks(self):
-        with mock.patch('db.profiles.append_video_records',side_effect=RuntimeError('injected first stats failure')):
+        captured = {}
+        def capture_inputs(video, *, new_members, staff, first_record=None):
+            captured.update(video=video,members=new_members,staff=staff,record=first_record,
+                            before=(tuple(video),tuple(new_members),tuple(staff),tuple(first_record)))
+            return create_video(video,new_members=new_members,staff=staff,first_record=first_record)
+        with mock.patch('task.task.create_video',side_effect=capture_inputs), \
+                mock.patch('db.profiles.append_video_records',side_effect=RuntimeError('injected first stats failure')):
             with self.assertRaisesRegex(RuntimeError,'injected first stats failure'):
                 add_video(self.aid,self.service)
+        self.assertIsInstance(captured['video'],NewVideo)
+        self.assertTrue(all(isinstance(member,NewMember) for member in captured['members']))
+        self.assertEqual((tuple(captured['video']),tuple(captured['members']),
+                          tuple(captured['staff']),tuple(captured['record'])),captured['before'])
         self.assertIsNone(query_video_via_aid(self.aid))
         self.assertEqual(read_staff(self.aid),[])
         for mid in (self.mid,self.mid+1):
@@ -143,6 +155,66 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual(read_value('SELECT count(*) FROM tdd_video_record_latest WHERE aid=%s',(self.aid,)),0)
         self.assertEqual(len(list(Path(self.directory.name).glob('*.json'))),1)
         self.expected_manifest({})
+
+    def test_competing_member_insert_does_not_abort_video_creation(self):
+        from db.ingest import guard_write_transaction
+        from db.profiles import _insert_member
+        from task.task import _prepare_members
+        # Prepare creation inputs while both profiles are absent.
+        new_members = list(_prepare_members(self.aid,[self.mid,self.mid+1],self.service,strict=True).values())
+        self.assertTrue(all(isinstance(member,NewMember) for member in new_members))
+        video = NewVideo(added=ADDED,aid=self.aid,bvid=a2b(self.aid),mid=self.mid,
+                         title='created',pubdate=100,state=0,hasstaff=1)
+        staff = [VideoViewStaffItem(self.mid+1,'producer','staff','')]
+        record = VideoRecord(ADDED,self.aid,a2b(self.aid),100,1,2,3,4,5,6)
+        before = (tuple(video),tuple(new_members),tuple(staff),tuple(record))
+        pid_queue = Queue()
+
+        def insert_and_report_pid(conn, member, *, run_id=None):
+            if member.mid == self.mid+1:
+                pid_queue.put(conn.info.backend_pid)
+            return _insert_member(conn,member,run_id=run_id)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with engine.connection() as conn, conn.transaction():
+                guard_write_transaction(conn,self.run_id)
+                # Use the staff member so the competing transaction does not
+                # hold the owner's last-video lock before creation reaches it.
+                conn.execute('INSERT INTO tdd_member (added,mid,name,face,sex,sign,code) '
+                             'VALUES (%s,%s,%s,%s,%s,%s,%s)',
+                             (timestamp(ADDED-1),self.mid+1,'concurrent','','','keep',0))
+                with mock.patch('db.profiles._insert_member',side_effect=insert_and_report_pid):
+                    future = executor.submit(create_video,video,new_members=new_members,
+                                             staff=staff,first_record=record)
+                    waiting_pid = pid_queue.get(timeout=5)
+                    deadline = time.monotonic()+5
+                    blocked = False
+                    while time.monotonic() < deadline:
+                        blocked = conn.execute('SELECT %s = ANY(pg_blocking_pids(%s))',
+                                               (conn.info.backend_pid,waiting_pid)).fetchone()[0]
+                        if blocked:
+                            break
+                        time.sleep(0.01)
+                    self.assertTrue(blocked,'creation must wait for the competing member insert')
+                    self.assertFalse(future.done())
+                    self.assertIsNone(query_video_via_aid(self.aid))
+            inserted = future.result(timeout=10)
+
+        self.assertIsInstance(inserted,TddVideo)
+        self.assertEqual(vars(inserted),vars(query_video_via_aid(self.aid)))
+        self.assertEqual((tuple(video),tuple(new_members),tuple(staff),tuple(record)),before)
+        existing = query_member_via_mid(self.mid+1)
+        self.assertEqual((existing.name,existing.sign,existing.added),('concurrent','keep',ADDED-1))
+        self.assertEqual(query_member_via_mid(self.mid).name,'member')
+        self.assertEqual([(item.mid,item.title) for item in read_staff(self.aid)],[(self.mid+1,'producer')])
+        self.assertEqual(read_value('SELECT view FROM tdd_video_record_latest WHERE aid=%s',(self.aid,)),100)
+        # Aid conflicts stop the whole operation before unrelated member writes.
+        another_member = NewMember(added=ADDED,mid=self.mid+2,name='must not insert',face='')
+        self.assertIsNone(create_video(video,new_members=[another_member],staff=[],first_record=record))
+        self.assertIsNone(query_member_via_mid(self.mid+2))
+        self.assertEqual(read_value('SELECT count(*) FROM tdd_video_record WHERE aid=%s',(self.aid,)),1)
+        self.assertEqual(list(Path(self.directory.name).glob('*.json')),[])
+        self.expected_manifest({'tdd_video_record':1})
 
     def test_code_403_does_not_invalidate_video_and_optional_keys_do_not_clear(self):
         add_video(self.aid,self.service)
@@ -160,9 +232,11 @@ class PostgresApplicationTest(unittest.TestCase):
         self.expected_manifest({'tdd_video_record':1,'tdd_video_log':1})
 
     def test_member_null_empty_optional_missing_and_late_profile(self):
-        insert_video(added=ADDED,aid=self.aid,bvid=a2b(self.aid),mid=self.mid,
-                     state=0,title='late profile',pubdate=100,staff=[],members=[])
-        add_member(self.mid,self.service)
+        create_video(NewVideo(added=ADDED,aid=self.aid,bvid=a2b(self.aid),mid=self.mid,
+                              state=0,title='late profile',pubdate=100),staff=[],new_members=[])
+        inserted_member = add_member(self.mid,self.service)
+        self.assertEqual(vars(inserted_member),vars(query_member_via_mid(self.mid)))
+        self.assertEqual(inserted_member.last_video_aid,self.aid)
         self.assertEqual(query_member_via_mid(self.mid).last_video_aid,self.aid)
         self.service.get_member_card.side_effect = None
         self.service.get_member_card.return_value = MemberCard(self.mid,'member',None,'','\x00')

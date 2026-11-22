@@ -2,6 +2,7 @@
 import unittest
 from unittest import mock
 from db import TddMember,TddVideo
+from core import NewMember
 from service import MemberCard,VideoViewStaffItem
 from task.task import add_member,add_video,ensure_video_member,update_video
 from profile_support import ProfileConnection
@@ -141,7 +142,7 @@ class ProfileObservationOrderTest(unittest.TestCase):
         from db.profiles import _insert_prepared_members
         self.apply(update_member_profile,self.member_payload(100))
         with self.conn.transaction():
-            _insert_prepared_members([TddMember(added=300,mid=self.mid,name='ignored',face='',code=-404)],self.conn)
+            _insert_prepared_members([NewMember(added=300,mid=self.mid,name='ignored',face='',code=-404)],self.conn)
         self.assertEqual(self.watermark('member',self.mid),100)
         self.apply(update_member_profile,self.member_payload(200,card=MemberCard(self.mid,'accepted','','','')))
         self.assertEqual(_query_member(self.conn,self.mid).name,'accepted')

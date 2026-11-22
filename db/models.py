@@ -1,5 +1,7 @@
 """Small row objects. SQL and transaction ownership live in the data layer."""
+from collections.abc import Iterable, Mapping
 from types import SimpleNamespace
+from typing import Any
 
 
 class Row(SimpleNamespace):
@@ -7,7 +9,7 @@ class Row(SimpleNamespace):
     fields = ()
     defaults = {}
 
-    def __init__(self, **values):
+    def __init__(self, **values: Any) -> None:
         unknown = set(values) - set(self.fields)
         if unknown:
             raise TypeError(f'Unknown {self.table} fields: {sorted(unknown)}')
@@ -17,7 +19,8 @@ class Row(SimpleNamespace):
 STAT_FIELDS = ('view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like')
 
 
-def row_type(name, table, fields, defaults=None):
+def row_type(name: str, table: str, fields: Iterable[str],
+             defaults: Mapping[str, Any] | None = None) -> type[Row]:
     return type(name, (Row,), {'table': table, 'fields': tuple(fields), 'defaults': defaults or {}})
 
 
@@ -41,14 +44,18 @@ TddVideoRecordAbnormalChange = row_type('TddVideoRecordAbnormalChange', 'tdd_vid
 class TddVideoLog(Row):
     table = 'tdd_video_log'
     fields = ('id','added','aid','attr','oldval','newval')
-    def __init__(self, added=None, aid=None, bvid=None, attr=None, oldval=None, newval=None, **values):
+    def __init__(self, added: int | None = None, aid: int | None = None,
+                 bvid: str | None = None, attr: str | None = None,
+                 oldval: str | None = None, newval: str | None = None, **values: Any) -> None:
         super().__init__(added=added, aid=aid, attr=attr, oldval=oldval, newval=newval, **values)
 
 
 class TddMemberLog(Row):
     table = 'tdd_member_log'
     fields = ('id','added','mid','attr','oldval','newval')
-    def __init__(self, added=None, mid=None, attr=None, oldval=None, newval=None, **values):
+    def __init__(self, added: int | None = None, mid: int | None = None,
+                 attr: str | None = None, oldval: str | None = None,
+                 newval: str | None = None, **values: Any) -> None:
         super().__init__(added=added, mid=mid, attr=attr, oldval=oldval, newval=newval, **values)
 
 

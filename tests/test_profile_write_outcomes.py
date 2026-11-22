@@ -4,8 +4,9 @@ import unittest
 from unittest import mock
 
 from db import TddMember, TddVideo
-from db.profiles import insert_video, insert_member, update_member_profile, _query_member
-from service import MemberCard
+from core import NewVideo, NewMember
+from db.profiles import create_video, insert_member, update_member_profile, _query_member
+from service import MemberCard, VideoViewStaffItem
 from task.error import AlreadyExistError, NotExistError
 from task.task import add_member, add_video, update_member, update_video
 from profile_support import ProfileConnection
@@ -51,15 +52,39 @@ class ProfileWriteOutcomesTest(unittest.TestCase):
 
     def test_unrelated_not_null_constraint_is_not_an_existing_aid_outcome(self):
         with self.assertRaises(sqlite3.IntegrityError):
-            insert_video(added=1, aid=self.view.aid,
+            create_video(NewVideo(added=1, aid=self.view.aid,
                          bvid=self.view.bvid.removeprefix('BV'), mid=self.view.owner.mid,
-                         title=None, pubdate=self.view.pubdate, staff=[], members=[])
+                         title=None, pubdate=self.view.pubdate), staff=[], new_members=[])
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_video').fetchone()[0], 0)
 
+    def test_existing_prepared_member_does_not_block_remaining_creation(self):
+        from core import VideoRecord
+        self.conn.seed(TddMember(added=1,mid=8,name='existing',face='old-face',code=0))
+        video = NewVideo(added=20,aid=7,bvid='1234567890',mid=8,title='video',pubdate=10,hasstaff=1)
+        members = [NewMember(added=20,mid=8,name='ignored',face='new-face'),
+                   NewMember(added=20,mid=10,name='staff',face='staff-face')]
+        first_record = VideoRecord(20,7,'1234567890',1,2,3,4,5,6,7)
+        with mock.patch('db.profiles.append_video_records') as append:
+            stored = create_video(video,new_members=members,
+                staff=[VideoViewStaffItem(10,'producer','staff','staff-face')],first_record=first_record)
+        self.assertIsInstance(stored,TddVideo)
+        self.assertIsNotNone(stored.id)
+        self.assertFalse(hasattr(video,'id'))
+        self.assertTrue(all(not hasattr(member,'id') for member in members))
+        self.assertEqual(_query_member(self.conn,8).name,'existing')
+        self.assertEqual(_query_member(self.conn,10).name,'staff')
+        self.assertEqual(self.conn.execute('SELECT mid,title FROM tdd_video_staff WHERE aid=%s',(7,)).fetchall(),
+                         [(10,'producer')])
+        append.assert_called_once_with(self.conn,[first_record],run_id=None)
+
     def test_database_reports_absence_and_duplicate_without_task_errors(self):
-        row = TddMember(added=1, mid=7, name='first', code=0)
-        self.assertIs(insert_member(row), row)
-        self.assertIsNone(insert_member(TddMember(added=2, mid=7, name='ignored', code=0)))
+        row = NewMember(added=1, mid=7, name='first', face='', code=0)
+        inserted = insert_member(row)
+        self.assertIsInstance(inserted,TddMember)
+        self.assertIsNot(inserted,row)
+        self.assertIsNotNone(inserted.id)
+        self.assertFalse(hasattr(row,'id'))
+        self.assertIsNone(insert_member(NewMember(added=2, mid=7, name='ignored', face='', code=0)))
         self.assertIsNone(update_member_profile(8, None, -404, 10))
         self.assertEqual(_query_member(self.conn, 7).name, 'first')
 

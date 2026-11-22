@@ -1,12 +1,21 @@
 """Guarded SQL transactions and trial-only complete-key manifests."""
+from __future__ import annotations
+from collections.abc import Callable, Iterable, Sequence
+from contextlib import AbstractContextManager
+from typing import Any, TypeVar, cast
+
 import os
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from psycopg import sql
+from psycopg import Connection, sql
 from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 from conf import get_db_timeouts
+
+HistoryKey = tuple[int, datetime, int]
+AppendKey = HistoryKey | tuple[int]
+_Result = TypeVar("_Result")
 
 _STATS = ('view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like')
 _BASE = ('added', 'aid') + _STATS
@@ -25,7 +34,7 @@ _SPEC = {
 }
 
 
-def _encode(value):
+def _encode(value: int | datetime) -> int | dict[str, str]:
     """Keep trial key timestamps compatible with migration cleanup tools."""
     if isinstance(value, datetime):
         if value.tzinfo is None or value.utcoffset() is None:
@@ -34,14 +43,14 @@ def _encode(value):
     return value
 
 
-def _require_transaction(conn):
+def _require_transaction(conn: Connection) -> None:
     if conn.info.transaction_status != TransactionStatus.INTRANS:
         raise RuntimeError('An explicit transaction is required for ingest writes')
     if conn.execute('SHOW transaction_isolation').fetchone()[0] != 'read committed':
         raise RuntimeError('Ingest requires READ COMMITTED isolation')
 
 
-def _check_run_control(conn, run_id):
+def _check_run_control(conn: Connection, run_id: UUID | None) -> None:
     run_id = UUID(str(run_id)) if run_id is not None else None
     # Maintenance owns the exclusive session-level version of this lock. This
     # separate SELECT runs after it is released, giving READ COMMITTED a fresh
@@ -57,7 +66,7 @@ def _check_run_control(conn, run_id):
         raise RuntimeError('Ingest control does not permit this run')
 
 
-def guard_write_transaction(conn, run_id=None):
+def guard_write_transaction(conn: Connection, run_id: UUID | None = None) -> None:
     """Gate derived writes and hold off maintenance until the caller commits.
 
     Call first inside an explicit READ COMMITTED transaction, before reading
@@ -69,7 +78,7 @@ def guard_write_transaction(conn, run_id=None):
     _check_run_control(conn, run_id)
 
 
-def _set_transaction_limits(conn):
+def _set_transaction_limits(conn: Connection) -> None:
     limits = get_db_timeouts()
     conn.execute("SELECT set_config('lock_timeout',%s,true),"
                  "set_config('statement_timeout',%s,true),"
@@ -78,7 +87,8 @@ def _set_transaction_limits(conn):
                   ('lock_timeout', 'statement_timeout', 'transaction_timeout')]).fetchone()
 
 
-def append_rows(conn, table, columns, rows, *, run_id=None):
+def append_rows(conn: Connection, table: str, columns: Sequence[str],
+                rows: Iterable[Sequence[Any]], *, run_id: UUID | None = None) -> list[AppendKey]:
     """Append one immutable batch inside the caller's transaction.
 
     The caller must acquire guard_write_transaction before business work.
@@ -123,10 +133,12 @@ def append_rows(conn, table, columns, rows, *, run_id=None):
                 [(UUID(str(batch_id)), i, UUID(str(run_id)), table,
                   Jsonb({field: _encode(value) for field, value in zip(pk, key)}))
                  for i, key in enumerate(keys)])
-    return keys
+    return cast(list[AppendKey], keys)
 
 
-def run_transaction(connection_factory, callback, *, run_id=None):
+def run_transaction(connection_factory: Callable[[], AbstractContextManager[Connection]],
+                    callback: Callable[[Connection], _Result], *,
+                    run_id: UUID | None = None) -> _Result:
     """Run database-only work in one guarded transaction, without automatic retry.
 
     The caller fetches HTTP input beforehand. An exception, including an

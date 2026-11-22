@@ -1,5 +1,11 @@
 """Profile persistence: row snapshots, observation ordering, and atomic change logs."""
 import logging
+from typing import Literal
+from uuid import UUID
+
+from psycopg import Connection
+from core import NewVideo, NewMember, VideoRecord
+from service import MemberCard, VideoView, VideoViewStaffItem
 from .models import TddVideo, TddMember, TddVideoLog, TddMemberLog, TddVideoStaff
 from .values import clean_text, database_value, epoch
 from .write import _append_objects, append_video_records
@@ -8,83 +14,97 @@ from util import a2b, same_pic_url
 
 logger = logging.getLogger('db.profiles')
 
-def insert_video(*, added, aid, bvid, mid, title, pubdate, staff, members,
-                 videos=None, tid=None, tname=None, copyright=None, pic=None, desc=None,
-                 tags=None, attribute=None, state=0, forward=None, hasstaff=0, isvc=-1,
-                 record=None):
-    """Create a video and return its stored snapshot, or None for an existing aid."""
-    return execute_write(
-        _insert_video, added=added, aid=aid, bvid=bvid, mid=mid, title=title, pubdate=pubdate,
-        staff=staff, members=members, videos=videos, tid=tid, tname=tname, copyright=copyright,
-        pic=pic, desc=desc, tags=tags, attribute=attribute, state=state, forward=forward,
-        hasstaff=hasstaff, isvc=isvc, record=record)
+def create_video(video: NewVideo, *, new_members: list[NewMember],
+                 staff: list[VideoViewStaffItem] | None,
+                 first_record: VideoRecord | None = None) -> TddVideo | None:
+    """Commit the complete creation and return its stored video snapshot.
+
+    An existing aid returns None without creating related rows. Members found
+    after the task's precheck are retained; their conflicts do not block creation.
+    Other database failures propagate, including an uncertain commit outcome.
+    """
+    return execute_write(_create_video, video, new_members=new_members, staff=staff,
+                         first_record=first_record)
 
 
-def _insert_video(conn, *, added, aid, bvid, mid, title, pubdate, staff, members,
-                  videos, tid, tname, copyright, pic, desc, tags, attribute, state,
-                  forward, hasstaff, isvc, record, run_id=None):
-    # New-video business values are explicit rather than inherited from a row object.
+def _create_video(conn: Connection, video: NewVideo, *, new_members: list[NewMember],
+                  staff: list[VideoViewStaffItem] | None, first_record: VideoRecord | None,
+                  run_id: UUID | None = None) -> TddVideo | None:
     row = conn.execute(
         'INSERT INTO tdd_video '
         '(added,aid,bvid,videos,tid,tname,copyright,pic,title,pubdate,"desc",tags,mid,'
-        'code,attribute,state,forward,hasstaff,solo,original,employed,isvc,engine,freq,activity,recent) '
-        'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'
-        '0,%s,%s,%s,%s,-1,-1,-1,%s,-1,0,0,2) '
+        'code,attribute,state,forward,hasstaff,isvc,recent) '
+        'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) '
         'ON CONFLICT (aid) DO NOTHING '
         'RETURNING id,added,aid,bvid,videos,tid,tname,copyright,pic,title,pubdate,"desc",tags,mid,'
         'code,attribute,state,forward,hasstaff,solo,original,employed,isvc,engine,freq,activity,recent',
-        (database_value('added',added),aid,clean_text(bvid),videos,tid,clean_text(tname),
-         copyright,clean_text(pic),clean_text(title),pubdate,clean_text(desc),clean_text(tags),mid,
-         attribute,state,forward,hasstaff,isvc)).fetchone()
+        (database_value('added',video.added),video.aid,clean_text(video.bvid),video.videos,
+         video.tid,clean_text(video.tname),video.copyright,clean_text(video.pic),
+         clean_text(video.title),video.pubdate,clean_text(video.desc),clean_text(video.tags),
+         video.mid,video.code,video.attribute,video.state,video.forward,video.hasstaff,
+         video.isvc,video.recent)).fetchone()
     if row is None:
         return None
-    video = TddVideo(**dict(zip(TddVideo.fields,map(epoch,row))))
-    _insert_prepared_members(members,conn)
-    _claim_profile_observation('video',aid,added,conn)
+    stored_video = TddVideo(**dict(zip(TddVideo.fields,map(epoch,row))))
+    _insert_prepared_members(new_members,conn)
+    _claim_profile_observation('video',video.aid,video.added,conn)
     for item in staff or []:
-        if _insert_staff(conn,added,aid,item.mid,item.title) is None:
-            logger.debug('Video staff relationship already exists: aid=%s, mid=%s',aid,item.mid)
-    if record is not None:
-        append_video_records(conn,[record],run_id=run_id)
-    return video
+        if _insert_staff(conn,video.added,video.aid,item.mid,item.title) is None:
+            logger.debug('Video staff relationship already exists: aid=%s, mid=%s',video.aid,item.mid)
+    if first_record is not None:
+        append_video_records(conn,[first_record],run_id=run_id)
+    return stored_video
 
-def update_video_profile(aid, view, code_error, tags, members, added):
+def update_video_profile(aid: int, view: VideoView | None, code_error: int | None,
+                         tags: str | None, members: list[NewMember], added: int) -> list[TddVideoLog] | None:
     """Return change logs (possibly empty), or None when the video is missing."""
     return execute_write(_update_video_profile, aid, view, code_error, tags, members, added)
 
-def insert_member(member):
+def insert_member(member: NewMember) -> TddMember | None:
     """Return the inserted member, or None when its mid already exists."""
-    return execute_write(_insert_member, member)
+    return execute_write(_insert_member_snapshot, member)
 
-def _insert_member(conn, member, *, run_id=None):
-    fields = tuple(field for field in member.fields if field not in ('id','last_video_aid'))
+
+def _insert_member_snapshot(conn: Connection, member: NewMember, *,
+                            run_id: UUID | None = None) -> TddMember | None:
+    if _insert_member(conn,member,run_id=run_id) is None:
+        return None
+    # The AFTER INSERT trigger may update last_video_aid after RETURNING.
+    # Only standalone adds need this final snapshot; prepared members need no reread.
+    return _query_member(conn,member.mid)
+
+def _insert_member(conn: Connection, member: NewMember, *, run_id: UUID | None = None) -> TddMember | None:
     row = conn.execute(
-        'INSERT INTO tdd_member (' + ','.join('"'+f+'"' for f in fields) + ') VALUES (' +
-        ','.join(['%s']*len(fields)) + ') ON CONFLICT (mid) DO NOTHING RETURNING id',
-        tuple(database_value(field,getattr(member,field)) for field in fields)).fetchone()
+        'INSERT INTO tdd_member (added,mid,sex,name,face,sign,code) '
+        'VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (mid) DO NOTHING '
+        'RETURNING id,added,mid,sex,name,face,sign,code,last_video_aid',
+        (database_value('added',member.added),member.mid,clean_text(member.sex),
+         clean_text(member.name),clean_text(member.face),clean_text(member.sign),member.code)).fetchone()
     if row is None:
         return None
-    member.id = row[0]
+    stored_member = TddMember(**dict(zip(TddMember.fields,map(epoch,row))))
     _claim_profile_observation('member',member.mid,member.added,conn)
-    return member
+    return stored_member
 
-def ensure_members(members):
+def ensure_members(members: list[NewMember]) -> list[TddMember]:
     return execute_write(_ensure_members, members)
 
-def _ensure_members(conn, members, *, run_id=None):
+def _ensure_members(conn: Connection, members: list[NewMember], *,
+                    run_id: UUID | None = None) -> list[TddMember]:
     _insert_prepared_members(members,conn)
     return []
 
-def update_member_profile(mid, card, code, added):
+def update_member_profile(mid: int, card: MemberCard | None, code: int, added: int) -> list[TddMemberLog] | None:
     """Return change logs (possibly empty), or None when the member is missing."""
     return execute_write(_update_member_profile, mid, card, code, added)
 
-def _insert_prepared_members(prepared, conn):
+def _insert_prepared_members(prepared: list[NewMember], conn: Connection) -> None:
     for member in prepared:
         _insert_member(conn,member)
 
 
-def _claim_profile_observation(kind, entity_id, observed_at, conn):
+def _claim_profile_observation(kind: Literal["video", "member"], entity_id: int,
+                               observed_at: int, conn: Connection) -> bool:
     """Advance a profile watermark inside its row-locked business transaction.
 
     The UPSERT also serializes the first watermark for an existing migrated
@@ -106,7 +126,9 @@ def _claim_profile_observation(kind, entity_id, observed_at, conn):
     return True
 
 
-def _update_video_profile(conn, aid, view, code_error, tags, members, added, *, run_id=None):
+def _update_video_profile(conn: Connection, aid: int, view: VideoView | None, code_error: int | None,
+                          tags: str | None, members: list[NewMember], added: int, *,
+                          run_id: UUID | None = None) -> list[TddVideoLog] | None:
     logs = []
     current = _query_video(conn,aid)
     if current is None:
@@ -116,7 +138,7 @@ def _update_video_profile(conn, aid, view, code_error, tags, members, added, *, 
     if not _claim_profile_observation('video',aid,added,conn):
         return []
     changes = {}
-    def change(field,new):
+    def change(field: str, new: str | int | None) -> None:
         old, new = clean_text(getattr(current,field)), clean_text(new)
         if old == new:
             return
@@ -175,7 +197,8 @@ def _update_video_profile(conn, aid, view, code_error, tags, members, added, *, 
     return logs
 
 
-def _update_member_profile(conn, mid, card, code, added, *, run_id=None):
+def _update_member_profile(conn: Connection, mid: int, card: MemberCard | None, code: int,
+                           added: int, *, run_id: UUID | None = None) -> list[TddMemberLog] | None:
     logs = []
     current = _query_member(conn,mid)
     if current is None:
@@ -183,7 +206,7 @@ def _update_member_profile(conn, mid, card, code, added, *, run_id=None):
     if not _claim_profile_observation('member',mid,added,conn):
         return []
     changes = {}
-    def change(field,new):
+    def change(field: str, new: str | int | None) -> None:
         old, new = clean_text(getattr(current,field)), clean_text(new)
         if old == new:
             return
@@ -206,7 +229,7 @@ def _update_member_profile(conn, mid, card, code, added, *, run_id=None):
     return logs
 
 
-def _insert_staff(conn, added, aid, mid, title):
+def _insert_staff(conn: Connection, added: int, aid: int, mid: int, title: str) -> TddVideoStaff | None:
     obj = TddVideoStaff(added=added,aid=aid,bvid=a2b(aid),mid=mid,title=clean_text(title))
     row = conn.execute(
         'INSERT INTO tdd_video_staff (added,aid,bvid,mid,title) VALUES (%s,%s,%s,%s,%s) '
@@ -218,19 +241,19 @@ def _insert_staff(conn, added, aid, mid, title):
     return obj
 
 
-def _query_video(conn, aid):
+def _query_video(conn: Connection, aid: int) -> TddVideo | None:
     columns = ','.join('"'+field+'"' for field in TddVideo.fields)
     row = conn.execute('SELECT '+columns+' FROM tdd_video WHERE aid = %s FOR UPDATE',(aid,)).fetchone()
     return TddVideo(**dict(zip(TddVideo.fields,map(epoch,row)))) if row is not None else None
 
 
-def _query_member(conn, mid):
+def _query_member(conn: Connection, mid: int) -> TddMember | None:
     columns = ','.join('"'+field+'"' for field in TddMember.fields)
     row = conn.execute('SELECT '+columns+' FROM tdd_member WHERE mid = %s FOR UPDATE',(mid,)).fetchone()
     return TddMember(**dict(zip(TddMember.fields,map(epoch,row)))) if row is not None else None
 
 
-def _query_staff(conn, aid):
+def _query_staff(conn: Connection, aid: int) -> list[TddVideoStaff]:
     columns = ','.join('"'+field+'"' for field in TddVideoStaff.fields)
     rows = conn.execute('SELECT '+columns+' FROM tdd_video_staff WHERE aid = %s',(aid,)).fetchall()
     return [TddVideoStaff(**dict(zip(TddVideoStaff.fields,map(epoch,row)))) for row in rows]

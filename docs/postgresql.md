@@ -70,6 +70,20 @@ a competing insert after a precheck. Tasks interpret these outcomes as success,
 `AlreadyExistError` or `NotExistError`. Unrelated constraint violations and
 connection errors remain database errors.
 
+`db.profiles.create_video()` accepts a `NewVideo`, prepared `NewMember` inputs,
+staff relationships and an optional first `VideoRecord`. Creation inputs carry
+no generated IDs. Database-defaulted columns are omitted; business values such
+as `recent=2` remain explicit. All related writes share one transaction, and the
+function returns a separate `TddVideo` snapshot from the stored row only after
+commit. An existing video aid returns `None` before any related writes; the
+task translates that outcome to `AlreadyExistError`.
+
+Prepared members are candidates found missing during an earlier lookup. If a
+member mid now exists, keep its stored profile and continue creating the video,
+other missing members, staff and first record. This expected member conflict
+does not abort the transaction. An explicit standalone member-add task still
+reports an existing member as `AlreadyExistError`.
+
 The shared `execute_write()` helper calls a Python function inside one guarded
 transaction; it does not dispatch operation strings or import task code.
 Database-internal helpers receive the same psycopg connection, including the

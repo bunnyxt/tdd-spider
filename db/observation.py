@@ -4,6 +4,16 @@ Failure files are diagnostics for manual reconciliation. They are not a durable
 queue or proof that a transaction rolled back: a lost COMMIT acknowledgement may
 leave the data committed. No input is automatically retried or replayed.
 """
+from __future__ import annotations
+from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
+from typing import Any, TypeVar
+from uuid import UUID
+
+from psycopg import Connection
+
+_Result = TypeVar("_Result")
+
 import inspect
 import json
 import logging
@@ -18,7 +28,7 @@ from .write import trial_run_id
 logger = logging.getLogger('db.observation')
 
 
-def encode(value):
+def encode(value: Any) -> Any:
     """Make a failure input readable without serializing successful batches."""
     if isinstance(value, Row):
         return {'row_type': type(value).__name__,
@@ -35,7 +45,8 @@ def encode(value):
     return value
 
 
-def _save_failure(operation, payload, run_id, error):
+def _save_failure(operation: str, payload: Mapping[str, Any], run_id: UUID | None,
+                  error: Exception) -> Path:
     directory = Path(os.environ.get('TDD_FAILURE_DIR', 'data/failed-writes'))
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     directory.chmod(0o700)
@@ -57,14 +68,16 @@ def _save_failure(operation, payload, run_id, error):
     return path
 
 
-def execute_write(function, *args, connection_factory=None, **kwargs):
+def execute_write(function: Callable[..., _Result], *args: Any,
+                  connection_factory: Callable[[], AbstractContextManager[Connection]] | None = None,
+                  **kwargs: Any) -> _Result:
     """Call named database work once, inside a guarded business transaction."""
     from .ingest import run_transaction
     if not callable(function):
         raise TypeError('Database work must be a callable')
     run_id = trial_run_id()
 
-    def callback(connection):
+    def callback(connection: Connection) -> _Result:
         return function(connection, *args, run_id=run_id, **kwargs)
 
     try:

@@ -17,7 +17,8 @@ class ProfileConnection:
                         '(entity_kind TEXT NOT NULL,entity_id INTEGER NOT NULL,observed_at INTEGER NOT NULL,'
                         'PRIMARY KEY(entity_kind,entity_id))')
         for model in (TddVideo,TddMember,TddVideoStaff,TddVideoLog,TddMemberLog):
-            fields = ','.join('"'+field+'"'+(' INTEGER PRIMARY KEY' if field == 'id' else ' NOT NULL' if model is TddVideo and field == 'title' else '') for field in model.fields)
+            defaults = {'solo':-1,'original':-1,'employed':-1,'engine':-1,'freq':0,'activity':0} if model is TddVideo else {}
+            fields = ','.join('"'+field+'"'+(' INTEGER PRIMARY KEY' if field == 'id' else ' NOT NULL' if model is TddVideo and field == 'title' else '') + (' DEFAULT '+str(defaults[field]) if field in defaults else '') for field in model.fields)
             unique = ', UNIQUE(aid,mid)' if model is TddVideoStaff else ', UNIQUE(mid)' if model is TddMember else ', UNIQUE(aid)' if model is TddVideo else ''
             self.db.execute('CREATE TABLE ' + model.table + '('+fields+unique+')')
         self.db.commit()
