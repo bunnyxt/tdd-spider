@@ -157,10 +157,10 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
         self.assertEqual(runner.metrics, {'snapshot_missing': 1})
         self.assertTrue(any('not found' in entry for entry in logs.output))
 
-    def test_bad_snapshot_header_and_rows_warn_but_keep_good_rows_and_freq(self):
+    def test_bad_snapshot_rows_warn_but_keep_good_rows_and_freq(self):
         path = s51.full_scan_snapshot_path('2026-09-06 04:00')
         with gzip.open(path, 'wt') as stream:
-            stream.write('unexpected,header\n'
+            stream.write('added,aid,bvid,view,danmaku,reply,favorite,coin,share,like\n'
                          '1788638400,1,BV1,100,0,0,0,0,0,0\n'
                          '1788638401,2,BV2,invalid,0,0,0,0,0,0\n'
                          '1788638401,3,BV3,100,0\n')
@@ -174,7 +174,7 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
             runner.process()
         updates = [params for sql, params in session.statements if sql.startswith('update')]
         self.assertEqual(updates, [(2, [1])])
-        self.assertEqual(runner.metrics['bad_header'], 1)
+        self.assertNotIn('bad_header', runner.metrics)
         self.assertEqual(runner.metrics['bad_rows'], 2)
         self.assertEqual(runner.failure_count, 0)
         freq.assert_called_once()

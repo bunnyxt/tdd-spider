@@ -10,9 +10,11 @@ from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, \
 import time
 import datetime
 import gzip
+import glob
 import os
 import re
 import shutil
+import subprocess
 import sys
 from collections import namedtuple, defaultdict, Counter
 from typing import Optional
@@ -299,6 +301,22 @@ class RecordsSaveToFileRunner(CheckedRunner):
         self.logger = logging.getLogger('RecordsSaveToFileRunner')
 
     def process(self):
+        try:
+            self._save_records()
+        except Exception as e:
+            self.failure_count += 1
+            self.metrics['csv_save_failed'] = 1
+            self.logger.error('Fail to save hourly CSV %s. Detail: %s',
+                              self.data_folder + self.current_filename, e)
+        else:
+            # The snapshot depends on this hour's CSV; daily packing does not.
+            if self.time_label == '04:00':
+                self._save_snapshot()
+
+        if self.time_label == '23:00':
+            self._pack_daily_files()
+
+    def _save_records(self):
         self.logger.info('Now start saving records to file...')
         current_filename_path = self.data_folder + self.current_filename
         self.logger.info('will save %d records into file %s' %
@@ -316,57 +334,66 @@ class RecordsSaveToFileRunner(CheckedRunner):
         self.logger.info('Finish save %d records into file %s!' %
                          (len(self.records), current_filename_path))
 
-        # keep the full scan as a snapshot for next week's activity update
-        if self.time_label == '04:00':
-            try:
-                os.makedirs(FULL_SCAN_SNAPSHOT_DIR, exist_ok=True)
-                with open(current_filename_path, 'rb') as src, \
-                        gzip.open(full_scan_snapshot_path(self.time_task), 'wb', compresslevel=6) as dst:
-                    shutil.copyfileobj(src, dst)
-                cutoff = os.path.basename(full_scan_snapshot_path(
-                    time_task_days_before(self.time_task, FULL_SCAN_SNAPSHOT_RETENTION_DAYS)))
-                for name in os.listdir(FULL_SCAN_SNAPSHOT_DIR):
-                    if name < cutoff:  # names start with the time task, so string order is time order
-                        os.remove(os.path.join(FULL_SCAN_SNAPSHOT_DIR, name))
-            except Exception as e:
-                self.failure_count += 1
-                self.metrics['snapshot_save_failed'] = 1
-                self.logger.error('Fail to save full scan snapshot. Exception caught. Detail: %s' % e)
+    def _save_snapshot(self):
+        # Keep the full scan as a snapshot for next week's activity update.
+        try:
+            os.makedirs(FULL_SCAN_SNAPSHOT_DIR, exist_ok=True)
+            with open(self.data_folder + self.current_filename, 'rb') as src, \
+                    gzip.open(full_scan_snapshot_path(self.time_task), 'wb', compresslevel=6) as dst:
+                shutil.copyfileobj(src, dst)
+            cutoff = os.path.basename(full_scan_snapshot_path(
+                time_task_days_before(self.time_task, FULL_SCAN_SNAPSHOT_RETENTION_DAYS)))
+            for name in os.listdir(FULL_SCAN_SNAPSHOT_DIR):
+                if name < cutoff:  # names start with the time task, so string order is time order
+                    os.remove(os.path.join(FULL_SCAN_SNAPSHOT_DIR, name))
+        except Exception as e:
+            self.failure_count += 1
+            self.metrics['snapshot_save_failed'] = 1
+            self.logger.error('Fail to save full scan snapshot. Exception caught. Detail: %s' % e)
 
-        # TODO ugly design, should be separated into another class
-        if self.time_label == '23:00':
-            try:
-                # get today filename prefix
-                day_prefix = ts_s_to_str(get_ts_s())[:10]
-                day_prefix_path = self.data_folder + day_prefix
+    def _pack_daily_files(self):
+        day_prefix = ts_s_to_str(get_ts_s())[:10]
+        day_prefix_path = self.data_folder + day_prefix
+        archive = day_prefix_path + '.tar.gz'
+        temporary_archive = archive + '.tmp'
+        try:
+            self.logger.info('pack %s*.csv into %s', day_prefix_path, archive)
+            os.mkdir(day_prefix_path)
+            for filename in glob.glob(day_prefix_path + '*.csv'):
+                shutil.copy2(filename, day_prefix_path)
+            result = subprocess.run(
+                ['tar', '-zcvf', os.path.basename(temporary_archive), day_prefix],
+                cwd=self.data_folder, check=True, capture_output=True, text=True)
+            for line in (result.stdout + result.stderr).splitlines():
+                self.logger.info(line)
+            if not os.path.isfile(temporary_archive) or os.path.getsize(temporary_archive) == 0:
+                raise RuntimeError('Packing did not produce a non-empty archive: ' + temporary_archive)
+            # A failed tar must not leave a partial archive that later authorizes CSV deletion.
+            os.replace(temporary_archive, archive)
+            shutil.rmtree(day_prefix_path)
+        except Exception as e:
+            self.failure_count += 1
+            self.metrics['pack_failed'] = 1
+            self.logger.error('Fail to pack daily CSV files into %s. Detail: %s', archive, e)
+        else:
+            self.logger.info('Finish packing daily CSV files into %s!', archive)
 
-                # pack today file
-                self.logger.info('pack %s*.csv into %s.tar.gz' %
-                                 (day_prefix_path, day_prefix_path))
-                pack_result = os.popen(
-                    'cd %s && mkdir %s && cp %s*.csv %s && tar -zcvf %s.tar.gz %s && rm -r %s && cd ..' % (
-                        self.data_folder, day_prefix, day_prefix, day_prefix, day_prefix, day_prefix, day_prefix
-                    )
-                )
-                for line in pack_result:
-                    self.logger.info(line.rstrip('\n'))
-
-                # get 3 day before filename prefix
-                day_prefix_3d_before = ts_s_to_str(
-                    get_ts_s() - 3 * 24 * 60 * 60)[:10]
-                day_prefix_3d_before_path = self.data_folder + day_prefix_3d_before
-
-                # remove 3 day before csv file
-                self.logger.info('remove %s*.csv' % day_prefix_3d_before_path)
-                pack_result = os.popen('rm %s*.csv' %
-                                       day_prefix_3d_before_path)
-                for line in pack_result:
-                    self.logger.info(line.rstrip('\n'))
-            except Exception as e:
-                self.logger.error(
-                    'Error occur when executing packing files shell scripts. Detail: %s' % e)
-            else:
-                self.logger.info('Finish execute packing files shell scripts!')
+        # Cleanup is independent, but only a completed archive permits deletion.
+        old_prefix = self.data_folder + ts_s_to_str(get_ts_s() - 3 * 24 * 60 * 60)[:10]
+        old_files = glob.glob(old_prefix + '*.csv')
+        if not old_files:
+            return
+        old_archive = old_prefix + '.tar.gz'
+        try:
+            if not os.path.isfile(old_archive) or os.path.getsize(old_archive) == 0:
+                raise RuntimeError('Keep old CSV files: missing or empty archive ' + old_archive)
+            for filename in old_files:
+                os.remove(filename)
+            self.logger.info('Removed %d archived CSV files for %s.', len(old_files), old_prefix)
+        except Exception as e:
+            self.failure_count += 1
+            self.metrics['cleanup_failed'] = 1
+            self.logger.error('Fail to clean up old CSV files for %s. Detail: %s', old_prefix, e)
 
 
 # TODO: change to record new
@@ -473,7 +500,12 @@ class RecentRecordsAnalystRunner(CheckedRunner):
             file_records = 0
             filename_path = self.data_folder + filename
             with open(filename_path, 'r') as f:
-                f.readline()
+                if tuple(f.readline().rstrip('\r\n').split(',')) != SNAPSHOT_FIELDS:
+                    self.failure_count += 1
+                    self.metrics['bad_header'] = 1
+                    self.logger.error('Invalid recent-record CSV header: %s. '
+                                      'Skip recent-record analysis.', filename_path)
+                    return
                 for line in f:
                     try:
                         line_arr = line.rstrip('\n').split(',')
@@ -510,7 +542,9 @@ class RecentRecordsAnalystRunner(CheckedRunner):
                               'Skip recent-record analysis. Detail: %s', e)
             return
         if not aid_pubdate_list:
-            self.logger.error('Fail to get pubdate of all videos from db!')
+            self.failure_count += 1
+            self.metrics['pubdate_empty'] = 1
+            self.logger.error('Empty pubdate result from db; skip recent-record analysis.')
             return
         aid_pubdate_dict = {}
         for aid, pubdate in aid_pubdate_list:
@@ -548,18 +582,31 @@ class RecentRecordsAnalystRunner(CheckedRunner):
 
             # ensure no all zero record (except the first record of video, which may be all zero)
             has_all_zero_record = False
+            per_video_read_failed = False
             for idx2, record in enumerate(records):
                 if is_all_zero_record(record):
                     if idx2 == 0:
                         # check if this is the first record of video
-                        if len(query_video_records_of_given_aid_added_before_given_ts(
-                                aid, record.added)) > 0:
+                        try:
+                            previous_records = query_video_records_of_given_aid_added_before_given_ts(
+                                aid, record.added)
+                        except Exception as e:
+                            self.failure_count += 1
+                            self.metrics['per_video_read_failed'] = self.metrics.get('per_video_read_failed', 0) + 1
+                            self.logger.warning('Fail to read earlier records of video aid %d; '
+                                                'skip this video. Detail: %s', aid, e)
+                            per_video_read_failed = True
+                            break
+                        if len(previous_records) > 0:
                             # has records of this video added before this record
                             continue
                     self.logger.warning('Abnormal all zero record %s of video aid %d detected, continue' % (
                         str(record), aid))
                     has_all_zero_record = True
                     break
+            if per_video_read_failed:
+                result_status_dict['per_video_read_failed'].append(aid)
+                continue
             if has_all_zero_record:
                 result_status_dict['has_all_zero_record'].append(aid)
                 continue
@@ -648,6 +695,8 @@ class RecentRecordsAnalystRunner(CheckedRunner):
                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
         self.logger.info('Abnormal-change writes failed for %d video(s).',
                          self.metrics.get('abnormal_write_failed', 0))
+        self.logger.info('Earlier-record reads failed for %d video(s).',
+                         self.metrics.get('per_video_read_failed', 0))
 
 
 class RecentActivityFreqUpdateRunner(CheckedRunner):
@@ -685,10 +734,11 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
             desired = defaultdict(list)  # Pair/validate before opening the write transaction.
             paired = hot = active = 0
             with gzip.open(last_path, 'rt') as f:
-                if tuple(next(f, '').strip().split(',')) != SNAPSHOT_FIELDS:
+                if tuple(f.readline().rstrip('\r\n').split(',')) != SNAPSHOT_FIELDS:
+                    self.failure_count += 1
                     self.metrics['bad_header'] = 1
-                    self.logger.warning('Unexpected snapshot header in %s; '
-                                        'continue reading the existing positional CSV format.', last_path)
+                    self.logger.error('Invalid snapshot header: %s. Skip activity update.', last_path)
+                    return
                 for line_number, line in enumerate(f, 2):
                     try:
                         fields = line.rstrip('\r\n').split(',')

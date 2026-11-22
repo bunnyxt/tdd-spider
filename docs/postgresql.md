@@ -201,11 +201,23 @@ the daily snapshot and analysis. Before downstream processing, keep the earliest
 Write failures and queue drops are counted and reported as a failed run only
 after all downstream stages finish. Each derived-field update still uses its
 own guarded transaction, and failure of one update does not prevent the next.
-A missing seven-day snapshot skips activity with a warning; malformed CSV rows
-are counted and skipped. Neither case prevents frequency updates or fails the
-run. Abnormal-change write failures warn with the aid and continue to the next
-video; snapshot-save and other stage failures remain visible in logs and run
-metrics without cancelling independent work.
+A missing seven-day snapshot skips activity with a warning; malformed rows
+are counted and skipped while good rows remain usable. Neither case prevents
+frequency updates or fails the run. A wrong snapshot header fails activity
+without reading its rows or writing activity values; frequency updates still
+run. A wrong header in any selected recent CSV skips the whole recent-record
+analysis before checking videos or writing abnormal changes. Empty or failed
+pubdate reads also fail that analysis step. Per-video history-read and
+abnormal-change write failures warn with the aid and continue to the next video.
+These failures appear in logs and run metrics and fail the run only after all
+downstream stages finish.
+
+At 23:00, daily packing runs even if the hourly CSV write fails. A failed CSV
+write skips its dependent 04:00 snapshot. Packing checks command success and a
+nonempty archive; three-day-old CSVs are deleted only when their own day's
+archive exists and is nonempty. Packing and cleanup failures are counted,
+unarchived CSVs are kept, and independent downstream work continues. Archive names,
+the date-directory layout and the three-day retention are unchanged.
 
 Earlier versions used `data/replay/`, `TDD_REPLAY_DIR` and `python -m db.replay`.
 That replay command is no longer provided. Stop old collectors before upgrading
