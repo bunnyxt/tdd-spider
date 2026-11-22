@@ -1,6 +1,6 @@
 """
-Per-entry-point verification that the six summary-reporting production
-scripts (12_/15_/16_/17_/62_/71_) open, populate and close a run record
+Per-entry-point verification that the five summary-reporting production
+scripts (15_/16_/17_/62_/71_) open, populate and close a run record
 without changing their duration / JobStat summary behaviour.
 
 Each script is imported by file path and its collaborators (Service, DB queries,
@@ -150,41 +150,6 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
                 (run_id,)):
             out.setdefault(scope, {})[name] = value
         return out
-
-    # ----------------------------------------------------------------- 12_ ---
-    def test_12_add_latest_video_with_tid_30(self):
-        m = _load('12_add-latest-video-with-tid-30.py')
-        newlist_stat = _stat(3, not_fully_loaded_page=1, get_newlist_exception=0)
-        add_stat = _stat(7, new_video=2, add_video_exception=0,
-                         commit_video_record_exception=0)
-
-        with mock.patch.object(m, 'Service', _FakeService), \
-             mock.patch.object(m, 'GetNewlistArchiveJob',
-                               lambda *a, **kw: _FakeJob(newlist_stat)), \
-             mock.patch.object(m, 'AddVideoFromArchiveJob',
-                               lambda *a, **kw: _FakeJob(add_stat)):
-            m.add_latest_video_with_tid_30()
-
-        (run_id, script_name, status, finished_at), = self._runs()
-        self.assertEqual(script_name, '12_add-latest-video-with-tid-30')
-        self.assertEqual(status, 'succeeded')
-        self.assertTrue(finished_at)
-        metrics = self._metrics(run_id)
-        self.assertEqual(metrics['get-newlist-archive']['total_count'], 3.0)
-        self.assertEqual(metrics['get-newlist-archive']['not_fully_loaded_page'], 1.0)
-        # 10 AddVideoFromArchiveJob stats merged (fake returns the same stat)
-        self.assertEqual(metrics['add-video-from-archive']['total_count'], 70.0)
-        self.assertEqual(metrics['add-video-from-archive']['new_video'], 20.0)
-
-    def test_12_failure_is_recorded(self):
-        m = _load('12_add-latest-video-with-tid-30.py')
-        with mock.patch.object(m, 'Service', _FakeService), \
-             mock.patch.object(m, 'GetNewlistArchiveJob',
-                               side_effect=RuntimeError('boom')):
-            with self.assertRaises(RuntimeError):
-                m.add_latest_video_with_tid_30()
-        (_, _, status, _), = self._runs()
-        self.assertEqual(status, 'failed')
 
     # ----------------------------------------------------------------- 15_ ---
     def test_15_update_video_info(self):

@@ -14,7 +14,7 @@ Usage (see 51_hourly-video-record-add.py):
         raise
 
 Scripts with a single top-level body can use the ``track`` context manager
-instead, which runs that same lifecycle (see 12_/15_/17_/62_/71_):
+instead, which runs that same lifecycle (see 15_/17_/62_/71_):
 
     with track('15_update-video-info') as recorder:
         ... do the work ...
