@@ -58,7 +58,7 @@ the whole repository as clean.
 
 ## Repository notes
 
-- Scripts are numbered by role (`12_`, `51_`, …) and run from cron on the prod
+- Scripts are numbered by role (`15_`, `51_`, …) and run from cron on the prod
   server. `51_hourly-video-record-add.py` is the hourly stats pipeline.
 - Shared code lives in `job/`, `service/`, `task/`, `db/`, `util/`, `core/`.
 - The prod server **cannot reach GitHub** — deployment is manual copy + blob-hash

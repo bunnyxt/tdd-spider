@@ -67,17 +67,5 @@
         "enabled": true
       }
     ]
-  },
-  "get_newlist": {
-    "direct": "http://api.bilibili.com/x/web-interface/newlist",
-    "workers": [
-      {
-        "id": "<worker-id>",
-        "url": "<worker-url>",
-        "platform": "<platform>",
-        "weight": 1,
-        "enabled": true
-      }
-    ]
   }
 }

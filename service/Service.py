@@ -13,12 +13,8 @@ from .worker import WorkerConfigurationError, WorkerSelector
 from .apistat import ApiStatTracker, NullApiStatTracker
 from .ua import UA_LIST
 from .endpoints import (get_member_card, get_member_relation, get_video_tags,
-                        get_video_view, get_video_view_trimmed, get_newlist)
-from .response import \
-    VideoView, VideoViewTrimmed, VideoTags, \
-    MemberCard, \
-    MemberRelation, \
-    Newlist
+                        get_video_view, get_video_view_trimmed)
+from .response import MemberCard, MemberRelation, VideoTags, VideoView, VideoViewTrimmed
 from util import a2b
 import logging
 
@@ -380,14 +376,5 @@ class Service:
             colddown_factor: Optional[float] = None
     ) -> MemberRelation:
         return get_member_relation.get(
-            self._get, params=params, headers=headers, retry=retry,
-            timeout=timeout, colddown_factor=colddown_factor)
-
-    def get_newlist(
-            self, params: Optional[dict] = None, headers: Optional[dict] = None,
-            retry: Optional[int] = None, timeout: Optional[float] = None,
-            colddown_factor: Optional[float] = None
-    ) -> Newlist:
-        return get_newlist.get(
             self._get, params=params, headers=headers, retry=retry,
             timeout=timeout, colddown_factor=colddown_factor)
