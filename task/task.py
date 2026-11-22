@@ -4,7 +4,7 @@ import time
 from collections.abc import Iterable, Sequence
 
 from service import (Service, ServiceError, CodeError, MemberCard, VideoView, VideoViewTrimmed,
-                     VideoViewStat, NewlistArchiveStat)
+                     VideoViewStat)
 from db import TddVideo, TddMember, TddVideoLog, TddMemberLog, TddSprintVideoRecord
 from db.ingest import HistoryKey
 from db.queries import query_video_via_aid, query_member_via_mid
@@ -12,20 +12,20 @@ from db.write import insert_video_records, insert_member_follower_records
 from db.profiles import create_video, update_video_profile, insert_member, update_member_profile
 from db.sprint import insert_sprint_video_record
 from db.values import clean_text
-from util import get_ts_s, a2b
+from util import get_ts_s
 from core import VideoRecord, MemberFollowerRecord, NewVideo, NewMember
 from .error import AlreadyExistError, NotExistError
 
 logger = logging.getLogger('task')
 STAT_FIELDS = ('view','danmaku','reply','favorite','coin','share','like')
 __all__ = ['add_video_record_via_video_view','fetch_video_record_via_video_view','commit_video_records_batch',
-           'commit_video_record_via_video_view','commit_video_record_via_newlist_archive_stat',
+           'commit_video_record_via_video_view',
            'add_sprint_video_record_via_video_view','add_video','update_video','add_member','update_member',
            'add_member_follower_record','fetch_member_follower_record',
            'commit_member_follower_records_batch']
 
 
-def _stats(stat: VideoViewStat | NewlistArchiveStat) -> dict[str, int | None]:
+def _stats(stat: VideoViewStat) -> dict[str, int | None]:
     return {field: -1 if field == 'view' and getattr(stat, field) == '--' else getattr(stat, field)
             for field in STAT_FIELDS}
 
@@ -63,13 +63,6 @@ def commit_video_records_batch(records: Sequence[VideoRecord],
 def commit_video_record_via_video_view(video_view: VideoView | VideoViewTrimmed, added: int) -> HistoryKey:
     record = VideoRecord(added=added, aid=video_view.aid, bvid=video_view.bvid.removeprefix('BV'),
                     **_stats(video_view.stat))
-    return commit_video_records_batch([record])[0]
-
-
-
-def commit_video_record_via_newlist_archive_stat(stat: NewlistArchiveStat, added: int, aid: int) -> HistoryKey:
-    aid = stat.aid if stat.aid != 0 else aid
-    record = VideoRecord(added=added, aid=aid, bvid=a2b(aid), **_stats(stat))
     return commit_video_records_batch([record])[0]
 
 

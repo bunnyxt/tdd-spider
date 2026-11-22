@@ -168,8 +168,7 @@ class WorkerSelectorConfigTest(TestCase):
     def test_request_methods_cannot_override_an_instances_mode(self):
         methods = [Service._get, Service.get_video_view,
                    Service.get_video_view_trimmed, Service.get_video_tags,
-                   Service.get_member_card, Service.get_member_relation,
-                   Service.get_newlist]
+                   Service.get_member_card, Service.get_member_relation]
         for method in methods:
             self.assertNotIn('mode', inspect.signature(method).parameters)
 

@@ -373,38 +373,54 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual((daily['newvids'],daily['millvids']),(str(aids[1])+';',str(aids[2])+';'))
         self.expected_manifest({'tdd_sprint_video_record':6})
 
-    def test_archive_manual_file_and_rank_paths_share_the_append_protocol(self):
-        from job import AddVideoFromArchiveJob
+    def test_manual_file_and_rank_paths_share_the_append_protocol(self):
         from test_remaining_script_run_records import _load
-        archive_queue = Queue()
-        archive_queue.put((ADDED-10,SimpleNamespace(aid=self.aid,stat=self.view().stat._replace(aid=0))))
-        self.service.get_video_view.side_effect = lambda params:self.view(aid=params['aid'])
-        self.service.get_video_view_trimmed.side_effect = lambda params:self.view(aid=params['aid'])
-        archive = AddVideoFromArchiveJob('archive',archive_queue,self.service)
-        self.addCleanup(archive.cleanup)
-        archive.process()
-        self.assertEqual(archive.stat.condition['new_video_record'],1)
-        self.assertEqual(read_value('SELECT added FROM tdd_video_record_latest WHERE aid=%s',(self.aid,)),ADDED-10)
-        path = Path(self.directory.name)/'aids.txt'
-        path.write_text(str(self.aid+1)+'\n')
-        for filename,function in (('41_add-video-from-file.py','add_video_from_file'),
-                                  ('42_add-video-record-from-file.py','add_video_record_from_file')):
-            script = _load(filename)
-            with mock.patch.object(script,'Service',return_value=self.service):
-                getattr(script,function)(str(path))
+
+        file_aid, rank_aid = self.aid, self.aid + 1
+        self.service.get_video_view.side_effect = lambda params: self.view(aid=params['aid'])
+        self.service.get_video_view_trimmed.side_effect = lambda params: self.view(aid=params['aid'])
+        path = Path(self.directory.name) / 'aids.txt'
+        path.write_text(str(file_aid) + '\n')
+
+        add = _load('41_add-video-from-file.py')
+        with mock.patch.object(add, 'Service', return_value=self.service):
+            add.add_video_from_file(str(path))
+        self.assertIsNotNone(query_video_via_aid(file_aid))
+        first, = read_rows('SELECT id,added FROM tdd_video_record WHERE aid=%s', (file_aid,))
+        self.assertEqual(first['added'], ADDED)
+
+        append = _load('42_add-video-record-from-file.py')
+        with mock.patch.object(append, 'Service', return_value=self.service):
+            append.add_video_record_from_file(str(path))
+        original, second = read_rows(
+            'SELECT id,added FROM tdd_video_record WHERE aid=%s ORDER BY id', (file_aid,))
+        self.assertEqual(original, first)
+        self.assertEqual(second['added'], ADDED)
+        self.assertGreater(second['id'], first['id'])
+        self.assertEqual(read_value('SELECT id FROM tdd_video_record_latest WHERE aid=%s',
+                                    (file_aid,)), second['id'])
+
         rank = _load('62_add-evocalrank-video.py')
         response = mock.Mock()
-        response.json.return_value = {key:[] for key in ('main_rank','second_rank','super_hit','pick_up','oth_pickup',
-                                                        'Vocaloid_pick_up','history-1-year','history-10-year','ed','op')}
-        response.json.return_value['main_rank'] = [{'avid':'av'+str(self.aid+1)},{'avid':'av'+str(self.aid+2)}]
-        with mock.patch.object(rank,'Service',return_value=self.service),mock.patch.object(rank.requests,'get',return_value=response):
+        response.json.return_value = {key: [] for key in (
+            'main_rank', 'second_rank', 'super_hit', 'pick_up', 'oth_pickup',
+            'Vocaloid_pick_up', 'history-1-year', 'history-10-year', 'ed', 'op')}
+        response.json.return_value['main_rank'] = [{'avid': f'av{file_aid}'},
+                                                  {'avid': f'av{rank_aid}'}]
+        self.service.get_video_view.reset_mock()
+        with mock.patch.object(rank, 'Service', return_value=self.service), \
+             mock.patch.object(rank.requests, 'get', return_value=response):
             rank.add_evocalrank_video(1)
-        aids = [self.aid,self.aid+1,self.aid+2]
-        self.assertEqual(read_value('SELECT count(*) FROM tdd_video WHERE aid=ANY(%s)',(aids,)),3)
-        self.assertEqual(read_value('SELECT count(*) FROM tdd_video_record WHERE aid=ANY(%s)',(aids,)),4)
-        self.assertEqual(read_value('SELECT count(*) FROM tdd_video_record_latest WHERE aid=ANY(%s)',(aids,)),3)
-        self.assertEqual(list(Path(self.directory.name).glob('*.json')),[])
-        self.expected_manifest({'tdd_video_record':4})
+        self.service.get_video_view.assert_called_once_with({'aid': rank_aid})
+        self.assertIsNotNone(query_video_via_aid(rank_aid))
+        self.assertEqual(read_value('SELECT count(*) FROM tdd_video_record WHERE aid=%s',
+                                    (file_aid,)), 2)
+        self.assertEqual(read_value('SELECT count(*) FROM tdd_video_record WHERE aid=%s',
+                                    (rank_aid,)), 1)
+        self.assertEqual(read_value('SELECT added FROM tdd_video_record_latest WHERE aid=%s',
+                                    (rank_aid,)), ADDED)
+        self.assertEqual(list(Path(self.directory.name).glob('*.json')), [])
+        self.expected_manifest({'tdd_video_record': 3})
 
     def test_aggregate_thousand_row_commit_survives_failure_then_manual_retry(self):
         from db.ingest import run_transaction
