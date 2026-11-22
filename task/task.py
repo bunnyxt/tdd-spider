@@ -23,7 +23,7 @@ __all__ = ['add_video_record_via_video_view','fetch_video_record_via_video_view'
            'commit_member_follower_records_batch']
 
 
-def _stats(stat: VideoViewStat) -> dict[str, int | None]:
+def _stats(stat: VideoViewStat) -> dict[str, int]:
     return {field: -1 if field == 'view' and getattr(stat, field) == '--' else getattr(stat, field)
             for field in STAT_FIELDS}
 

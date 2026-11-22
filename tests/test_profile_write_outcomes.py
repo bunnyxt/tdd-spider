@@ -57,15 +57,18 @@ class ProfileWriteOutcomesTest(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             create_video(NewVideo(added=1, aid=self.video_view.aid,
                          bvid=self.video_view.bvid.removeprefix('BV'), mid=self.video_view.owner.mid,
-                         title=None, pubdate=self.video_view.pubdate), staff=[], new_members=[])
+                         title=None, pubdate=self.video_view.pubdate, videos=1, tid=30,
+                         tname='music', copyright=1, pic='', desc='', tags='', state=0),
+                         staff=[], new_members=[])
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_video').fetchone()[0], 0)
 
     def test_existing_prepared_member_does_not_block_remaining_creation(self):
         from core import VideoRecord
         self.conn.seed(TddMember(added=1,mid=8,name='existing',face='old-face',code=0))
-        video = NewVideo(added=20,aid=7,bvid='1234567890',mid=8,title='video',pubdate=10,hasstaff=1)
-        members = [NewMember(added=20,mid=8,name='ignored',face='new-face'),
-                   NewMember(added=20,mid=10,name='staff',face='staff-face')]
+        video = NewVideo(added=20,aid=7,bvid='1234567890',mid=8,title='video',pubdate=10,
+                         videos=1,tid=30,tname='music',copyright=1,pic='',desc='',tags='',state=0,hasstaff=1)
+        members = [NewMember(added=20,mid=8,name='ignored',face='new-face',sex='',sign=''),
+                   NewMember(added=20,mid=10,name='staff',face='staff-face',sex='',sign='')]
         first_record = VideoRecord(20,7,'1234567890',1,2,3,4,5,6,7)
         stored = create_video(video,new_members=members,
             staff=[VideoViewStaffItem(10,'producer','staff','staff-face')],first_record=first_record)
@@ -82,8 +85,9 @@ class ProfileWriteOutcomesTest(unittest.TestCase):
             [(20,7,1,2,3,4,5,6,7)])
 
     def test_database_reports_absence_and_duplicate_without_task_errors(self):
-        row = NewMember(added=1, mid=7, name='first', face='', code=0)
-        video = NewVideo(added=1, aid=100, bvid='1234567890', mid=7, title='first', pubdate=1)
+        row = NewMember(added=1, mid=7, name='first', face='', sex='', sign='', code=0)
+        video = NewVideo(added=1, aid=100, bvid='1234567890', mid=7, title='first', pubdate=1,
+                         videos=1, tid=30, tname='music', copyright=1, pic='', desc='', tags='', state=0)
         self.assertIsInstance(create_video(video,new_members=[row],staff=[]),TddVideo)
         inserted = _query_member(self.conn,7)
         self.assertIsInstance(inserted,TddMember)
@@ -92,7 +96,7 @@ class ProfileWriteOutcomesTest(unittest.TestCase):
         self.assertFalse(hasattr(row,'id'))
         next_video = video._replace(added=2,aid=101,title='next')
         self.assertIsInstance(create_video(next_video,new_members=[
-            NewMember(added=2,mid=7,name='ignored',face='new-face',code=0)],staff=[]),TddVideo)
+            NewMember(added=2,mid=7,name='ignored',face='new-face',sex='',sign='',code=0)],staff=[]),TddVideo)
         current = _query_member(self.conn,7)
         self.assertEqual(vars(current),vars(inserted))
         self.assertIsNone(create_video(next_video,new_members=[],staff=[]))

@@ -160,7 +160,8 @@ class PostgresApplicationTest(unittest.TestCase):
         new_members = list(_prepare_members(self.aid,[self.mid,self.mid+1],self.service,strict=True).values())
         self.assertTrue(all(isinstance(member,NewMember) for member in new_members))
         video = NewVideo(added=ADDED,aid=self.aid,bvid=a2b(self.aid),mid=self.mid,
-                         title='created',pubdate=100,state=0,hasstaff=1)
+                         title='created',pubdate=100,videos=1,tid=30,tname='music',
+                         copyright=1,pic='',desc='',tags='',state=0,hasstaff=1)
         staff = [VideoViewStaffItem(self.mid+1,'producer','staff','')]
         record = VideoRecord(ADDED,self.aid,a2b(self.aid),100,1,2,3,4,5,6)
         before = (tuple(video),tuple(new_members),tuple(staff),tuple(record))
@@ -205,7 +206,7 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual([(item.mid,item.title) for item in read_staff(self.aid)],[(self.mid+1,'producer')])
         self.assertEqual(read_value('SELECT view FROM tdd_video_record_latest WHERE aid=%s',(self.aid,)),100)
         # Aid conflicts stop the whole operation before unrelated member writes.
-        another_member = NewMember(added=ADDED,mid=self.mid+2,name='must not insert',face='')
+        another_member = NewMember(added=ADDED,mid=self.mid+2,name='must not insert',face='',sex='',sign='')
         self.assertIsNone(create_video(video,new_members=[another_member],staff=[],first_record=record))
         self.assertIsNone(query_member_via_mid(self.mid+2))
         self.assertEqual(read_value('SELECT count(*) FROM tdd_video_record WHERE aid=%s',(self.aid,)),1)
@@ -229,7 +230,8 @@ class PostgresApplicationTest(unittest.TestCase):
 
     def test_member_null_empty_optional_missing_and_late_profile(self):
         create_video(NewVideo(added=ADDED,aid=self.aid,bvid=a2b(self.aid),mid=self.mid,
-                              state=0,title='late profile',pubdate=100),staff=[],new_members=[])
+                              title='late profile',pubdate=100,videos=1,tid=30,tname='music',
+                              copyright=1,pic='',desc='',tags='',state=0),staff=[],new_members=[])
         self.assertIsNone(query_member_via_mid(self.mid))
         self.service.get_video_view.return_value = self.video_view(staff=False)._replace(title='late profile')
         video_logs = update_video(self.aid,self.service)

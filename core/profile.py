@@ -1,4 +1,8 @@
-"""Typed creation inputs; generated ids and derived references belong to DB snapshots."""
+"""Creation contracts follow API response types, not legacy column nullability.
+
+These annotations do not validate raw responses. Generated ids and derived
+references belong to database snapshots.
+"""
 from typing import NamedTuple
 
 __all__ = ['NewVideo', 'NewMember']
@@ -8,18 +12,18 @@ class NewVideo(NamedTuple):
     added: int
     aid: int
     bvid: str
-    mid: int | None
+    mid: int
     title: str
-    pubdate: int | None
-    videos: int | None = None
-    tid: int | None = None
-    tname: str | None = None
-    copyright: int | None = None
-    pic: str | None = None
-    desc: str | None = None
-    tags: str | None = None
+    pubdate: int
+    videos: int
+    tid: int
+    tname: str
+    copyright: int
+    pic: str
+    desc: str
+    tags: str
+    state: int
     attribute: int | None = None
-    state: int | None = 0
     forward: int | None = None
     code: int = 0
     hasstaff: int = 0
@@ -33,6 +37,6 @@ class NewMember(NamedTuple):
     mid: int
     name: str
     face: str
-    sex: str | None = None
-    sign: str | None = None
+    sex: str
+    sign: str
     code: int = 0

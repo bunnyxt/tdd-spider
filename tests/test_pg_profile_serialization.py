@@ -170,7 +170,8 @@ class PostgresProfileSerializationTest(unittest.TestCase):
         from task import add_video, AlreadyExistError
         aid = self.aid+1
         video = NewVideo(added=1,aid=aid,bvid=a2b(aid),mid=self.mid,
-                         state=0,title='first',pubdate=100)
+                         title='first',pubdate=100,videos=1,tid=30,tname='music',
+                         copyright=1,pic='',desc='',tags='',state=0)
         service = mock.Mock()
 
         def fetch_after_competing_insert(params):

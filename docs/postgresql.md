@@ -81,6 +81,12 @@ function returns a separate `TddVideo` snapshot from the stored row only after
 commit. An existing video aid returns `None` before any related writes; the
 task translates that outcome to `AlreadyExistError`.
 
+Creation input types follow the API response contracts, which are stricter than
+nullable columns retained for old data. `NewVideo` permits `None` only for
+`attribute` and `forward`; `NewMember` has no nullable fields. Required response
+fields have no placeholder defaults in these inputs. This is a typing contract;
+comprehensive runtime response-type validation remains separate work.
+
 The active `task.add_video()` always includes the first collected statistics in
 that transaction. Member creation is part of video creation or refresh; there
 is no separate member-creation task. Sprint tasks pass aid, collection time and
