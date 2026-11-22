@@ -4,10 +4,8 @@ from .BatchInsertMemberFollowerRecordJob import *
 from .AddSprintVideoRecordJob import *
 from .AddVideoJob import *
 from .AddVideoRecordJob import *
-from .AddVideoFromArchiveJob import *
 from .BatchInsertVideoRecordJob import *
 from .FetchVideoRecordJob import *
-from .GetNewlistArchiveJob import *
 from .Job import *
 from .JobStat import *
 from .JobPool import *

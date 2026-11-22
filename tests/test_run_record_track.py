@@ -1,6 +1,6 @@
 """
 Tests for the ``runrecord.track`` context manager -- the shared run-record
-lifecycle used by the summary scripts (12_/15_/17_/62_/71_).
+lifecycle used by the summary scripts (15_/17_/62_/71_).
 
 ``track`` runs the same open / attach-logs / close sequence 51_ drives by hand:
 'succeeded' on a clean exit, 'failed' if the body raises, and a row left
