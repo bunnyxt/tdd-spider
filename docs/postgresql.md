@@ -92,16 +92,32 @@ directly; callers do not construct or mutate database row objects.
 Prepared members are candidates found missing during an earlier lookup. If a
 member mid now exists, keep its stored profile and continue creating the video,
 other missing members, staff and first record. This expected member conflict
-does not abort the transaction. An explicit standalone member-add task still
-reports an existing member as `AlreadyExistError`.
+does not abort the transaction.
 
-The shared `execute_write()` helper calls a Python function inside one guarded
+The shared `db.transaction.write()` calls a Python function inside one guarded
 transaction; it does not dispatch operation strings or import task code.
 Database-internal helpers receive the same psycopg connection, including the
 trial manifest writer. Tasks, jobs and numbered scripts do not own database
 connections or transactions. Batch writers configure batch size and queue
 polling. A failed transaction is reported to its caller and is not automatically
 retried.
+
+The write path separates normal persistence from temporary migration controls:
+
+| Module | Responsibility |
+| --- | --- |
+| `db/basic.py` | Connection pool; connection options apply the selected INI timeouts. |
+| `db/transaction.py` | One transaction, commit, best-effort failure input, error propagation. |
+| `db/profiles.py`, `db/write.py`, `db/sprint.py`, `db/hourly.py` | Named business SQL operations; no trial run parameter. |
+| `db/ingest.py` | Pipelined append batches and explicit returned keys or stored snapshots. |
+| `db/migration.py` | Temporary run control, shared maintenance lock and trial manifest. |
+
+There are two migration hooks: `before_write(connection)` at the transaction
+boundary and `record_keys(connection, table, keys)` after an append. The latter
+also covers sprint records; their returned snapshots and status updates stay
+in the same transaction. Formal appends do not build manifest keys or generate
+batch UUIDs. The guard checks READ COMMITTED once per transaction; writes do
+not reapply timeout settings already installed on the connection.
 
 ## Failed writes
 
@@ -116,6 +132,10 @@ selects another directory. The error log identifies the file for manual
 inspection. Failure to save the file is also logged, and the original write
 error still propagates. Files are diagnostic inputs, not an automatically
 processed queue. They are not fsynced and do not guarantee crash recovery.
+
+During migration, a successful write gate supplies the run label for failure
+diagnostics. If connection acquisition or the gate itself fails, no business
+callback has run and that label is absent. It is never passed into business SQL.
 
 A lost connection during COMMIT may mean the data was committed even though
 the caller received an error. Before manually submitting a failed input,
@@ -140,6 +160,9 @@ comparing fields. Profile changes, staff relationships and change logs share
 one transaction. A waiting updater compares against the preceding committed
 values, and its changes take effect when it commits, even if its HTTP input
 was observed earlier. Profile updates do not reject inputs by observation time.
+This may temporarily restore an older value. A later successful refresh may
+correct it, depending on collection coverage and request results; there is no
+one-hour recovery guarantee.
 
 The update's `added` remains the business time of its change logs; video
 view/status time is captured before slower member/tag enrichment. It does not
@@ -159,6 +182,10 @@ Its batch UUID and ordinal group manifest entries; they are not deduplication
 keys. Formal collection must not set a trial run ID and adds no trial manifest
 entries. Sprint daily summaries and details remain separately committed
 observations.
+
+The trial environment is fixed for each collector process. Stop and drain
+collectors before changing the active run or switching to formal mode, then
+restart with the matching configuration.
 
 ## Migration-period deployment and run control
 
@@ -251,11 +278,12 @@ the `formal` flag:
    revoke trial reset/import authority; remove scheduled starts and access for
    obsolete collectors and migration tools. An old restored configuration must
    not regain cleanup authority.
-2. Stop and drain all current writers and maintenance jobs. Remove run-control
-   queries, trial-manifest writes, trial arguments/environment settings and the
-   migration-only advisory-lock protocol from every active path, including
-   hourly derived updates and the maintenance wrapper. Keep normal business
-   transactions, profile row locks and maintenance functions' own locks.
+2. Stop and drain all current writers and maintenance jobs. Delete
+   `db/migration.py` and its imports and two hooks in `db/transaction.py` and
+   `db/ingest.py`. No business function signatures need to change. Remove trial
+   environment settings and the maintenance wrapper's temporary control/lock
+   include as well. Keep normal transactions, failure diagnostics, profile row
+   locks and maintenance functions' own locks.
 3. Remove the temporary code, tests, grants and install/upgrade instructions.
    Retire `tdd_ingest.control` and `tdd_ingest.manifest` only after no live caller
    needs them; archive required migration evidence before deleting temporary

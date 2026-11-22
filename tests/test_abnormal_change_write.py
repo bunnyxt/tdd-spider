@@ -1,5 +1,6 @@
 """Abnormal changes bind observations directly and retain trial cleanup keys."""
 from datetime import datetime, timezone
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -7,6 +8,8 @@ import tempfile
 import unittest
 from unittest import mock
 from uuid import uuid4
+
+from psycopg.pq import TransactionStatus
 
 from core import VideoRecord
 from db.write import _insert_video_record_abnormal_change
@@ -24,12 +27,13 @@ class AbnormalChangeWriteTest(unittest.TestCase):
         script = _load('51_hourly-video-record-add.py')
         runner = script.RecentRecordsAnalystRunner(records, '2026-01-01 03:00',
                                                     data_folder=directory)
-        def run(factory, callback, *, run_id):
-            self.assertIsNone(run_id)
-            return callback(conn)
+        conn.info.transaction_status = TransactionStatus.IDLE
+        conn.transaction.return_value.__enter__.side_effect = lambda: setattr(
+            conn.info, 'transaction_status', TransactionStatus.INTRANS)
         with mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': '', 'TDD_FAILURE_DIR': directory}), \
                 mock.patch.object(script, 'query_video_pubdate_all', return_value=[(7, 0)]), \
-                mock.patch('db.ingest.run_transaction', side_effect=run), \
+                mock.patch('db.transaction.engine.connection', return_value=nullcontext(conn)), \
+                mock.patch('db.migration.before_write', return_value={'run_id': None}), \
                 mock.patch.object(runner, '_assemble_record_abnormal_change',
                                   wraps=runner._assemble_record_abnormal_change) as assemble:
             runner.process()
@@ -78,10 +82,11 @@ class AbnormalChangeWriteTest(unittest.TestCase):
         previous = VideoRecord(122, 7, '1AbCdEfGhJ', 100, 21, 22, 23, None, 25, 26)
         conn, cursors = connection([[(31,)], []])
         run_id = uuid4()
-        result = _insert_video_record_abnormal_change(
-            conn, added=124, aid=7, attr='view', speed_now=100, speed_last=10,
-            speed_now_incr_rate=10, period_range=24, speed_period=20, speed_overall=5,
-            this_record=current, last_record=previous, description='view\x00 changed', run_id=run_id)
+        with mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': str(run_id)}):
+            result = _insert_video_record_abnormal_change(
+                conn, added=124, aid=7, attr='view', speed_now=100, speed_last=10,
+                speed_now_incr_rate=10, period_range=24, speed_period=20, speed_overall=5,
+                this_record=current, last_record=previous, description='view\x00 changed')
         self.assertIsNone(result)
         query, rows = cursors[0].executemany.call_args.args
         self.assertNotIn('bvid', query.as_string())

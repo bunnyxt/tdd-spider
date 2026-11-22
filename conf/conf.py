@@ -19,7 +19,7 @@ def get_db_pool_max_size():
 
 
 def get_db_timeouts():
-    """Shared millisecond limits for connection startup and write transactions."""
+    """Validated millisecond limits applied when opening a database connection."""
     limits = {}
     for name, default in (('lock_timeout', 10000), ('statement_timeout', 60000),
                           ('transaction_timeout', 120000)):

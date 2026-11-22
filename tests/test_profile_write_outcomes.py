@@ -18,7 +18,7 @@ class ProfileWriteOutcomesTest(unittest.TestCase):
         self.conn = ProfileConnection()
         self.addCleanup(self.conn.close)
         self.conn.patch_task_reads(self)
-        patcher = mock.patch('db.profiles.execute_write', side_effect=self.conn.execute_write)
+        patcher = mock.patch('db.profiles.write', side_effect=self.conn.write)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.service = mock.Mock()

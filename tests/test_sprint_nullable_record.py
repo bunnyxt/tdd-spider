@@ -1,5 +1,6 @@
 """Nullable sprint statistics persist without a million-status transition."""
 from datetime import datetime, timezone
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,8 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 from uuid import uuid4
+
+from psycopg.pq import TransactionStatus
 
 from db import TddSprintVideoRecord
 from job import AddSprintVideoRecordJob
@@ -33,25 +36,26 @@ class SprintNullableRecordTest(unittest.TestCase):
                 response = valid_response()
                 # Both response aid values are 7; the requested aid must win.
                 response['data']['stat']['view'] = response_view
-                conn, _ = connection([])
-                conn.execute.return_value.fetchone.return_value = (
+                stored_row = (
                     31, datetime.fromtimestamp(124, timezone.utc), 10,
                     stored_view, 2, 3, 4, 5, 6, 7)
-                def run(factory, callback, *, run_id):
-                    self.assertIsNone(run_id)
-                    return callback(conn)
+                conn, cursors = connection([[stored_row]])
+                conn.info.transaction_status = TransactionStatus.IDLE
+                conn.transaction.return_value.__enter__.side_effect = lambda: setattr(
+                    conn.info, 'transaction_status', TransactionStatus.INTRANS)
                 with mock.patch.object(service, '_get', return_value=response) as request, \
                         mock.patch('task.task.get_ts_s', return_value=123), \
                         mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': ''}), \
-                        mock.patch('db.ingest.run_transaction', side_effect=run), \
-                        mock.patch('db.observation._save_failure') as save:
+                        mock.patch('db.transaction.engine.connection', return_value=nullcontext(conn)), \
+                        mock.patch('db.migration.before_write', return_value={'run_id': None}), \
+                        mock.patch('db.transaction._save_failure') as save:
                     record = add_sprint_video_record_via_video_view(10, service)
                 request.assert_called_once_with('get_video_view_trimmed', params={'aid': 10},
                                                 headers=None, retry=None, timeout=None,
                                                 colddown_factor=None)
-                self.assertEqual(conn.execute.call_args.args[1], (
+                self.assertEqual(cursors[0].executemany.call_args.args[1], [(
                     datetime.fromtimestamp(123, timezone.utc), 10,
-                    stored_view, 2, 3, 4, 5, 6, 7))
+                    stored_view, 2, 3, 4, 5, 6, 7)])
                 self.assertIs(type(record), TddSprintVideoRecord)
                 self.assertEqual((record.id, record.added, record.aid, record.view),
                                  (31, 124, 10, stored_view))
@@ -67,16 +71,16 @@ class SprintNullableRecordTest(unittest.TestCase):
     def test_nullable_record_is_appended_without_finished_update(self):
         stat = sprint_stat(view=None, danmaku=None, reply=None,
                            favorite=None, coin=None, share=None, like=None)
-        conn, cursors = connection([[]])
         added = datetime.fromtimestamp(123, timezone.utc)
-        conn.execute.return_value.fetchone.return_value = (31, added, 10) + (None,) * 7
+        conn, cursors = connection([[(31, added, 10) + (None,) * 7], []])
         run_id = uuid4()
-        record = _insert_sprint_video_record(conn, 10, 123, stat, run_id=run_id)
+        with mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': str(run_id)}):
+            record = _insert_sprint_video_record(conn, 10, 123, stat)
         self.assertIs(type(record), TddSprintVideoRecord)
         self.assertEqual((record.id, record.added, record.aid, record.view), (31, 123, 10, None))
-        conn.execute.assert_called_once()
-        self.assertEqual(conn.execute.call_args.args[1], (added, 10) + (None,) * 7)
-        manifest, = cursors[0].executemany.call_args.args[1]
+        conn.execute.assert_not_called()
+        self.assertEqual(cursors[0].executemany.call_args.args[1], [(added, 10) + (None,) * 7])
+        manifest, = cursors[1].executemany.call_args.args[1]
         self.assertEqual(manifest[2:4], (run_id, 'tdd_sprint_video_record'))
         self.assertEqual(manifest[4].obj, {'id': 31})
         self.assertIsNone(stat.view)
@@ -84,49 +88,48 @@ class SprintNullableRecordTest(unittest.TestCase):
 
     def test_unavailable_view_is_normalized_only_for_insert(self):
         stat = sprint_stat(view='--', danmaku=1, reply=2, favorite=3, coin=4, share=5, like=6)
-        conn, _ = connection([])
         added = datetime.fromtimestamp(123, timezone.utc)
-        conn.execute.return_value.fetchone.return_value = (31, added, 10, -1, 1, 2, 3, 4, 5, 6)
-        with mock.patch('db.ingest.uuid4', side_effect=AssertionError('formal write needs no manifest')):
+        conn, cursors = connection([[(31, added, 10, -1, 1, 2, 3, 4, 5, 6)]])
+        with mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': ''}), \
+                mock.patch('db.migration.uuid4', side_effect=AssertionError('formal write needs no manifest')):
             record = _insert_sprint_video_record(conn, 10, 123, stat)
-        self.assertEqual(conn.execute.call_args.args[1], (added, 10, -1, 1, 2, 3, 4, 5, 6))
+        self.assertEqual(cursors[0].executemany.call_args.args[1], [(added, 10, -1, 1, 2, 3, 4, 5, 6)])
         self.assertEqual(record.view, -1)
         self.assertEqual(stat.view, '--')
-        conn.cursor.assert_not_called()
+        conn.cursor.assert_called_once_with()
 
     def test_finished_status_and_result_use_returned_database_values(self):
         stat = sprint_stat(view=999999)
-        conn, _ = connection([])
         # RETURNING, not mutation of the response, defines the stored snapshot.
         added = datetime.fromtimestamp(124, timezone.utc)
-        conn.execute.return_value.fetchone.return_value = (31, added, 10, 1000000, 1, 2, 3, 4, 5, 6)
-        record = _insert_sprint_video_record(conn, 10, 123, stat)
+        conn, _ = connection([[(31, added, 10, 1000000, 1, 2, 3, 4, 5, 6)]])
+        with mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': ''}):
+            record = _insert_sprint_video_record(conn, 10, 123, stat)
         self.assertEqual((record.id, record.added, record.view), (31, 124, 1000000))
-        self.assertEqual(conn.execute.call_args_list[1], mock.call(
-            'UPDATE tdd_sprint_video SET status = %s WHERE aid = %s', ('finished', 10)))
+        self.assertEqual(conn.execute.call_args_list, [mock.call(
+            'UPDATE tdd_sprint_video SET status = %s WHERE aid = %s', ('finished', 10))])
         self.assertEqual(stat.view, 999999)
 
     def test_manifest_failure_prevents_returning_a_confirmed_sprint_record(self):
-        conn, cursors = connection([[]])
-        conn.execute.return_value.fetchone.return_value = (
-            31, datetime.fromtimestamp(123, timezone.utc), 10, 1000000, 1, 2, 3, 4, 5, 6)
-        cursors[0].executemany.side_effect = RuntimeError('manifest failed')
-        with self.assertRaisesRegex(RuntimeError, 'manifest failed'):
-            _insert_sprint_video_record(conn, 10, 123, sprint_stat(view=1000000), run_id=uuid4())
+        conn, cursors = connection([[(
+            31, datetime.fromtimestamp(123, timezone.utc), 10, 1000000, 1, 2, 3, 4, 5, 6)], []])
+        cursors[1].executemany.side_effect = RuntimeError('manifest failed')
+        with mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': str(uuid4())}), \
+                self.assertRaisesRegex(RuntimeError, 'manifest failed'):
+            _insert_sprint_video_record(conn, 10, 123, sprint_stat(view=1000000))
         conn.commit.assert_not_called()
 
     def test_missing_returning_result_is_not_accepted(self):
-        conn = mock.Mock()
-        conn.execute.return_value.fetchone.return_value = None
-        with self.assertRaisesRegex(RuntimeError, 'stored record'):
+        conn, _ = connection([[None]])
+        with self.assertRaisesRegex(RuntimeError, 'complete key'):
             _insert_sprint_video_record(conn, 10, 123, sprint_stat())
 
     def test_failed_insert_keeps_raw_stat_for_manual_reconciliation(self):
         stat = sprint_stat(view='--')
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.dict(os.environ, {'TDD_FAILURE_DIR': directory, 'TDD_TRIAL_RUN_ID': ''}), \
-                mock.patch('db.ingest.run_transaction', side_effect=RuntimeError('offline')), \
-                self.assertLogs('db.observation', level='ERROR'):
+                mock.patch('db.transaction.engine.connection', side_effect=RuntimeError('offline')), \
+                self.assertLogs('db.transaction', level='ERROR'):
             with self.assertRaisesRegex(RuntimeError, 'offline'):
                 insert_sprint_video_record(10, 123, stat)
             path, = Path(directory).glob('*.json')

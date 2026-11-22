@@ -8,17 +8,19 @@ import unittest
 from unittest import mock
 from uuid import uuid4
 
+from psycopg.pq import TransactionStatus
+
 from core import VideoRecord
-from db.observation import execute_write
+from db.transaction import write
 from db.write import insert_video_record_abnormal_change
 from service import MemberCard
 
 
-def save_member(conn, card, record, present, *, run_id=None):
+def save_member(conn, card, record, present):
     return card
 
 
-def unsupported(conn, value, *, run_id=None):
+def unsupported(conn, value):
     return value
 
 
@@ -30,7 +32,7 @@ def abnormal_input(aid=1):
                 description='view changed')
 
 
-class ObservationTest(unittest.TestCase):
+class TransactionTest(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -39,14 +41,20 @@ class ObservationTest(unittest.TestCase):
                                                    'TDD_TRIAL_RUN_ID': ''})
         environment.start()
         self.addCleanup(environment.stop)
+        self.connection = mock.MagicMock()
+        self.connection.__enter__.return_value = self.connection
+        self.connection.info.transaction_status = TransactionStatus.IDLE
+        pool = mock.patch('db.transaction.engine.connection', return_value=self.connection)
+        pool.start()
+        self.addCleanup(pool.stop)
+        guard = mock.patch('db.migration.before_write', return_value={})
+        self.guard = guard.start()
+        self.addCleanup(guard.stop)
 
     def test_successful_append_skips_encoding_and_filesystem_work(self):
-        def run(factory, callback, *, run_id):
-            return callback(mock.Mock())
-        with mock.patch('db.ingest.run_transaction', side_effect=run), \
-             mock.patch('db.ingest.append_rows') as append, \
-             mock.patch('db.observation.encode', side_effect=AssertionError('must not encode')), \
-             mock.patch('db.observation._save_failure') as save:
+        with mock.patch('db.ingest.append_rows') as append, \
+             mock.patch('db.transaction.encode', side_effect=AssertionError('must not encode')), \
+             mock.patch('db.transaction._save_failure') as save:
             result = insert_video_record_abnormal_change(**abnormal_input())
         self.assertIsNone(result)
         append.assert_called_once()
@@ -62,11 +70,11 @@ class ObservationTest(unittest.TestCase):
         def fail(*args, **kwargs):
             self.assertFalse(self.directory.exists(), 'input must not be persisted before DB attempt')
             raise error
-        with mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': str(run_id)}), \
-             mock.patch('db.ingest.run_transaction', side_effect=fail) as runner, \
-             self.assertLogs('db.observation', level='ERROR') as logs:
+        self.guard.return_value = {'run_id': str(run_id)}
+        with mock.patch.object(self.connection.transaction.return_value, '__exit__', side_effect=fail) as runner, \
+             self.assertLogs('db.transaction', level='ERROR') as logs:
             with self.assertRaises(RuntimeError) as caught:
-                execute_write(save_member, **payload)
+                write(save_member, **payload)
         self.assertIs(caught.exception, error)
         runner.assert_called_once()
         path, = self.directory.glob('*.json')
@@ -83,8 +91,8 @@ class ObservationTest(unittest.TestCase):
         self.assertIn('reconcile manually before retrying', logs.output[0])
 
     def test_failures_create_separate_files_without_overwriting_prior_inputs(self):
-        with mock.patch('db.ingest.run_transaction', side_effect=RuntimeError('offline')), \
-             self.assertLogs('db.observation', level='ERROR'):
+        with mock.patch('db.transaction.engine.connection', side_effect=RuntimeError('offline')), \
+             self.assertLogs('db.transaction', level='ERROR'):
             for aid in (1, 2):
                 with self.assertRaises(RuntimeError):
                     insert_video_record_abnormal_change(**abnormal_input(aid))
@@ -99,32 +107,60 @@ class ObservationTest(unittest.TestCase):
 
     def test_archive_failure_does_not_mask_database_exception(self):
         original = RuntimeError('database failed')
-        with mock.patch('db.ingest.run_transaction', side_effect=original), \
-             mock.patch('db.observation._save_failure', side_effect=OSError('disk full')), \
-             self.assertLogs('db.observation', level='ERROR') as logs:
+        with mock.patch('db.transaction.engine.connection', side_effect=original), \
+             mock.patch('db.transaction._save_failure', side_effect=OSError('disk full')), \
+             self.assertLogs('db.transaction', level='ERROR') as logs:
             with self.assertRaises(RuntimeError) as caught:
                 insert_video_record_abnormal_change(**abnormal_input())
         self.assertIs(caught.exception, original)
         self.assertIn('could not be saved', logs.output[0])
 
     def test_partial_archive_is_removed_when_input_cannot_be_encoded(self):
-        with mock.patch('db.ingest.run_transaction', side_effect=RuntimeError('offline')), \
-             self.assertLogs('db.observation', level='ERROR'):
+        with mock.patch('db.transaction.engine.connection', side_effect=RuntimeError('offline')), \
+             self.assertLogs('db.transaction', level='ERROR'):
             with self.assertRaisesRegex(RuntimeError, 'offline'):
-                execute_write(unsupported, object())
+                write(unsupported, object())
         self.assertEqual(list(self.directory.iterdir()), [])
 
     def test_operation_strings_are_rejected_before_database_work(self):
-        with mock.patch('db.ingest.run_transaction') as run:
+        with mock.patch('db.transaction.engine.connection') as run:
             with self.assertRaisesRegex(TypeError, 'callable'):
-                execute_write('append', objects=[])
+                write('append', objects=[])
         run.assert_not_called()
 
     def test_callable_without_name_preserves_original_exception(self):
         from functools import partial
         original = RuntimeError('database failed')
-        with mock.patch('db.ingest.run_transaction', side_effect=original), \
-             self.assertLogs('db.observation', level='ERROR'):
+        with mock.patch('db.transaction.engine.connection', side_effect=original), \
+             self.assertLogs('db.transaction', level='ERROR'):
             with self.assertRaises(RuntimeError) as caught:
-                execute_write(partial(unsupported, value=123))
+                write(partial(unsupported, value=123))
         self.assertIs(caught.exception, original)
+
+    def test_uncertain_commit_attempts_the_callback_once(self):
+        error = RuntimeError('lost COMMIT acknowledgement')
+        self.connection.transaction.return_value.__exit__.side_effect = error
+        callback = mock.Mock(return_value=object())
+        with self.assertLogs('db.transaction', level='ERROR'):
+            with self.assertRaises(RuntimeError) as caught:
+                write(callback)
+        self.assertIs(caught.exception, error)
+        callback.assert_called_once_with(self.connection)
+        self.guard.assert_called_once_with(self.connection)
+
+    def test_result_is_returned_only_after_commit_without_encoding(self):
+        result = object()
+        committed = []
+        self.connection.transaction.return_value.__exit__.side_effect = lambda *args: committed.append(True)
+        with mock.patch('db.transaction.encode', side_effect=AssertionError('must not encode')):
+            self.assertIs(write(lambda conn: result), result)
+        self.assertEqual(committed, [True])
+
+    def test_existing_transaction_is_rejected_before_business_work(self):
+        self.connection.info.transaction_status = TransactionStatus.INTRANS
+        callback = mock.Mock()
+        with self.assertLogs('db.transaction', level='ERROR'):
+            with self.assertRaisesRegex(RuntimeError, 'idle connection'):
+                write(callback)
+        callback.assert_not_called()
+        self.guard.assert_not_called()

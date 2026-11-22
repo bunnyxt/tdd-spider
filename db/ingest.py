@@ -1,21 +1,16 @@
-"""Guarded SQL transactions and trial-only complete-key manifests."""
+"""Pipelined immutable inserts with explicit returned database values."""
 from __future__ import annotations
-from collections.abc import Callable, Iterable, Sequence
-from contextlib import AbstractContextManager
-from typing import Any, TypeVar, cast
-
-import os
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from collections.abc import Iterable, Sequence
+from datetime import datetime
+from typing import Any
 
 from psycopg import Connection, sql
 from psycopg.pq import TransactionStatus
-from psycopg.types.json import Jsonb
-from conf import get_db_timeouts
+
+from . import migration
 
 HistoryKey = tuple[int, datetime, int]
 AppendKey = HistoryKey | tuple[int]
-_Result = TypeVar("_Result")
 
 _STATS = ('view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like')
 _BASE = ('added', 'aid') + _STATS
@@ -34,68 +29,16 @@ _SPEC = {
 }
 
 
-def _encode(value: int | datetime) -> int | dict[str, str]:
-    """Keep trial key timestamps compatible with migration cleanup tools."""
-    if isinstance(value, datetime):
-        if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError('Manifest datetimes must have a timezone')
-        return {'__tdd_type__': 'datetime', 'value': value.astimezone(timezone.utc).isoformat()}
-    return value
-
-
-def _require_transaction(conn: Connection) -> None:
-    if conn.info.transaction_status != TransactionStatus.INTRANS:
-        raise RuntimeError('An explicit transaction is required for ingest writes')
-    if conn.execute('SHOW transaction_isolation').fetchone()[0] != 'read committed':
-        raise RuntimeError('Ingest requires READ COMMITTED isolation')
-
-
-def _check_run_control(conn: Connection, run_id: UUID | None) -> None:
-    run_id = UUID(str(run_id)) if run_id is not None else None
-    # Maintenance owns the exclusive session-level version of this lock. This
-    # separate SELECT runs after it is released, giving READ COMMITTED a fresh
-    # control snapshot before business data is read or changed.
-    conn.execute('SELECT pg_advisory_xact_lock_shared(141376009,169)').fetchone()
-    control = conn.execute(
-        'SELECT mode,active_run_id FROM tdd_ingest.control WHERE singleton').fetchone()
-    if control is None:
-        if os.environ.get('TDD_ALLOW_UNMANAGED_INGEST') != '1':
-            raise RuntimeError('Ingest control is not configured')
-    elif not ((control[0] == 'trial' and run_id == control[1] and run_id is not None)
-              or (control[0] == 'formal' and run_id is None)):
-        raise RuntimeError('Ingest control does not permit this run')
-
-
-def guard_write_transaction(conn: Connection, run_id: UUID | None = None) -> None:
-    """Gate derived writes and hold off maintenance until the caller commits.
-
-    Call first inside an explicit READ COMMITTED transaction, before reading
-    business state used by the update. Recomputable derived updates need no
-    manifest, but must obey the same maintenance lock and run control.
-    """
-    _require_transaction(conn)
-    _set_transaction_limits(conn)
-    _check_run_control(conn, run_id)
-
-
-def _set_transaction_limits(conn: Connection) -> None:
-    limits = get_db_timeouts()
-    conn.execute("SELECT set_config('lock_timeout',%s,true),"
-                 "set_config('statement_timeout',%s,true),"
-                 "set_config('transaction_timeout',%s,true)",
-                 [str(limits[name]) + 'ms' for name in
-                  ('lock_timeout', 'statement_timeout', 'transaction_timeout')]).fetchone()
-
 
 def append_rows(conn: Connection, table: str, columns: Sequence[str],
-                rows: Iterable[Sequence[Any]], *, run_id: UUID | None = None) -> list[AppendKey]:
-    """Append one immutable batch inside the caller's transaction.
+                rows: Iterable[Sequence[Any]], *,
+                returning: Sequence[str] | None = None) -> list[tuple[Any, ...]]:
+    """Append a batch and return stored values in input order.
 
-    The caller must acquire guard_write_transaction before business work.
-    Return complete PK tuples in input order. Pipelined prepared INSERTs use
-    default identity values and one RETURNING result set per input row, so the
-    mapping does not depend on multi-row RETURNING order. Failed attempts can
-    consume sequence values; gaps are expected.
+    The caller owns the transaction. By default return complete primary keys;
+    callers needing a stored snapshot may select business fields as well.
+    Pipelined prepared INSERTs use default identity values and one RETURNING
+    result set per input row. Failed attempts can consume sequence values.
     """
     if table not in _SPEC:
         raise ValueError('Table is not an approved append target')
@@ -105,66 +48,29 @@ def append_rows(conn: Connection, table: str, columns: Sequence[str],
         raise ValueError('Append columns must match the complete business row without id')
     if any(len(row) != len(columns) for row in rows):
         raise ValueError('Append row width does not match columns')
-    _require_transaction(conn)
-    keys = []
+    returned_columns = pk if returning is None else tuple(returning)
+    if (len(set(returned_columns)) != len(returned_columns)
+            or not set(pk) <= set(returned_columns) <= set(allowed + pk)):
+        raise ValueError('Returned columns must include the complete key and only stored fields')
+    if conn.info.transaction_status != TransactionStatus.INTRANS:
+        raise RuntimeError('An explicit transaction is required for append writes')
+    results = []
     query = sql.SQL('INSERT INTO public.{} ({}) VALUES ({}) RETURNING {}').format(
         sql.Identifier(table), sql.SQL(',').join(map(sql.Identifier, columns)),
         sql.SQL(',').join(sql.Placeholder() for _ in columns),
-        sql.SQL(',').join(map(sql.Identifier, pk)))
-    # Psycopg 3 executemany pipelines its commands rather than waiting for each
-    # network round trip. Each result set still corresponds to one input row.
+        sql.SQL(',').join(map(sql.Identifier, returned_columns)))
+    # Psycopg pipelines these commands; each result set belongs to one input.
     for start in range(0, len(rows), 1000):
         chunk = rows[start:start + 1000]
         with conn.cursor() as cursor:
             cursor.executemany(query, chunk, returning=True)
             for index in range(len(chunk)):
-                key = cursor.fetchone()
-                if key is None:
-                    raise RuntimeError('An append did not return its complete key')
-                keys.append(tuple(key))
+                row = cursor.fetchone()
+                if row is None or len(row) != len(returned_columns):
+                    raise RuntimeError('An append did not return its complete key and selected fields')
+                results.append(tuple(row))
                 if index + 1 < len(chunk) and not cursor.nextset():
                     raise RuntimeError('An append batch has missing result sets')
-    record_trial_keys(conn, table, keys, run_id=run_id)
-    return cast(list[AppendKey], keys)
-
-
-def record_trial_keys(conn: Connection, table: str, keys: Sequence[AppendKey], *,
-                      run_id: UUID | None = None) -> None:
-    """Record returned keys in the same guarded transaction as their inserts.
-
-    A single-row writer returning a stored snapshot can use this without going
-    through append_rows. Formal writes do not allocate a manifest batch.
-    """
-    if run_id is None or not keys:
-        return
-    if table not in _SPEC:
-        raise ValueError('Table is not an approved append target')
-    pk = _SPEC[table][1]
-    if any(len(key) != len(pk) for key in keys):
-        raise ValueError('Trial manifest requires complete primary keys')
-    batch_id = uuid4()
-    with conn.cursor() as cursor:
-        cursor.executemany(
-            'INSERT INTO tdd_ingest.manifest(batch_id,ordinal,run_id,table_name,key) '
-            'VALUES(%s,%s,%s,%s,%s)',
-            [(batch_id, i, UUID(str(run_id)), table,
-              Jsonb({field: _encode(value) for field, value in zip(pk, key)}))
-             for i, key in enumerate(keys)])
-
-
-def run_transaction(connection_factory: Callable[[], AbstractContextManager[Connection]],
-                    callback: Callable[[Connection], _Result], *,
-                    run_id: UUID | None = None) -> _Result:
-    """Run database-only work in one guarded transaction, without automatic retry.
-
-    The caller fetches HTTP input beforehand. An exception, including an
-    uncertain commit acknowledgement, propagates for manual reconciliation.
-    """
-    with connection_factory() as conn:
-        if conn.info.transaction_status != TransactionStatus.IDLE:
-            raise RuntimeError('run_transaction requires an idle connection')
-        with conn.transaction():
-            guard_write_transaction(conn, run_id)
-            result = callback(conn)
-            _require_transaction(conn)
-    return result
+    migration.record_keys(conn, table,
+        ({field: row[returned_columns.index(field)] for field in pk} for row in results))
+    return results

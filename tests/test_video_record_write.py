@@ -1,5 +1,6 @@
 """Collected records bind directly to SQL and retain their CSV/analysis values."""
 from datetime import datetime, timezone
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,8 @@ import tempfile
 import unittest
 from unittest import mock
 from uuid import uuid4
+
+from psycopg.pq import TransactionStatus
 
 from core import VideoRecord
 from db.write import VIDEO_RECORD_COLUMNS
@@ -29,12 +32,13 @@ class VideoRecordWriteTest(unittest.TestCase):
         expected = [(7, added, 10), (7, added, 11)]
         conn, cursors = connection([expected, []])
         run_id = uuid4()
-        def run(factory, callback, *, run_id):
-            self.assertEqual(str(run_id), os.environ['TDD_TRIAL_RUN_ID'])
-            return callback(conn)
+        conn.info.transaction_status = TransactionStatus.IDLE
+        conn.transaction.return_value.__enter__.side_effect = lambda: setattr(
+            conn.info, 'transaction_status', TransactionStatus.INTRANS)
         with mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': str(run_id)}), \
-                mock.patch('db.ingest.run_transaction', side_effect=run), \
-                mock.patch('db.observation._save_failure') as save:
+                mock.patch('db.transaction.engine.connection', return_value=nullcontext(conn)), \
+                mock.patch('db.migration.before_write', return_value={'run_id': str(run_id)}), \
+                mock.patch('db.transaction._save_failure') as save:
             result = commit_video_records_batch(records)
         self.assertEqual(result, expected)
         query, rows = cursors[0].executemany.call_args.args
@@ -62,8 +66,8 @@ class VideoRecordWriteTest(unittest.TestCase):
         record = self.record()
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.dict(os.environ, {'TDD_FAILURE_DIR': directory, 'TDD_TRIAL_RUN_ID': ''}), \
-                mock.patch('db.ingest.run_transaction', side_effect=RuntimeError('write failed')), \
-                self.assertLogs('db.observation', level='ERROR'):
+                mock.patch('db.transaction.engine.connection', side_effect=RuntimeError('write failed')), \
+                self.assertLogs('db.transaction', level='ERROR'):
             with self.assertRaisesRegex(RuntimeError, 'write failed'):
                 commit_video_records_batch([record])
             path, = Path(directory).glob('*.json')

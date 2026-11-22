@@ -21,7 +21,7 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.service.get_video_tags.return_value.tags = []
         self.conn.seed(TddMember(added=1,mid=8,name='owner',face='',code=0))
         self.conn.seed(TddMember(added=1,mid=10,name='staff',face='',code=0))
-        patcher = mock.patch('db.profiles.execute_write',side_effect=self.conn.execute_write)
+        patcher = mock.patch('db.profiles.write',side_effect=self.conn.write)
         patcher.start()
         self.addCleanup(patcher.stop)
 

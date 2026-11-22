@@ -1,10 +1,13 @@
 """Follower observations bind directly and publish only confirmed batches."""
 from datetime import datetime, timezone
+from contextlib import nullcontext
 import os
 from queue import Queue
 import unittest
 from unittest import mock
 from uuid import uuid4
+
+from psycopg.pq import TransactionStatus
 
 from core import MemberFollowerRecord
 from job import BatchInsertMemberFollowerRecordJob
@@ -19,10 +22,12 @@ class MemberFollowerWriteTest(unittest.TestCase):
         expected = [(record.mid, added, 10), (record.mid, added, 11)]
         conn, cursors = connection([expected, []])
         run_id = uuid4()
-        def run(factory, callback, *, run_id):
-            return callback(conn)
+        conn.info.transaction_status = TransactionStatus.IDLE
+        conn.transaction.return_value.__enter__.side_effect = lambda: setattr(
+            conn.info, 'transaction_status', TransactionStatus.INTRANS)
         with mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': str(run_id)}), \
-             mock.patch('db.ingest.run_transaction', side_effect=run):
+             mock.patch('db.transaction.engine.connection', return_value=nullcontext(conn)), \
+             mock.patch('db.migration.before_write', return_value={'run_id': str(run_id)}):
             keys = commit_member_follower_records_batch([record, record])
         self.assertEqual(keys, expected)
         query, rows = cursors[0].executemany.call_args.args

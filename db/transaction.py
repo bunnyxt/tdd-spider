@@ -1,4 +1,4 @@
-"""Persist one observation; save input only after a failed database attempt.
+"""Execute one write transaction; save input only after a failed attempt.
 
 Failure files are diagnostics for manual reconciliation. They are not a durable
 queue or proof that a transaction rolled back: a lost COMMIT acknowledgement may
@@ -8,9 +8,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from typing import Any, TypeVar
-from uuid import UUID
 
 from psycopg import Connection
+from psycopg.pq import TransactionStatus
 
 _Result = TypeVar("_Result")
 
@@ -23,9 +23,9 @@ import tempfile
 
 from .basic import engine
 from .models import Row
-from .write import trial_run_id
+from . import migration
 
-logger = logging.getLogger('db.observation')
+logger = logging.getLogger('db.transaction')
 
 
 def encode(value: Any) -> Any:
@@ -45,8 +45,8 @@ def encode(value: Any) -> Any:
     return value
 
 
-def _save_failure(operation: str, payload: Mapping[str, Any], run_id: UUID | None,
-                  error: Exception) -> Path:
+def _save_failure(operation: str, payload: Mapping[str, Any], error: Exception,
+                  metadata: Mapping[str, Any]) -> Path:
     directory = Path(os.environ.get('TDD_FAILURE_DIR', 'data/failed-writes'))
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     directory.chmod(0o700)
@@ -56,8 +56,7 @@ def _save_failure(operation: str, payload: Mapping[str, Any], run_id: UUID | Non
     path = Path(filename)
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-            json.dump({'version': 1, 'operation': operation,
-                       'run_id': str(run_id) if run_id else None,
+            json.dump({**metadata, 'version': 1, 'operation': operation,
                        'commit_status': 'unconfirmed', 'error_type': type(error).__name__,
                        'payload': encode(payload)}, stream, ensure_ascii=False,
                       allow_nan=False, separators=(',', ':'))
@@ -68,27 +67,32 @@ def _save_failure(operation: str, payload: Mapping[str, Any], run_id: UUID | Non
     return path
 
 
-def execute_write(function: Callable[..., _Result], *args: Any,
-                  connection_factory: Callable[[], AbstractContextManager[Connection]] | None = None,
-                  **kwargs: Any) -> _Result:
-    """Call named database work once, inside a guarded business transaction."""
-    from .ingest import run_transaction
+def write(function: Callable[..., _Result], *args: Any,
+          connection_factory: Callable[[], AbstractContextManager[Connection]] | None = None,
+          **kwargs: Any) -> _Result:
+    """Run named database work once; return its result only after commit.
+
+    HTTP input is fetched beforehand. Any exception, including an uncertain
+    COMMIT acknowledgement, is recorded best-effort and re-raised without retry.
+    """
     if not callable(function):
         raise TypeError('Database work must be a callable')
-    run_id = trial_run_id()
-
-    def callback(connection: Connection) -> _Result:
-        return function(connection, *args, run_id=run_id, **kwargs)
-
+    metadata: Mapping[str, Any] = {}
     try:
-        return run_transaction(connection_factory or engine.connection, callback, run_id=run_id)
+        with (connection_factory or engine.connection)() as connection:
+            if connection.info.transaction_status != TransactionStatus.IDLE:
+                raise RuntimeError('write requires an idle connection')
+            with connection.transaction():
+                metadata = migration.before_write(connection)
+                result = function(connection, *args, **kwargs)
+        return result
     except Exception as error:
         operation = getattr(function, '__name__', type(function).__name__)
         try:
             signature = inspect.signature(function)
             arguments = signature.bind(None, *args, **kwargs).arguments
             arguments.pop(next(iter(signature.parameters)), None)
-            path = _save_failure(operation, arguments, run_id, error)
+            path = _save_failure(operation, arguments, error, metadata)
         except Exception:
             logger.error('Database write failed; failure input could not be saved. '
                          'operation=%s. Commit status is unconfirmed; reconcile manually '

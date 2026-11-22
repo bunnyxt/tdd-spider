@@ -1,6 +1,5 @@
 """Profile persistence: row-locked snapshots and atomic change logs."""
 import logging
-from uuid import UUID
 
 from psycopg import Connection
 from core import NewVideo, NewMember, VideoRecord
@@ -8,7 +7,7 @@ from service import MemberCard, VideoView, VideoViewStaffItem
 from .models import TddVideo, TddMember, TddVideoLog, TddMemberLog, TddVideoStaff
 from .values import clean_text, database_value, epoch
 from .write import _append_objects, append_video_records
-from .observation import execute_write
+from .transaction import write
 from util import a2b, same_pic_url
 
 logger = logging.getLogger('db.profiles')
@@ -22,13 +21,12 @@ def create_video(video: NewVideo, *, new_members: list[NewMember],
     after the task's precheck are retained; their conflicts do not block creation.
     Other database failures propagate, including an uncertain commit outcome.
     """
-    return execute_write(_create_video, video, new_members=new_members, staff=staff,
-                         first_record=first_record)
+    return write(_create_video, video, new_members=new_members, staff=staff,
+                 first_record=first_record)
 
 
 def _create_video(conn: Connection, video: NewVideo, *, new_members: list[NewMember],
-                  staff: list[VideoViewStaffItem] | None, first_record: VideoRecord | None,
-                  run_id: UUID | None = None) -> TddVideo | None:
+                  staff: list[VideoViewStaffItem] | None, first_record: VideoRecord | None) -> TddVideo | None:
     row = conn.execute(
         'INSERT INTO tdd_video '
         '(added,aid,bvid,videos,tid,tname,copyright,pic,title,pubdate,"desc",tags,mid,'
@@ -50,15 +48,15 @@ def _create_video(conn: Connection, video: NewVideo, *, new_members: list[NewMem
         if _insert_staff(conn,video.added,video.aid,item.mid,item.title) is None:
             logger.debug('Video staff relationship already exists: aid=%s, mid=%s',video.aid,item.mid)
     if first_record is not None:
-        append_video_records(conn,[first_record],run_id=run_id)
+        append_video_records(conn,[first_record])
     return stored_video
 
 def update_video_profile(aid: int, video_view: VideoView | None, code_error: int | None,
                          tags: str | None, members: list[NewMember], added: int) -> list[TddVideoLog] | None:
     """Return change logs (possibly empty), or None when the video is missing."""
-    return execute_write(_update_video_profile, aid, video_view, code_error, tags, members, added)
+    return write(_update_video_profile, aid, video_view, code_error, tags, members, added)
 
-def _insert_member(conn: Connection, member: NewMember, *, run_id: UUID | None = None) -> TddMember | None:
+def _insert_member(conn: Connection, member: NewMember) -> TddMember | None:
     row = conn.execute(
         'INSERT INTO tdd_member (added,mid,sex,name,face,sign,code) '
         'VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (mid) DO NOTHING '
@@ -72,7 +70,7 @@ def _insert_member(conn: Connection, member: NewMember, *, run_id: UUID | None =
 
 def update_member_profile(mid: int, card: MemberCard | None, code: int, added: int) -> list[TddMemberLog] | None:
     """Return change logs (possibly empty), or None when the member is missing."""
-    return execute_write(_update_member_profile, mid, card, code, added)
+    return write(_update_member_profile, mid, card, code, added)
 
 def _insert_prepared_members(prepared: list[NewMember], conn: Connection) -> None:
     for member in prepared:
@@ -80,8 +78,7 @@ def _insert_prepared_members(prepared: list[NewMember], conn: Connection) -> Non
 
 
 def _update_video_profile(conn: Connection, aid: int, video_view: VideoView | None, code_error: int | None,
-                          tags: str | None, members: list[NewMember], added: int, *,
-                          run_id: UUID | None = None) -> list[TddVideoLog] | None:
+                          tags: str | None, members: list[NewMember], added: int) -> list[TddVideoLog] | None:
     logs = []
     current = _query_video(conn,aid)
     if current is None:
@@ -146,12 +143,12 @@ def _update_video_profile(conn: Connection, aid: int, video_view: VideoView | No
         assignments = ', '.join('"' + field + '" = %s' for field in changes)
         conn.execute('UPDATE tdd_video SET ' + assignments + ' WHERE id = %s',
                         tuple(database_value(field,new) for field,(_,new) in changes.items()) + (current.id,))
-    _append_objects(conn,logs,run_id=run_id)
+    _append_objects(conn,logs)
     return logs
 
 
 def _update_member_profile(conn: Connection, mid: int, card: MemberCard | None, code: int,
-                           added: int, *, run_id: UUID | None = None) -> list[TddMemberLog] | None:
+                           added: int) -> list[TddMemberLog] | None:
     logs = []
     current = _query_member(conn,mid)
     if current is None:
@@ -176,7 +173,7 @@ def _update_member_profile(conn: Connection, mid: int, card: MemberCard | None, 
         assignments = ', '.join('"' + field + '" = %s' for field in changes)
         conn.execute('UPDATE tdd_member SET ' + assignments + ' WHERE id = %s',
                         tuple(database_value(field,new) for field,(_,new) in changes.items()) + (current.id,))
-    _append_objects(conn,logs,run_id=run_id)
+    _append_objects(conn,logs)
     return logs
 
 

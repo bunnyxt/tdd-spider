@@ -153,7 +153,7 @@ class PostgresApplicationTest(unittest.TestCase):
         self.expected_manifest({})
 
     def test_competing_member_insert_does_not_abort_video_creation(self):
-        from db.ingest import guard_write_transaction
+        from db.migration import before_write
         from db.profiles import _insert_member
         from task.task import _prepare_members
         # Prepare creation inputs while both profiles are absent.
@@ -166,14 +166,14 @@ class PostgresApplicationTest(unittest.TestCase):
         before = (tuple(video),tuple(new_members),tuple(staff),tuple(record))
         pid_queue = Queue()
 
-        def insert_and_report_pid(conn, member, *, run_id=None):
+        def insert_and_report_pid(conn, member):
             if member.mid == self.mid+1:
                 pid_queue.put(conn.info.backend_pid)
-            return _insert_member(conn,member,run_id=run_id)
+            return _insert_member(conn,member)
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             with engine.connection() as conn, conn.transaction():
-                guard_write_transaction(conn,self.run_id)
+                before_write(conn)
                 # Use the staff member so the competing transaction does not
                 # hold the owner's last-video lock before creation reaches it.
                 conn.execute('INSERT INTO tdd_member (added,mid,name,face,sex,sign,code) '
@@ -337,8 +337,8 @@ class PostgresApplicationTest(unittest.TestCase):
         self.service.get_video_view_trimmed.return_value = self.video_view(view=1000000)
         completed = []
 
-        def insert_then_fail(conn, aid, added, stat, *, run_id=None):
-            stored = _insert_sprint_video_record(conn,aid,added,stat,run_id=run_id)
+        def insert_then_fail(conn, aid, added, stat):
+            stored = _insert_sprint_video_record(conn,aid,added,stat)
             # Inspect this same transaction after all three real writes ran.
             self.assertEqual(conn.execute('SELECT count(*) FROM tdd_sprint_video_record WHERE id=%s',
                                           (stored.id,)).fetchone()[0],1)
@@ -348,7 +348,7 @@ class PostgresApplicationTest(unittest.TestCase):
             raise RuntimeError('injected failure after sprint status update')
 
         with mock.patch('db.sprint._insert_sprint_video_record',new=insert_then_fail), \
-                self.assertLogs('db.observation',level='ERROR'), \
+                self.assertLogs('db.transaction',level='ERROR'), \
                 self.assertRaisesRegex(RuntimeError,'after sprint status update'):
             add_sprint_video_record_via_video_view(self.aid,self.service)
 
@@ -467,16 +467,16 @@ class PostgresApplicationTest(unittest.TestCase):
         self.expected_manifest({'tdd_video_record': 3})
 
     def test_aggregate_thousand_row_commit_survives_failure_then_manual_retry(self):
-        from db.ingest import run_transaction
+        from db.migration import before_write
         calls = []
-        def fail_second(factory,callback,*,run_id):
-            calls.append(run_id)
+        def fail_second(conn):
+            calls.append(conn)
             if len(calls) == 2:
                 raise RuntimeError('injected second aggregate batch failure')
-            return run_transaction(factory,callback,run_id=run_id)
+            return before_write(conn)
         rows = [dict(added=ADDED,mid=self.mid+i,video_count=1,view=2147483648,
                      danmaku=0,reply=0,favorite=0,coin=0,share=0,like=0) for i in range(1001)]
-        with mock.patch('db.ingest.run_transaction',side_effect=fail_second), \
+        with mock.patch('db.transaction.migration.before_write',side_effect=fail_second), \
              self.assertLogs(LOG,level='CRITICAL'), self.assertRaisesRegex(RuntimeError,'second aggregate'):
             write_member_stats(rows,LOG)
         mids = [row['mid'] for row in rows]
@@ -485,7 +485,7 @@ class PostgresApplicationTest(unittest.TestCase):
         pending = list(Path(self.directory.name).glob('*.json'))
         self.assertEqual(len(pending),1)
         self.assertEqual(read_value('SELECT count(*) FROM tdd_member_total_stat_record WHERE mid=%s',(rows[-1]['mid'],)),0)
-        # The injected second failure occurred before its transaction started.
+        # The injected second failure occurred before any business write.
         # Submit just that verified-missing row; no generic replay is involved.
         self.assertEqual(write_member_stats(rows[-1:],LOG),1)
         self.assertTrue(pending[0].exists())

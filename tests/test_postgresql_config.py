@@ -15,7 +15,6 @@ from psycopg import pq
 from psycopg.conninfo import make_conninfo
 from conf.conf import get_db_args, get_db_pool_max_size
 from db.basic import Engine
-from db.ingest import _set_transaction_limits
 
 
 def option_settings(options):
@@ -85,23 +84,16 @@ class PostgreSQLConfigTest(unittest.TestCase):
                     Engine().pool
                 pool_class.assert_not_called()
 
-    def test_ini_timeouts_override_earlier_zero_options_at_both_application_sites(self):
+    def test_ini_timeouts_override_earlier_zero_connection_options(self):
         values = {'lock_timeout_ms': '1', 'statement_timeout_ms': '300000',
                   'transaction_timeout_ms': '120001',
                   'options': '-c search_path=custom -c statement_timeout=0 -c lock_timeout=0 '
                              '-c transaction_timeout=0 -c idle_in_transaction_session_timeout=0'}
         with self.configured(values):
             settings = option_settings(get_db_args()['options'])
-            conn = mock.Mock()
-            _set_transaction_limits(conn)
         self.assertEqual(settings, {
             'search_path': 'custom', 'lock_timeout': '1', 'statement_timeout': '300000',
             'transaction_timeout': '120001', 'idle_in_transaction_session_timeout': '60000'})
-        query, params = conn.execute.call_args.args
-        self.assertEqual(query, "SELECT set_config('lock_timeout',%s,true),"
-                                "set_config('statement_timeout',%s,true),"
-                                "set_config('transaction_timeout',%s,true)")
-        self.assertEqual(params, ['1ms', '300000ms', '120001ms'])
 
     def test_inherited_target_credentials_options_and_timeouts_do_not_override_ini(self):
         env = {'PGHOST': 'wrong.example', 'PGHOSTADDR': '192.0.2.1', 'PGPORT': '9999',
@@ -111,8 +103,6 @@ class PostgreSQLConfigTest(unittest.TestCase):
                'TDD_DB_STATEMENT_TIMEOUT_MS': '0', 'TDD_DB_TRANSACTION_TIMEOUT_MS': '0'}
         with self.configured(environment=env):
             args = get_db_args()
-            conn = mock.Mock()
-            _set_transaction_limits(conn)
             # An invalid SSL mode stops libpq before any socket is opened. Its
             # resolved connection info still reveals hidden environment fallback.
             probe = pq.PGconn.connect_start(make_conninfo(**{**args, 'sslmode': 'invalid-test-mode'}).encode())
@@ -126,7 +116,6 @@ class PostgreSQLConfigTest(unittest.TestCase):
         self.assertEqual(args['sslmode'], 'prefer')
         self.assertEqual(resolved['connect_timeout'], '10')
         self.assertEqual(option_settings(resolved['options'])['statement_timeout'], '60000')
-        self.assertEqual(conn.execute.call_args.args[1], ['10000ms', '60000ms', '120000ms'])
 
     def test_unconfigured_external_libpq_options_raise_instead_of_silently_applying(self):
         for variable in ('PGSERVICE', 'PGSSLROOTCERT', 'PGAPPNAME', 'PGREQUIREAUTH'):
@@ -149,16 +138,12 @@ class PostgreSQLConfigTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, field):
                     get_db_args()
 
-    def test_invalid_timeouts_fail_before_connection_or_transaction_sql(self):
+    def test_invalid_timeouts_fail_before_connecting(self):
         for name in ('lock_timeout', 'statement_timeout', 'transaction_timeout'):
             for value in ('0', '-1', '300001', '1.5', 'invalid', ''):
                 with self.subTest(name=name, value=value), self.configured({name + '_ms': value}):
                     with self.assertRaises(ValueError):
                         get_db_args()
-                    conn = mock.Mock()
-                    with self.assertRaises(ValueError):
-                        _set_transaction_limits(conn)
-                    conn.execute.assert_not_called()
         for value in ('0', '-1', '301'):
             with self.configured({'connect_timeout': value}), self.assertRaises(ValueError):
                 get_db_args()

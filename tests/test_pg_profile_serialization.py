@@ -19,7 +19,7 @@ from db.queries import query_video_via_aid, query_member_via_mid
 from db.values import database_value
 from test_pg_application import read_rows, read_value
 from db.basic import engine
-from db.ingest import guard_write_transaction
+from db.migration import before_write
 from db.profiles import _update_video_profile, _update_member_profile
 from service import MemberCard
 from test_endpoint_get_video_view import expected_result
@@ -43,7 +43,7 @@ class PostgresProfileSerializationTest(unittest.TestCase):
         self.video_view = expected_result()._replace(aid=self.aid,bvid='BV'+a2b(self.aid),staff=[],
                     owner=expected_result().owner._replace(mid=self.mid))
         with engine.connection() as connection, connection.transaction():
-            guard_write_transaction(connection,self.run_id)
+            before_write(connection)
             member = TddMember(added=1,mid=self.mid,name='baseline',face='',sex='',sign='',code=0)
             values = {field:getattr(self.video_view,field) for field in
                       ('videos','tid','tname','copyright','pic','title','pubdate','desc','state','attribute','forward')}
@@ -65,14 +65,14 @@ class PostgresProfileSerializationTest(unittest.TestCase):
         def waiting_writer():
             with engine.connection() as connection:
                 with connection.transaction():
-                    guard_write_transaction(connection,self.run_id)
+                    before_write(connection)
                     pid_queue.put(connection.info.backend_pid)
-                    return function(connection,**second,run_id=self.run_id)
+                    return function(connection,**second)
         with ThreadPoolExecutor(max_workers=1) as executor:
             with engine.connection() as connection:
                 with connection.transaction():
-                    guard_write_transaction(connection,self.run_id)
-                    function(connection,**first,run_id=self.run_id)
+                    before_write(connection)
+                    function(connection,**first)
                     future = executor.submit(waiting_writer)
                     waiting_pid = pid_queue.get(timeout=5)
                     deadline = time.monotonic()+5
@@ -127,13 +127,13 @@ class PostgresProfileSerializationTest(unittest.TestCase):
             title='updated',staff=[VideoViewStaffItem(mid,'producer','','')])
         service.get_video_tags.return_value = VideoTags([])
 
-        def insert_and_report_pid(conn, member, *, run_id=None):
+        def insert_and_report_pid(conn, member):
             pid_queue.put(conn.info.backend_pid)
-            return _insert_member(conn,member,run_id=run_id)
+            return _insert_member(conn,member)
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             with engine.connection() as conn, conn.transaction():
-                guard_write_transaction(conn,self.run_id)
+                before_write(conn)
                 conn.execute('INSERT INTO tdd_member (added,mid,name,face,sex,sign,code) '
                              'VALUES (%s,%s,%s,%s,%s,%s,%s)',
                              (database_value('added',1),mid,'first','','','keep',0))

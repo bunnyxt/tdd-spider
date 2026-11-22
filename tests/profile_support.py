@@ -40,7 +40,7 @@ class ProfileConnection:
         self.db.commit()
         return obj
 
-    def append(self,conn,objects,*,run_id=None):
+    def append(self,conn,objects):
         for obj in objects:
             fields = [field for field in obj.fields if field != 'id']
             row = self.execute('INSERT INTO '+obj.table+' ('+','.join('"'+f+'"' for f in fields)+') VALUES ('+
@@ -48,12 +48,12 @@ class ProfileConnection:
             obj.id = row[0]
         return [(obj.id,) for obj in objects]
 
-    def execute_write(self,function,*args,**kwargs):
+    def write(self,function,*args,**kwargs):
         with self.transaction(), mock.patch('db.profiles._append_objects',side_effect=self.append), \
                 mock.patch('db.profiles.append_video_records',side_effect=self.append_video_records):
-            return function(self,*args,run_id=None,**kwargs)
+            return function(self,*args,**kwargs)
 
-    def append_video_records(self,conn,records,*,run_id=None):
+    def append_video_records(self,conn,records):
         return [self.execute(
             'INSERT INTO tdd_video_record (' + ','.join('"'+f+'"' for f in VIDEO_RECORD_COLUMNS) +
             ') VALUES (' + ','.join(['%s']*len(VIDEO_RECORD_COLUMNS)) + ') RETURNING aid,added,id',

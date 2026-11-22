@@ -59,7 +59,7 @@ class FakeConnection:
 
 
 def use_connection(connection):
-    return mock.patch('db.observation.engine.connection', side_effect=lambda: nullcontext(connection))
+    return mock.patch('db.transaction.engine.connection', side_effect=lambda: nullcontext(connection))
 
 
 @unittest.skipUnless(_DEPS, 'db dependencies unavailable')

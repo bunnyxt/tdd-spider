@@ -1,19 +1,18 @@
 """Committed writes for the hourly collector's derived video fields."""
 from __future__ import annotations
 from collections.abc import Mapping, Sequence
-from uuid import UUID
 
 from psycopg import Connection
 
-from .observation import execute_write
+from .transaction import write
 from .values import timestamp
 
 
 def update_video_recent(now_ts: int) -> None:
-    return execute_write(_update_video_recent, now_ts)
+    return write(_update_video_recent, now_ts)
 
 
-def _update_video_recent(conn: Connection, now_ts: int, *, run_id: UUID | None = None) -> None:
+def _update_video_recent(conn: Connection, now_ts: int) -> None:
     last_1d_ts = timestamp(now_ts - 24 * 60 * 60)
     last_7d_ts = timestamp(now_ts - 7 * 24 * 60 * 60)
     conn.execute('update tdd_video set recent = 0 where added < %s', (last_7d_ts,))
@@ -24,11 +23,10 @@ def _update_video_recent(conn: Connection, now_ts: int, *, run_id: UUID | None =
 
 def update_video_activity(desired: Mapping[int, Sequence[int]]) -> int:
     # Even an empty input must enter the guarded transaction before any DB access.
-    return execute_write(_update_video_activity, desired)
+    return write(_update_video_activity, desired)
 
 
-def _update_video_activity(conn: Connection, desired: Mapping[int, Sequence[int]], *,
-                           run_id: UUID | None = None) -> int:
+def _update_video_activity(conn: Connection, desired: Mapping[int, Sequence[int]]) -> int:
     current = dict(conn.execute('select aid, activity from tdd_video where activity != 0').fetchall())
     changed = 0
     for activity, aids in sorted(desired.items()):
@@ -41,10 +39,10 @@ def _update_video_activity(conn: Connection, desired: Mapping[int, Sequence[int]
 
 
 def update_video_freq() -> None:
-    return execute_write(_update_video_freq)
+    return write(_update_video_freq)
 
 
-def _update_video_freq(conn: Connection, *, run_id: UUID | None = None) -> None:
+def _update_video_freq(conn: Connection) -> None:
     conn.execute('update tdd_video set freq = 0')
     conn.execute('update tdd_video set freq = 1 where activity = 1')
     conn.execute('update tdd_video set freq = 2 where activity = 2 OR recent = 1')
