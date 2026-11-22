@@ -59,17 +59,16 @@ class AbnormalChangeWriteTest(unittest.TestCase):
                          'unexpected increase detected, speed now of prop view is 18.00, > 200%')
         self.assertIsNone(row[28])
 
-    def test_actual_hourly_analysis_propagates_failed_insert_and_preserves_input(self):
+    def test_actual_hourly_analysis_warns_on_failed_insert_and_preserves_input(self):
         records = self.observations()
         conn, cursors = connection([[]])
         error = RuntimeError('insert failed')
         cursors[0].executemany.side_effect = error
-        with tempfile.TemporaryDirectory() as directory, self.assertLogs(level='ERROR'):
-            with self.assertRaises(RuntimeError) as caught:
-                self.run_analysis(conn, records, directory)
+        with tempfile.TemporaryDirectory() as directory, self.assertLogs(level='WARNING') as logs:
+            self.run_analysis(conn, records, directory)
             path, = Path(directory).glob('*.json')
             saved = json.loads(path.read_text())
-        self.assertIs(caught.exception, error)
+        self.assertTrue(any('Fail to add abnormal change of video aid 7' in entry for entry in logs.output))
         self.assertEqual(saved['operation'], '_insert_video_record_abnormal_change')
         self.assertEqual(saved['payload']['this_record']['values'], records[-1]._asdict())
         self.assertEqual(saved['payload']['last_record']['values'], records[-2]._asdict())

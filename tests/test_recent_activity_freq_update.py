@@ -103,10 +103,9 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
                                 str(uuid4()) if control[0] == 'trial' else ''}):
                         session = FakeConnection(control=control)
                         runner = s51.RecentActivityFreqUpdateRunner('2026-09-13 04:00', records)
-                        with self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
-                            with self.assertRaisesRegex(RuntimeError, 'does not permit'):
-                                with use_connection(session):
-                                    getattr(runner, method)()
+                        with self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'), \
+                                use_connection(session):
+                            getattr(runner, method)()
                         self.assertEqual(session.statements, [])
                         self.assertEqual((session.commits, session.rollbacks), (0, 1))
 
@@ -139,35 +138,71 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
         runner = s51.RecentActivityFreqUpdateRunner('2026-09-13 05:00', [])
         with use_connection(session), \
                 self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
-            with self.assertRaisesRegex(RuntimeError, 'does not permit'):
-                runner.process()
+            runner.process()
         self.assertEqual(len(session.statements), 3)  # recent committed; freq was never written.
         self.assertTrue(all('set recent' in sql for sql, _ in session.statements))
         self.assertEqual((session.commits, session.rollbacks), (1, 1))
 
-    def test_missing_snapshot_fails(self):
+    def test_missing_snapshot_keeps_activity_and_continues_freq(self):
+        runner = s51.RecentActivityFreqUpdateRunner('2026-09-13 04:00', [_rec(1, 99999)])
         session = FakeConnection(current={1: 2})
-        with self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
-            with self.assertRaises(FileNotFoundError):
-                self._update_activity([_rec(1, 99999)], session)
+        with use_connection(session), \
+                mock.patch.object(s51, 'update_video_recent') as recent, \
+                mock.patch.object(s51, 'update_video_freq') as freq, \
+                self.assertLogs('RecentActivityFreqUpdateRunner', level='WARNING') as logs:
+            runner.process()
+        recent.assert_called_once()
+        freq.assert_called_once()
         self.assertEqual(session.statements, [])
+        self.assertEqual(runner.metrics, {'snapshot_missing': 1})
+        self.assertTrue(any('not found' in entry for entry in logs.output))
 
-    def test_snapshot_header_date_and_corruption_fail(self):
+    def test_bad_snapshot_header_and_rows_warn_but_keep_good_rows_and_freq(self):
         path = s51.full_scan_snapshot_path('2026-09-06 04:00')
-        for content in ('aid,added,view\n',
-                        'added,aid,bvid,view,danmaku,reply,favorite,coin,share,like\n1,1,BV1,100,0,0,0,0,0,0\n',
-                        'added,aid,bvid,view,danmaku,reply,favorite,coin,share,like\n1788638400,1,BV1,100,0\n'):
-            with self.subTest(content=content):
-                with gzip.open(path, 'wt') as stream:
-                    stream.write(content)
-                with self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
-                    with self.assertRaises(ValueError):
-                        self._update_activity([_rec(1, 99999)], FakeConnection())
+        with gzip.open(path, 'wt') as stream:
+            stream.write('unexpected,header\n'
+                         '1788638400,1,BV1,100,0,0,0,0,0,0\n'
+                         '1788638401,2,BV2,invalid,0,0,0,0,0,0\n'
+                         '1788638401,3,BV3,100,0\n')
+        session = FakeConnection()
+        runner = s51.RecentActivityFreqUpdateRunner('2026-09-13 04:00',
+                                                   [_rec(1, 99999), _rec(2, 99999)])
+        with use_connection(session), \
+                mock.patch.object(s51, 'update_video_recent'), \
+                mock.patch.object(s51, 'update_video_freq') as freq, \
+                self.assertLogs('RecentActivityFreqUpdateRunner', level='WARNING'):
+            runner.process()
+        updates = [params for sql, params in session.statements if sql.startswith('update')]
+        self.assertEqual(updates, [(2, [1])])
+        self.assertEqual(runner.metrics['bad_header'], 1)
+        self.assertEqual(runner.metrics['bad_rows'], 2)
+        self.assertEqual(runner.failure_count, 0)
+        freq.assert_called_once()
+
+    def test_unreadable_snapshot_counts_failure_without_writing_and_continues_freq(self):
+        path = s51.full_scan_snapshot_path('2026-09-06 04:00')
         with open(path, 'wb') as stream:
             stream.write(b'not gzip')
-        with self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
-            with self.assertRaises(gzip.BadGzipFile):
-                self._update_activity([_rec(1, 99999)], FakeConnection())
+        session = FakeConnection()
+        runner = s51.RecentActivityFreqUpdateRunner('2026-09-13 04:00', [_rec(1, 99999)])
+        with use_connection(session), \
+                mock.patch.object(s51, 'update_video_recent'), \
+                mock.patch.object(s51, 'update_video_freq') as freq, \
+                self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
+            runner.process()
+        self.assertEqual(session.statements, [])
+        self.assertEqual(runner.metrics['activity_update_failed'], 1)
+        self.assertEqual(runner.failure_count, 1)
+        freq.assert_called_once()
+
+    def test_activity_accepts_delayed_snapshot_and_ignores_unused_metric_values(self):
+        path = s51.full_scan_snapshot_path('2026-09-06 04:00')
+        with gzip.open(path, 'wt') as stream:
+            stream.write('added,aid,bvid,view,danmaku,reply,favorite,coin,share,like\n'
+                         '1788645600,1,BV1,100,unused,,unknown,NULL,?,none\n')
+        runner, updates = self._update_activity([_rec(1, 6100)], FakeConnection())
+        self.assertEqual(updates, [(2, [1])])
+        self.assertEqual(runner.metrics['activity_paired'], 1)
 
     def test_valid_snapshot_with_no_changed_rows_succeeds(self):
         self._last_week([(1, 100)])
@@ -190,36 +225,81 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
                                            FakeConnection(current={1: 2}))
         self.assertEqual([len(aids) for _, aids in updates], [1000, 1])
 
-    def test_db_failure_rolls_back(self):
+    def test_db_failure_rolls_back_without_raising(self):
         self._last_week([(1, 0)])
         session = FakeConnection(fail=True)
         with self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
-            with self.assertRaisesRegex(RuntimeError, 'db down'):
-                self._update_activity([_rec(1, 7000)], session)
-        runner = s51.RecentActivityFreqUpdateRunner('2026-09-13 04:00', [])
-        self.assertEqual((session.commits, session.rollbacks, runner.metrics), (0, 1, {}))
+            runner, updates = self._update_activity([_rec(1, 7000)], session)
+        self.assertEqual(updates, [])
+        self.assertEqual((session.commits, session.rollbacks), (0, 1))
+        self.assertEqual(runner.metrics['activity_update_failed'], 1)
+        self.assertEqual(runner.failure_count, 1)
 
-    def test_unconfirmed_writer_prevents_analysis(self):
+    def test_derived_failure_does_not_prevent_later_updates(self):
+        self._last_week([(1, 0)])
+        for failed_phase in ('recent', 'activity'):
+            with self.subTest(failed_phase=failed_phase):
+                runner = s51.RecentActivityFreqUpdateRunner('2026-09-13 04:00', [_rec(1, 9000)])
+                with mock.patch.object(s51, 'update_video_recent', side_effect=(
+                        RuntimeError('recent failed') if failed_phase == 'recent' else None)) as recent, \
+                        mock.patch.object(s51, 'update_video_activity', return_value=1, side_effect=(
+                            RuntimeError('activity failed') if failed_phase == 'activity' else None)) as activity, \
+                        mock.patch.object(s51, 'update_video_freq') as freq, \
+                        self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
+                    runner.run()
+                recent.assert_called_once()
+                activity.assert_called_once()
+                freq.assert_called_once()
+                self.assertIsNone(runner.error)
+
+    def test_partial_acquisition_keeps_confirmed_records_for_all_downstream_stages(self):
         from job import JobStat
-        fetch, writer, updater = JobStat(), JobStat(), JobStat()
-        fetch.condition['success'] = 3
-        writer.total_count = 3
-        writer.condition.update(persisted=2, batch_insert_fail=1)
-        runner = s51.VideoRecordAcquisitionJob('2026-09-13 04:00', s51.Queue())
-        with mock.patch.object(s51, 'get_need_insert_aid_list', return_value=[1, 2, 3]), \
-                mock.patch.object(s51, 'fetch_and_batch_insert_records', return_value=(fetch, writer, updater, None)):
-            runner.run()
-        self.assertIsInstance(runner.error, RuntimeError)
-        with mock.patch.object(s51, 'VideoRecordAcquisitionJob', return_value=runner), \
-                mock.patch.object(runner, 'start'), mock.patch.object(runner, 'join'), \
-                mock.patch.object(s51, 'RecordsSaveToFileRunner') as save:
-            with self.assertRaisesRegex(RuntimeError, 'downstream analysis was not started'):
-                s51.run_hourly_video_record_add('2026-09-13 04:00')
-        save.assert_not_called()
+        for fetched, persisted, failed, dropped in ((3, 2, 1, 0), (3, 2, 0, 0), (2, 2, 0, 1)):
+            with self.subTest(fetched=fetched, persisted=persisted, failed=failed, dropped=dropped):
+                fetch, writer, updater = JobStat(), JobStat(), JobStat()
+                fetch.condition.update(success=fetched, record_dropped_queue_full=dropped)
+                writer.total_count = fetched
+                writer.condition.update(persisted=persisted, batch_insert_fail=failed)
+                records = [_rec(1, 100), _rec(2, 200)]
+                queue = s51.Queue()
+                for record in records:
+                    queue.put(record)
+                runner = s51.VideoRecordAcquisitionJob('2026-09-13 04:00', queue)
+                with mock.patch.object(s51, 'get_need_insert_aid_list', return_value=[1, 2, 3]), \
+                        mock.patch.object(s51, 'fetch_and_batch_insert_records',
+                                          return_value=(fetch, writer, updater, None)), \
+                        self.assertLogs(runner.logger, level='ERROR'):
+                    runner.run()
+                self.assertIsNone(runner.error)
+                def acquisition(time_task, downstream):
+                    for record in records:
+                        downstream.put(record)
+                    return runner
+                with mock.patch.object(s51, 'VideoRecordAcquisitionJob', side_effect=acquisition), \
+                        mock.patch.object(runner, 'start'), mock.patch.object(runner, 'join'), \
+                        mock.patch.object(s51, 'RecordsSaveToFileRunner',
+                                          return_value=mock.Mock(error=None, metrics={}, failure_count=0)) as save, \
+                        mock.patch.object(s51, 'RecentRecordsAnalystRunner',
+                                          return_value=mock.Mock(error=None, metrics={}, failure_count=0)) as analyze, \
+                        mock.patch.object(s51, 'RecentActivityFreqUpdateRunner',
+                                          return_value=mock.Mock(error=None, metrics={}, failure_count=0)) as activity:
+                    recorder = mock.Mock()
+                    with self.assertRaisesRegex(RuntimeError, 'after downstream completed'):
+                        s51.run_hourly_video_record_add('2026-09-13 04:00', recorder)
+                for name, count in {'db_write_failed': failed, 'queue_full_dropped': dropped,
+                                    'persisted_success_mismatch': abs(persisted - fetched)}.items():
+                    recorder.add_metric.assert_any_call('record-acquisition', name, count, unit='count')
+                save.assert_called_once_with(records, '2026-09-13 04:00')
+                analyze.assert_called_once_with(records, '2026-09-13 04:00')
+                activity.assert_called_once_with('2026-09-13 04:00', records)
+                for stage in (save, analyze, activity):
+                    stage.return_value.start.assert_called_once()
+                    stage.return_value.join.assert_called_once()
 
-    def test_thread_failure_is_visible_to_caller(self):
+    def test_unhandled_thread_failure_is_visible_to_caller(self):
         runner = s51.RecentActivityFreqUpdateRunner('2026-09-13 05:00', [])
-        with use_connection(FakeConnection(fail=True)):
+        with mock.patch.object(runner, 'process', side_effect=RuntimeError('unexpected failure')), \
+                self.assertLogs('RecentActivityFreqUpdateRunner', level='ERROR'):
             runner.start()
             runner.join()
         self.assertIsInstance(runner.error, RuntimeError)
@@ -239,6 +319,7 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
     def test_metrics_land_in_run_record(self):
         class FakeAcquisition:
             api_stats = None
+            failure_counts = {}
 
             def __init__(self, time_task, record_queue):
                 record_queue.put(_rec(1, 9000))
@@ -254,6 +335,9 @@ class RecentActivityFreqUpdateRunnerTest(unittest.TestCase):
         class NoopRunner(threading.Thread):
             def __init__(self, *args):
                 super().__init__()
+                self.error = None
+                self.failure_count = 0
+                self.metrics = {}
 
         self._last_week([(1, 0)])
         recorder = s51.RunRecorder.start('51_hourly-video-record-add', db_path='run-records.sqlite3')

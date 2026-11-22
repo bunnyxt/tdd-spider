@@ -195,6 +195,18 @@ valid same-second records. Confirmed batches alone continue to downstream
 processing; manual database repair does not recreate an interrupted run's CSV,
 snapshots or derived analysis.
 
+In `51_`, a failed batch never blocks confirmed batches from reaching CSV,
+the daily snapshot and analysis. Before downstream processing, keep the earliest
+`added` record per `bvid`, as before; this does not remove database history.
+Write failures and queue drops are counted and reported as a failed run only
+after all downstream stages finish. Each derived-field update still uses its
+own guarded transaction, and failure of one update does not prevent the next.
+A missing seven-day snapshot skips activity with a warning; malformed CSV rows
+are counted and skipped. Neither case prevents frequency updates or fails the
+run. Abnormal-change write failures warn with the aid and continue to the next
+video; snapshot-save and other stage failures remain visible in logs and run
+metrics without cancelling independent work.
+
 Earlier versions used `data/replay/`, `TDD_REPLAY_DIR` and `python -m db.replay`.
 That replay command is no longer provided. Stop old collectors before upgrading
 and inspect any old files manually; do not automatically delete, execute or

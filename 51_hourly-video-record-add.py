@@ -206,6 +206,7 @@ class VideoRecordAcquisitionJob(Job):
         # set by process(); stays None if it raised
         self.api_stats = None
         self.error = None
+        self.failure_counts = {}
 
     def run(self):
         try:
@@ -229,10 +230,20 @@ class VideoRecordAcquisitionJob(Job):
             duration_limit_s=60 * 40,  # 40 minutes, caps the 04:00 full scan
             update_job_num=10, update_label=self.UPDATE_LABEL)
 
-        if (self.writer_stat.condition['batch_insert_fail']
-                or self.writer_stat.condition['persisted'] != self.fetch_stat.condition['success']
-                or self.fetch_stat.condition['record_dropped_queue_full']):
-            raise RuntimeError('Unconfirmed fetched records; check failure log and reconcile database writes before analysis')
+        self.failure_counts = {
+            'db_write_failed': self.writer_stat.condition['batch_insert_fail'],
+            'queue_full_dropped': self.fetch_stat.condition['record_dropped_queue_full'],
+            'persisted_success_mismatch': abs(self.writer_stat.condition['persisted']
+                                             - self.fetch_stat.condition['success']),
+        }
+        if any(self.failure_counts.values()):
+            self.logger.error(
+                'Some fetched records were not confirmed: fetched=%d, persisted=%d, '
+                'db_write_unconfirmed=%d, queue_dropped=%d. '
+                'Continue downstream with confirmed records; reconcile failed writes separately.',
+                self.fetch_stat.condition['success'], self.writer_stat.condition['persisted'],
+                self.writer_stat.condition['batch_insert_fail'],
+                self.fetch_stat.condition['record_dropped_queue_full'])
 
         self.logger.info('Finish add need insert aid list!')
 
@@ -260,16 +271,20 @@ def full_scan_snapshot_path(time_task: str) -> str:
 
 
 class CheckedRunner(Thread):
-    """Keep thread failures visible to the caller that records the run result."""
+    """Report unhandled stage failures after all independent stages have run."""
     def __init__(self):
         super().__init__()
         self.error = None
+        self.metrics = {}
+        self.failure_count = 0
 
     def run(self):
         try:
             self.process()
         except Exception as error:
             self.error = error
+            self.failure_count += 1
+            self.metrics['unhandled_error'] = 1
             self.logger.exception('Downstream stage failed')
 
 
@@ -314,8 +329,9 @@ class RecordsSaveToFileRunner(CheckedRunner):
                     if name < cutoff:  # names start with the time task, so string order is time order
                         os.remove(os.path.join(FULL_SCAN_SNAPSHOT_DIR, name))
             except Exception as e:
+                self.failure_count += 1
+                self.metrics['snapshot_save_failed'] = 1
                 self.logger.error('Fail to save full scan snapshot. Exception caught. Detail: %s' % e)
-                raise
 
         # TODO ugly design, should be separated into another class
         if self.time_label == '23:00':
@@ -485,7 +501,14 @@ class RecentRecordsAnalystRunner(CheckedRunner):
 
         # get video aid pubdate dict, since the following check process requires
         self.logger.info('Now get pubdate of all videos from db...')
-        aid_pubdate_list = query_video_pubdate_all()
+        try:
+            aid_pubdate_list = query_video_pubdate_all()
+        except Exception as e:
+            self.failure_count += 1
+            self.metrics['pubdate_read_failed'] = 1
+            self.logger.error('Fail to get pubdate of all videos from db! '
+                              'Skip recent-record analysis. Detail: %s', e)
+            return
         if not aid_pubdate_list:
             self.logger.error('Fail to get pubdate of all videos from db!')
             return
@@ -610,9 +633,10 @@ class RecentRecordsAnalystRunner(CheckedRunner):
                 for change in record_abnormal_change_list:
                     insert_video_record_abnormal_change(**change)
             except Exception as e:
-                self.logger.error('Fail to add abnormal change of video aid %d to db. Exception caught. Detail: %s' % (
+                self.failure_count += 1
+                self.metrics['abnormal_write_failed'] = self.metrics.get('abnormal_write_failed', 0) + 1
+                self.logger.warning('Fail to add abnormal change of video aid %d to db. Exception caught. Detail: %s' % (
                     aid, e))
-                raise
 
             if idx % 10000 == 0:
                 self.logger.info('%d / %d done' %
@@ -622,6 +646,8 @@ class RecentRecordsAnalystRunner(CheckedRunner):
 
         self.logger.info('Finish analyzing recent records! %s' %
                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
+        self.logger.info('Abnormal-change writes failed for %d video(s).',
+                         self.metrics.get('abnormal_write_failed', 0))
 
 
 class RecentActivityFreqUpdateRunner(CheckedRunner):
@@ -639,39 +665,41 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
             update_video_recent(get_ts_s())
             self.logger.info('Finish update recent field!')
         except Exception as e:
+            self.failure_count += 1
+            self.metrics['recent_update_failed'] = 1
             self.logger.error('Fail to update recent field. Exception caught. Detail: %s' % e)
-            raise
 
     def _update_activity(self, active_threshold=1000, hot_threshold=5000):
         self.logger.info('Now start update activity field...')
         try:
             last_path = full_scan_snapshot_path(time_task_days_before(self.time_task, 7))
             if not os.path.isfile(last_path):
-                raise FileNotFoundError('Required seven-day snapshot not found: ' + last_path)
+                self.metrics['snapshot_missing'] = 1
+                self.logger.warning('Skip update activity field: %s not found.' % last_path)
+                return
 
-            expected_start = int(datetime.datetime.strptime(time_task_days_before(self.time_task, 7),
-                                '%Y-%m-%d %H:%M').replace(
-                                    tzinfo=datetime.timezone(datetime.timedelta(hours=8))).timestamp())
-
-            this_views = {r.aid: r.view for r in sorted(self.records, key=lambda r: r.added)
+            this_views = {r.aid: r.view for r in self.records
                           if r.view >= 0}  # -1 is '--' from the api
 
             # only videos in both scans get a new activity, and only changed ones are written
             desired = defaultdict(list)  # Pair/validate before opening the write transaction.
             paired = hot = active = 0
             with gzip.open(last_path, 'rt') as f:
-                if tuple(next(f).strip().split(',')) != SNAPSHOT_FIELDS:
-                    raise ValueError('Invalid full-scan snapshot header')
+                if tuple(next(f, '').strip().split(',')) != SNAPSHOT_FIELDS:
+                    self.metrics['bad_header'] = 1
+                    self.logger.warning('Unexpected snapshot header in %s; '
+                                        'continue reading the existing positional CSV format.', last_path)
                 for line_number, line in enumerate(f, 2):
-                    fields = line.rstrip('\r\n').split(',')
-                    if len(fields) != len(SNAPSHOT_FIELDS):
-                        raise ValueError('Invalid snapshot field count at line ' + str(line_number))
-                    added = int(fields[0])
-                    if not expected_start <= added < expected_start + 60 * 60:
-                        raise ValueError('Snapshot observation is outside its expected hour at line ' + str(line_number))
-                    for field in fields[3:]:
-                        int(field)
-                    aid, last_view = int(fields[1]), int(fields[3])
+                    try:
+                        fields = line.rstrip('\r\n').split(',')
+                        if len(fields) != len(SNAPSHOT_FIELDS):
+                            raise ValueError('Invalid snapshot field count')
+                        aid, last_view = int(fields[1]), int(fields[3])
+                    except (ValueError, IndexError) as e:
+                        self.metrics['bad_rows'] = self.metrics.get('bad_rows', 0) + 1
+                        self.logger.warning('Skip invalid snapshot row: file=%s, line=%d, error=%s',
+                                            last_path, line_number, e)
+                        continue
                     view = this_views.pop(aid, None)  # pop: a repeated row pairs only once
                     if view is None or last_view < 0:
                         continue
@@ -688,8 +716,9 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
             self.logger.info('Finish update activity field! %d paired, %d hot, %d active, %d changed.' % (
                 paired, hot, active, changed))
         except Exception as e:
+            self.failure_count += 1
+            self.metrics['activity_update_failed'] = 1
             self.logger.error('Fail to update activity field. Exception caught. Detail: %s' % e)
-            raise
 
     def _update_freq(self):
         self.logger.info('Now start update freq field...')
@@ -697,8 +726,9 @@ class RecentActivityFreqUpdateRunner(CheckedRunner):
             update_video_freq()
             self.logger.info('Finish update freq field!')
         except Exception as e:
+            self.failure_count += 1
+            self.metrics['freq_update_failed'] = 1
             self.logger.error('Fail to update freq field. Exception caught. Detail: %s' % e)
-            raise
 
     def process(self):
         self.logger.info(
@@ -731,6 +761,8 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
         for scope, stat in acquisition_runner.stats().items():
             recorder.add_job_stat_metrics(scope, stat)
         recorder.add_api_stat_metrics(acquisition_runner.api_stats)
+        for name, value in acquisition_runner.failure_counts.items():
+            recorder.add_metric('record-acquisition', name, value, unit='count')
 
     if getattr(acquisition_runner, 'error', None) is not None:
         raise RuntimeError('Acquisition failed; downstream analysis was not started') from acquisition_runner.error
@@ -739,19 +771,28 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     while not records_queue.empty():
         records.append(records_queue.get())
 
-    # Retain every confirmed observation, including multiple rows for one video.
+    # Keep the original downstream snapshot rule; all inserted DB rows remain.
     logger.info('Now check duplicate records...')
     duplicate_records_item_list = list(
         filter(lambda item: item[1] > 1, Counter(
-            map(lambda r: r.aid, records)).items())
-    )  # aid -> count of records of this video
+            map(lambda r: r.bvid, records)).items())
+    )  # bvid -> count of records of this video
     if len(duplicate_records_item_list) == 0:
         logger.info('No duplicate records detected!')
     else:
         logger.warning(f'Duplicate records detected! '
                        f'{len(duplicate_records_item_list)} videos with '
                        f'{sum(map(lambda item: item[1], duplicate_records_item_list))} records in total.')
-        logger.warning('All confirmed observations will be retained in the downstream files.')
+        removed_records_count = 0
+        for bvid, count in duplicate_records_item_list:
+            logger.warning(f'Video bvid {bvid} have total {count} records.')
+            for record in sorted(
+                    filter(lambda r: r.bvid == bvid, records),
+                    key=lambda r: r.added)[1:]:
+                records.remove(record)
+                removed_records_count += 1
+        logger.warning(
+            f'Finish remove duplicate records! Total {removed_records_count} duplicate records removed.')
 
     logger.info(
         f'Finish upstream data acquisition pipelines! {len(records)} records received')
@@ -759,26 +800,28 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     # downstream data analysis pipeline
     logger.info('Now start downstream data analysis pipelines...')
     activity_freq_runner = RecentActivityFreqUpdateRunner(time_task, records)
-    data_analysis_pipeline_runner_list = [
-        RecordsSaveToFileRunner(records, time_task),
-        RecentRecordsAnalystRunner(records, time_task),
-        activity_freq_runner,
+    stages = [
+        ('records-save-to-file', RecordsSaveToFileRunner(records, time_task)),
+        ('recent-records-analysis', RecentRecordsAnalystRunner(records, time_task)),
+        ('recent-activity-freq-update', activity_freq_runner),
     ]
+    data_analysis_pipeline_runner_list = [runner for _, runner in stages]
     for runner in data_analysis_pipeline_runner_list:
         runner.start()
     for runner in data_analysis_pipeline_runner_list:
         runner.join()
 
-    failures = [runner for runner in data_analysis_pipeline_runner_list
-                if getattr(runner, 'error', None) is not None]
-    if failures:
-        raise RuntimeError('Downstream stage failed: ' + ', '.join(type(runner).__name__ for runner in failures)) from failures[0].error
-
     if recorder is not None:
-        for name, value in activity_freq_runner.metrics.items():
-            recorder.add_metric('recent-activity-freq-update', name, value, unit='count')
+        for scope, runner in stages:
+            for name, value in runner.metrics.items():
+                recorder.add_metric(scope, name, value, unit='count')
 
+    failures = [runner for runner in data_analysis_pipeline_runner_list
+                if runner.failure_count or runner.error is not None]
     logger.info('Finish downstream data analysis pipelines!')
+    if any(acquisition_runner.failure_counts.values()) or failures:
+        raise RuntimeError('Hourly run has failures after downstream completed: acquisition=%s; stages=%s' % (
+            acquisition_runner.failure_counts, ', '.join(type(runner).__name__ for runner in failures)))
     del data_analysis_pipeline_runner_list  # release memory
 
 
