@@ -9,7 +9,7 @@ from db import TddVideo, TddMember, TddVideoLog, TddMemberLog, TddSprintVideoRec
 from db.ingest import HistoryKey
 from db.queries import query_video_via_aid, query_member_via_mid
 from db.write import insert_video_records, insert_member_follower_records
-from db.profiles import create_video, update_video_profile, insert_member, update_member_profile, ensure_members
+from db.profiles import create_video, update_video_profile, insert_member, update_member_profile
 from db.sprint import insert_sprint_video_record
 from db.values import clean_text
 from util import get_ts_s, a2b
@@ -111,9 +111,6 @@ def add_video(aid: int, service: Service, test_exist: bool = True,
     if test_exist and query_video_via_aid(aid) is not None:
         raise AlreadyExistError(table='tdd_video',params={'aid':aid})
     video_view = service.get_video_view({'aid':aid})
-    if video_view.title is None:
-        logger.warning('Reject new video with null title: aid=%s',aid)
-        raise ValueError('New video title must not be null')
     added = get_ts_s()
     tags = _get_video_tags_str(aid,service)
     staff = video_view.staff or []
@@ -163,12 +160,6 @@ def update_video(aid: int, service: Service,
     if logs is None:
         raise NotExistError(table='tdd_video',params={'aid':aid})
     return logs
-
-
-
-def ensure_video_member(aid: int, mid: int, service: Service) -> list[TddMember]:
-    prepared = _prepare_members(aid,[mid],service)
-    return ensure_members(list(prepared.values()))
 
 
 

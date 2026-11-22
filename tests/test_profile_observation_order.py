@@ -4,7 +4,7 @@ from unittest import mock
 from db import TddMember,TddVideo
 from core import NewMember
 from service import MemberCard,VideoViewStaffItem
-from task.task import add_member,add_video,ensure_video_member,update_video
+from task.task import add_member,add_video,update_video
 from profile_support import ProfileConnection
 from db.profiles import _query_video, _query_member, _query_staff
 from db.profiles import update_video_profile, update_member_profile
@@ -123,14 +123,16 @@ class ProfileObservationOrderTest(unittest.TestCase):
         self.assertEqual(self.watermark('video',self.aid),100)
 
     def test_new_member_and_prepared_member_start_with_observation_watermark(self):
-        for operation in ('member-add','member-ensure'):
+        for operation in ('member-add','video-update'):
             mid = self.mid + (10 if operation == 'member-add' else 20)
             self.service.get_member_card.return_value = MemberCard(mid,'fresh','','','')
             with mock.patch('task.task.get_ts_s',return_value=200):
                 if operation == 'member-add':
                     add_member(mid,self.service)
                 else:
-                    ensure_video_member(self.aid,mid,self.service)
+                    self.service.get_video_view.return_value = self.view._replace(
+                        staff=[VideoViewStaffItem(mid,'role','','')])
+                    update_video(self.aid,self.service)
             old = dict(mid=mid,card=None,code=-404,added=100)
             with self.subTest(operation=operation),self.assertLogs('db.profiles',level='WARNING'):
                 self.assertEqual(self.apply(update_member_profile,old),[])
@@ -139,10 +141,14 @@ class ProfileObservationOrderTest(unittest.TestCase):
             self.assertEqual(self.watermark('member',mid),200)
 
     def test_ignored_prepared_existing_member_does_not_poison_watermark(self):
-        from db.profiles import _insert_prepared_members
         self.apply(update_member_profile,self.member_payload(100))
-        with self.conn.transaction():
-            _insert_prepared_members([NewMember(added=300,mid=self.mid,name='ignored',face='',code=-404)],self.conn)
+        # A member may be inserted after enrichment's existence check.
+        candidate = NewMember(added=300,mid=self.mid,name='ignored',face='',code=-404)
+        with mock.patch('task.task._prepare_members',return_value={self.mid:candidate}), \
+             mock.patch('task.task.get_ts_s',return_value=300):
+            update_video(self.aid,self.service)
+        self.assertEqual((_query_member(self.conn,self.mid).name,_query_member(self.conn,self.mid).code),
+                         ('original',0))
         self.assertEqual(self.watermark('member',self.mid),100)
         self.apply(update_member_profile,self.member_payload(200,card=MemberCard(self.mid,'accepted','','','')))
         self.assertEqual(_query_member(self.conn,self.mid).name,'accepted')

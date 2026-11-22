@@ -1,11 +1,12 @@
 """Large member IDs and profile failures retain their observed semantics."""
 import unittest
 from unittest import mock
-from db import TddMember
+from db import TddMember,TddVideo
 from service import MemberCard,ServiceError
-from task.task import add_member,ensure_video_member,update_member
+from task.task import _prepare_members,add_member,update_member,update_video
 from profile_support import ProfileConnection
-from db.profiles import _query_video, _query_member, _query_staff
+from db.profiles import _query_member
+from test_endpoint_get_video_view import expected_result
 
 
 class VideoMemberProfilesTest(unittest.TestCase):
@@ -26,11 +27,17 @@ class VideoMemberProfilesTest(unittest.TestCase):
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_member').fetchone()[0],3)
 
     def test_profile_failure_is_retried_on_next_refresh(self):
+        view = expected_result()._replace(staff=[])
+        view = view._replace(owner=view.owner._replace(mid=10))
+        self.conn.seed(TddVideo(added=1,aid=view.aid,bvid=view.bvid.removeprefix('BV'),
+                               mid=10,title='original',code=0,hasstaff=0,tags=''))
+        self.service.get_video_view.return_value = view
+        self.service.get_video_tags.return_value.tags = []
         self.service.get_member_card.side_effect = [ServiceError(),MemberCard(10,'name','','','')]
         with self.assertLogs('task',level='WARNING'):
-            ensure_video_member(1,10,self.service)
+            update_video(view.aid,self.service)
         self.assertIsNone(_query_member(self.conn,10))
-        ensure_video_member(1,10,self.service)
+        update_video(view.aid,self.service)
         self.assertEqual(_query_member(self.conn,10).name,'name')
         self.assertEqual(self.service.get_member_card.call_count,2)
 
@@ -69,7 +76,7 @@ class VideoMemberProfilesTest(unittest.TestCase):
     def test_invalid_mid_never_fetches_or_writes(self):
         for mid in (0,-1,None,'10'):
             with self.subTest(mid=mid), self.assertLogs('task',level='WARNING'):
-                ensure_video_member(1,mid,self.service)
+                self.assertEqual(_prepare_members(1,[mid],self.service),{})
             with self.assertRaises(ValueError):
                 add_member(mid,self.service)
         self.service.get_member_card.assert_not_called()

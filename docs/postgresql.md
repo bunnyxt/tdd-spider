@@ -57,7 +57,9 @@ transaction; those settings do not replace the connection bounds used by other
 queries. The former `TDD_DB_*_TIMEOUT_MS` environment overrides are ignored.
 
 Tasks fetch HTTP input before calling named database functions with explicit
-arguments. `db.write.insert_video_records()` and
+arguments. The full-view endpoint requires a string title and raises
+`FormatError` for a missing, null or non-string title before tasks can write it.
+Empty strings remain valid. `db.write.insert_video_records()` and
 `insert_member_follower_records()` accept the collected lightweight records and
 return complete keys only after commit. `db.profiles.update_video_profile()`
 and `update_member_profile()` lock and read stored snapshots, compare incoming

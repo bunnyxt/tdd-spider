@@ -13,7 +13,7 @@ import unittest
 from unittest import mock
 from uuid import uuid4
 
-from core import NewMember, NewVideo
+from core import NewVideo
 from db import TddMember,TddVideo
 from db.queries import query_video_via_aid, query_member_via_mid
 from db.values import database_value
@@ -132,7 +132,7 @@ class PostgresProfileObservationTest(unittest.TestCase):
         self.assertEqual(query_video_via_aid(self.aid).title,'accepted')
 
     def test_member_insert_after_precheck_reports_expected_conflict(self):
-        from db.profiles import _insert_member, ensure_members
+        from db.profiles import _insert_member
         from service import MemberCard
         from task import add_member, AlreadyExistError
         mid = self.mid + 1
@@ -166,8 +166,6 @@ class PostgresProfileObservationTest(unittest.TestCase):
                     self.assertTrue(blocked,'the insert must wait for the competing business key')
             with self.assertRaises(AlreadyExistError):
                 future.result(timeout=10)
-        self.assertEqual(query_member_via_mid(mid).name,'first')
-        ensure_members([NewMember(added=2,mid=mid,name='ignored',face='',sex='',sign='',code=0)])
         self.assertEqual(query_member_via_mid(mid).name,'first')
         self.assertEqual(list(self.directory.glob('*.json')),[])
 

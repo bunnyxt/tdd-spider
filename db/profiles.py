@@ -86,14 +86,6 @@ def _insert_member(conn: Connection, member: NewMember, *, run_id: UUID | None =
     _claim_profile_observation('member',member.mid,member.added,conn)
     return stored_member
 
-def ensure_members(members: list[NewMember]) -> list[TddMember]:
-    return execute_write(_ensure_members, members)
-
-def _ensure_members(conn: Connection, members: list[NewMember], *,
-                    run_id: UUID | None = None) -> list[TddMember]:
-    _insert_prepared_members(members,conn)
-    return []
-
 def update_member_profile(mid: int, card: MemberCard | None, code: int, added: int) -> list[TddMemberLog] | None:
     """Return change logs (possibly empty), or None when the member is missing."""
     return execute_write(_update_member_profile, mid, card, code, added)

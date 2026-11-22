@@ -69,6 +69,35 @@ class GetVideoViewEndpointTest(unittest.TestCase):
         self.assertFalse(result.response_has_attribute)
         self.assertFalse(result.response_has_forward)
 
+    def test_missing_title_is_a_format_error(self):
+        response = valid_response()
+        del response['data']['title']
+        with self.assertRaises(FormatError) as raised:
+            get_video_view.get(lambda *args, **kwargs: response, params={'aid': 7})
+        self.assertIn('title', raised.exception.message)
+
+    def test_null_and_non_string_titles_are_format_errors(self):
+        for title in (None, 0, 42, 1.5, True, False, [], ['title'], {}, {'title': 'value'}):
+            with self.subTest(title=title):
+                response = valid_response()
+                response['data']['title'] = title
+                with self.assertRaises(FormatError) as raised:
+                    get_video_view.get(lambda *args, **kwargs: response, params={'aid': 7})
+                error = raised.exception
+                self.assertEqual(error.endpoint, 'get_video_view')
+                self.assertIs(error.result_type, VideoView)
+                self.assertEqual(error.params, {'aid': 7})
+                self.assertIs(error.response, response)
+                self.assertIn('title', error.message)
+
+    def test_string_titles_are_preserved_including_empty_and_unicode(self):
+        for title in ('', 'title', '中文标题 🎵\x00'):
+            with self.subTest(title=title):
+                response = valid_response()
+                response['data']['title'] = title
+                result = get_video_view.get(lambda *args, **kwargs: response)
+                self.assertEqual(result, expected_result()._replace(title=title))
+
     def test_presence_tracks_only_optional_scalar_keys(self):
         for field, other in (('attribute', 'forward'), ('forward', 'attribute')):
             for value in (None, 0, 42):

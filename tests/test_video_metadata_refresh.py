@@ -100,6 +100,29 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.assertEqual(len(_query_staff(self.conn,7)), 1)
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_video_log').fetchone()[0], 0)
 
+    def test_malformed_title_stops_add_and_refresh_before_enrichment_or_writes(self):
+        from task.task import add_video
+        response = valid_response()
+        response['data']['title'] = None
+        self.use_api_response(response)
+        for operation in (add_video,update_video):
+            with self.subTest(operation=operation.__name__):
+                if operation is update_video:
+                    self.seed(title='stored title')
+                with mock.patch('task.task.create_video') as create, \
+                        mock.patch('task.task.update_video_profile') as update:
+                    with self.assertRaises(FormatError):
+                        operation(self.view.aid,self.service)
+                create.assert_not_called()
+                update.assert_not_called()
+                self.service.get_member_card.assert_not_called()
+                self.service.get_video_tags.assert_not_called()
+                current = _query_video(self.conn,self.view.aid)
+                if operation is add_video:
+                    self.assertIsNone(current)
+                else:
+                    self.assertEqual(current.title,'stored title')
+
     def test_missing_staff_resolves_unknown_flag_and_only_logs_actual_change(self):
         self.seed(hasstaff=-1)
         response = valid_response()
