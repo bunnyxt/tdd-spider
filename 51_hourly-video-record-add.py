@@ -240,9 +240,8 @@ class VideoRecordAcquisitionJob(Job):
         }
         if any(self.failure_counts.values()):
             self.logger.error(
-                'Some fetched records were not confirmed: fetched=%d, persisted=%d, '
-                'db_write_unconfirmed=%d, queue_dropped=%d. '
-                'Continue downstream with confirmed records; reconcile failed writes separately.',
+                'Video collection results: fetched=%d, persisted=%d, '
+                'db_write_failed=%d, queue_full_dropped=%d.',
                 self.fetch_stat.condition['success'], self.writer_stat.condition['persisted'],
                 self.writer_stat.condition['batch_insert_fail'],
                 self.fetch_stat.condition['record_dropped_queue_full'])

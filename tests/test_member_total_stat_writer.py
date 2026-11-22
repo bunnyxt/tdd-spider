@@ -61,9 +61,10 @@ class MemberTotalStatWriterTest(unittest.TestCase):
             with self.assertLogs(LOG,level='CRITICAL') as logs, self.assertRaisesRegex(RuntimeError,'unknown'):
                 write_member_stats(records(1001),LOG)
             self.assertEqual(len(session.committed),1000)
-            self.assertIn('confirmed_committed_rows=1000',logs.output[0])
-            self.assertIn('failed_batch_rows=1',logs.output[0])
-            self.assertIn('reconcile before retrying',logs.output[0])
+            self.assertEqual([entry.getMessage() for entry in logs.records], [
+                'Aggregate batch write failed: rows=1, committed_rows=1000, '
+                'error=batch commit outcome unknown',
+            ])
 
     def test_invalid_batch_size_fails_before_opening_transaction(self):
         for size in (0,-1,True,1.5):

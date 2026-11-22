@@ -45,7 +45,10 @@ class MemberFollowerWriteTest(unittest.TestCase):
             job._flush([record])
         self.assertIs(write.call_args.args[0][0], record)
         with mock.patch('job.BatchInsertMemberFollowerRecordJob.commit_member_follower_records_batch',
-                        side_effect=RuntimeError('unconfirmed')), self.assertLogs(level='ERROR'):
+                        side_effect=RuntimeError('unconfirmed')), self.assertLogs(job.logger, level='ERROR') as logs:
             job._flush([record])
         self.assertEqual(job.stat.condition['persisted'], 1)
         self.assertEqual(job.stat.condition['batch_insert_fail'], 1)
+        self.assertEqual([entry.getMessage() for entry in logs.records], [
+            'Follower batch write failed: rows=1, error=unconfirmed',
+        ])

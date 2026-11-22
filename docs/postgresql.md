@@ -185,12 +185,15 @@ transaction. There is no input file, JSON digest, receipt or automatic replay
 on the successful path. Independent observations remain independent, including
 multiple records for the same entity in the same second.
 
-After a write raises an exception, the application attempts to save the input
+After a write raises an exception, `db.transaction.write()` attempts to save the input
 as a restrictive JSON file under `data/failed-writes/`; `TDD_FAILURE_DIR`
-selects another directory. The error log identifies the file for manual
-inspection. Failure to save the file is also logged, and the original write
-error still propagates. Files are diagnostic inputs, not an automatically
-processed queue. They are not fsynced and do not guarantee crash recovery.
+selects another directory. Only `db.transaction` resolves this directory,
+saves the file and logs its actual path (or that saving failed), together with
+the write error and the manual reconciliation instruction. Callers only count
+the failure and log a short business-item error; run summaries report counts
+without repeating failure-file instructions. The original write error still
+propagates. Files are diagnostic inputs, not an automatically processed queue.
+They are not fsynced and do not guarantee crash recovery.
 
 During migration, a successful write gate supplies the run label for failure
 diagnostics. If connection acquisition or the gate itself fails, no business

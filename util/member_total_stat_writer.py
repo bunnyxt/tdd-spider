@@ -13,10 +13,9 @@ def write_member_stats(records, logger, batch_size=1000):
             return committed
         try:
             insert_member_total_stat_records(batch)
-        except Exception:
-            logger.critical('Incomplete aggregate write: confirmed_committed_rows=%d, failed_batch_rows=%d, '
-                            'Check the failure log and reconcile before retrying.',
-                            committed,len(batch))
+        except Exception as error:
+            logger.critical('Aggregate batch write failed: rows=%d, committed_rows=%d, error=%s',
+                            len(batch),committed,error)
             raise
         committed += len(batch)
         logger.info('Aggregate batch committed: rows=%d, committed_rows=%d',len(batch),committed)

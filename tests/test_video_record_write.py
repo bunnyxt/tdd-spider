@@ -85,10 +85,14 @@ class VideoRecordWriteTest(unittest.TestCase):
         self.assertIs(commit.call_args.args[0][0], record)
         self.assertIs(downstream.get_nowait(), record)
         with mock.patch('job.BatchInsertVideoRecordJob.commit_video_records_batch',
-                        side_effect=RuntimeError('unconfirmed')), self.assertLogs(level='ERROR'):
+                        side_effect=RuntimeError('unconfirmed')), self.assertLogs(writer.logger, level='ERROR') as logs:
             writer._flush([record])
         self.assertTrue(downstream.empty())
         self.assertEqual(writer.stat.condition['persisted'], 1)
+        self.assertEqual(writer.stat.condition['batch_insert_fail'], 1)
+        self.assertEqual([entry.getMessage() for entry in logs.records], [
+            'Video batch write failed: rows=1, error=unconfirmed',
+        ])
 
     def test_csv_history_fresh_and_publication_time_use_the_same_record_type(self):
         script = _load('51_hourly-video-record-add.py')

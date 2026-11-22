@@ -1,5 +1,4 @@
 """Sprint collection distinguishes fetch failures from unconfirmed database writes."""
-import os
 from queue import Queue
 from types import SimpleNamespace
 import unittest
@@ -22,7 +21,6 @@ class SprintRecordJobTest(unittest.TestCase):
                 mock.patch('job.AddSprintVideoRecordJob.commit_sprint_video_record',
                            side_effect=[RuntimeError('COMMIT unknown'),
                                         SimpleNamespace(aid=3, view=1000000)]) as commit, \
-                mock.patch.dict(os.environ, {'TDD_FAILURE_DIR': '/tmp/test-failed-writes'}), \
                 self.assertLogs(job.logger, level='ERROR') as logs:
             job.process()
         self.assertEqual(fetch.call_count, 3)
@@ -32,13 +30,10 @@ class SprintRecordJobTest(unittest.TestCase):
                                  'persisted': 1, 'success': 1, 'exception': 2,
                                  'million_success': 1}.items():
             self.assertEqual(job.stat.condition[metric], expected, metric)
-        self.assertIn('aid: 1', logs.output[0])
-        self.assertIn('No failed-write file', logs.output[0])
-        self.assertIn('re-fetch this aid', logs.output[0])
-        self.assertIn('aid: 2', logs.output[1])
-        self.assertIn('/tmp/test-failed-writes', logs.output[1])
-        self.assertIn('best-effort', logs.output[1])
-        self.assertIn('Reconcile the database', logs.output[1])
+        self.assertEqual([entry.getMessage() for entry in logs.records], [
+            'Sprint record fetch failed: aid=1, error=HTTP unavailable',
+            'Sprint record write failed: aid=2, error=COMMIT unknown',
+        ])
         self.assertTrue(queue.empty())
 
 

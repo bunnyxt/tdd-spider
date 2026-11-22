@@ -88,7 +88,11 @@ class TransactionTest(unittest.TestCase):
         self.assertEqual(data['payload']['present']['set_values'], ['name', 'sign'])
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(self.directory.stat().st_mode), 0o700)
-        self.assertIn('reconcile manually before retrying', logs.output[0])
+        self.assertEqual(len(logs.records), 1)
+        self.assertEqual(logs.records[0].getMessage(),
+                         f'Database write failed; input saved to {path}. operation=save_member. '
+                         'Commit status is unconfirmed; reconcile manually before retrying.')
+        self.assertIs(logs.records[0].exc_info[1], error)
 
     def test_failures_create_separate_files_without_overwriting_prior_inputs(self):
         with mock.patch('db.transaction.engine.connection', side_effect=RuntimeError('offline')), \
@@ -113,7 +117,12 @@ class TransactionTest(unittest.TestCase):
             with self.assertRaises(RuntimeError) as caught:
                 insert_video_record_abnormal_change(**abnormal_input())
         self.assertIs(caught.exception, original)
-        self.assertIn('could not be saved', logs.output[0])
+        self.assertEqual(len(logs.records), 1)
+        self.assertEqual(logs.records[0].getMessage(),
+                         'Database write failed; failure input could not be saved. '
+                         'operation=_insert_video_record_abnormal_change. Commit status is unconfirmed; '
+                         'reconcile manually before retrying.')
+        self.assertEqual(str(logs.records[0].exc_info[1]), 'disk full')
 
     def test_partial_archive_is_removed_when_input_cannot_be_encoded(self):
         with mock.patch('db.transaction.engine.connection', side_effect=RuntimeError('offline')), \

@@ -5,7 +5,6 @@ from runrecord import track
 from util import logging_init, fullname, get_ts_ms, format_duration_summary
 from queue import Queue
 import logging
-import os
 
 script_id = '71'
 script_name = 'add-sprint-video-record'
@@ -59,16 +58,8 @@ def add_sprint_video_record():
         logger.info('Sprint results: persisted=%d, db_write_failed=%d, fetch_failed=%d, unfetched=%d.',
                     job_stat.condition['persisted'], job_stat.condition['db_write_failed'],
                     job_stat.condition['fetch_failed'], len(unfetched_aids))
-        if job_stat.condition['db_write_failed']:
-            logger.error('Sprint database write failures need manual reconciliation. '
-                         'Failure input is saved best-effort under %s; check the write logs '
-                         'for the actual files or save failures before manually resubmitting.',
-                         os.environ.get('TDD_FAILURE_DIR', 'data/failed-writes'))
         if unfetched_aids:
             logger.warning('Sprint aids left unfetched: %s', unfetched_aids)
-        if job_stat.condition['fetch_failed'] or unfetched_aids:
-            logger.warning('Failed or unfetched sprint requests have no failed-write file. '
-                           'Re-fetch the aids in the fetch error and unfetched logs.')
         if (getattr(job, 'error', None) is not None or job_stat.condition['exception']
                 or job_stat.condition['persisted'] != job_stat.total_count or unfetched_aids):
             raise RuntimeError('Sprint records were not all confirmed; inspect the separate '

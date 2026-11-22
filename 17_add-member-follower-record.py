@@ -5,7 +5,6 @@ from runrecord import track
 from queue import Queue
 from job import FetchMemberFollowerRecordJob, BatchInsertMemberFollowerRecordJob, JobPool
 import logging
-import os
 
 script_id = '17'
 script_name = 'add-member-follower-record'
@@ -92,17 +91,8 @@ def add_member_follower_record():
         logger.info('Follower results: persisted=%d, db_write_failed=%d, '
                     'queue_full_dropped=%d, fetch_failed=%d, unfetched=%d.',
                     persisted, db_failed, dropped, fetch_failed, len(unfetched_mids))
-        if db_failed:
-            logger.error('Follower database writes were not confirmed for %d rows. '
-                         'Failure input is saved best-effort under %s; check the write logs '
-                         'for the actual file or a save failure. Reconcile the database '
-                         'before manually resubmitting saved input.', db_failed,
-                         os.environ.get('TDD_FAILURE_DIR', 'data/failed-writes'))
         if unfetched_mids:
             logger.warning('Follower mids left unfetched: %s', unfetched_mids)
-        if dropped or fetch_failed or unfetched_mids:
-            logger.warning('Dropped or unfetched follower records have no failed-write file. '
-                           'Re-fetch the mids in the fetch error, queue-drop and unfetched logs.')
         if (db_failed or persisted != fetch_stat.condition.get('success', 0) or dropped):
             raise RuntimeError('Follower write incomplete; inspect the separate database-write '
                                'and fetch/drop counts above')

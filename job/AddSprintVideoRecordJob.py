@@ -1,5 +1,4 @@
 import time
-import os
 from .Job import Job
 from service import Service
 from queue import Queue
@@ -35,8 +34,7 @@ class AddSprintVideoRecordJob(Job):
             try:
                 record = fetch_video_record_via_video_view(aid, self.service)
             except Exception as e:
-                self.logger.error('Sprint record fetch failed. aid: %s, error: %s. '
-                                  'No failed-write file exists for this request; re-fetch this aid.', aid, e)
+                self.logger.error('Sprint record fetch failed: aid=%s, error=%s', aid, e)
                 self.stat.condition['fetch_failed'] += 1
                 self.stat.condition['exception'] += 1
             else:
@@ -44,11 +42,7 @@ class AddSprintVideoRecordJob(Job):
                 try:
                     new_sprint_video_record = commit_sprint_video_record(record)
                 except Exception as e:
-                    self.logger.error('Sprint database write unconfirmed. aid: %s, error: %s. '
-                                      'Failure input is saved best-effort under %s; check the write '
-                                      'log for the actual file or a save failure. Reconcile the '
-                                      'database before manually resubmitting saved input.', aid, e,
-                                      os.environ.get('TDD_FAILURE_DIR', 'data/failed-writes'))
+                    self.logger.error('Sprint record write failed: aid=%s, error=%s', aid, e)
                     self.stat.condition['db_write_failed'] += 1
                     self.stat.condition['exception'] += 1
                 else:

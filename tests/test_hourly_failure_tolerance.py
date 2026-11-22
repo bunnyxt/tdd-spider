@@ -55,7 +55,7 @@ class HourlyFailureToleranceTest(unittest.TestCase):
                 mock.patch.object(s51, 'query_video_pubdate_all', return_value=[(2, 0)]) as analyze, \
                 mock.patch.object(s51, 'update_video_recent') as recent, \
                 mock.patch.object(s51, 'update_video_freq') as freq, \
-                self.assertLogs(level='WARNING'):
+                self.assertLogs(level='WARNING') as logs:
             with self.assertRaises(SystemExit) as stopped:
                 s51.hourly_video_record_add()
         self.assertEqual(stopped.exception.code, 1)
@@ -76,6 +76,10 @@ class HourlyFailureToleranceTest(unittest.TestCase):
                 (recorder.run_id,)))
         self.assertEqual(counts, {'db_write_failed': 1.0, 'queue_full_dropped': 0.0,
                                   'persisted_success_mismatch': 1.0})
+        self.assertEqual([entry.getMessage() for entry in logs.records
+                          if entry.getMessage().startswith('Video collection results:')], [
+            'Video collection results: fetched=2, persisted=1, db_write_failed=1, queue_full_dropped=0.',
+        ])
 
     def test_snapshot_save_failure_is_counted_and_other_stages_finish_before_failure(self):
         records = [_record(1)]
