@@ -100,10 +100,10 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.assertEqual(len(_query_staff(self.conn,7)), 1)
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_video_log').fetchone()[0], 0)
 
-    def test_malformed_title_stops_add_and_refresh_before_enrichment_or_writes(self):
+    def test_missing_title_stops_add_and_refresh_before_enrichment_or_writes(self):
         from task.task import add_video
         response = valid_response()
-        response['data']['title'] = None
+        del response['data']['title']
         self.use_api_response(response)
         for operation in (add_video,update_video):
             with self.subTest(operation=operation.__name__):

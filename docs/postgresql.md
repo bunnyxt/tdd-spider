@@ -50,17 +50,17 @@ as writes: lock wait 10,000 ms, statement 60,000 ms, transaction 120,000 ms, and
 idle time within a transaction 60,000 ms. Configure the first three as
 `lock_timeout_ms`, `statement_timeout_ms` and `transaction_timeout_ms` in the
 selected `[db_postgresql]` section; each must be an integer from 1 through
-300,000. Zero does not disable a deadline. Connection startup and write
-transactions use the same parser, defaults and validation. Application limits
+300,000. Zero does not disable a deadline. Application limits
 are appended after the INI's connection `options`, so an earlier zero cannot
-override them. Write transactions also apply the first three locally on each
-transaction; those settings do not replace the connection bounds used by other
-queries. The former `TDD_DB_*_TIMEOUT_MS` environment overrides are ignored.
+override them. Writes use these connection limits without repeating per-transaction
+timeout SQL. The former `TDD_DB_*_TIMEOUT_MS` environment overrides are ignored.
 
 Tasks fetch HTTP input before calling named database functions with explicit
-arguments. The full-view endpoint requires a string title and raises
-`FormatError` for a missing, null or non-string title before tasks can write it.
-Empty strings remain valid. `db.write.insert_video_records()` and
+arguments. The full-view endpoint requires the title key and raises `FormatError`
+when it is missing. Its response contract declares `title: str`, but scalar type
+validation is deferred to a unified response-validation change. Existing key and
+container checks remain; the database still rejects NULL titles. Empty strings
+remain valid. `db.write.insert_video_records()` and
 `insert_member_follower_records()` accept the collected lightweight records and
 return complete keys only after commit. `db.profiles.update_video_profile()`
 and `update_member_profile()` lock and read stored snapshots, compare incoming

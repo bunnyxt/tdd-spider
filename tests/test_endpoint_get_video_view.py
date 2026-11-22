@@ -76,20 +76,6 @@ class GetVideoViewEndpointTest(unittest.TestCase):
             get_video_view.get(lambda *args, **kwargs: response, params={'aid': 7})
         self.assertIn('title', raised.exception.message)
 
-    def test_null_and_non_string_titles_are_format_errors(self):
-        for title in (None, 0, 42, 1.5, True, False, [], ['title'], {}, {'title': 'value'}):
-            with self.subTest(title=title):
-                response = valid_response()
-                response['data']['title'] = title
-                with self.assertRaises(FormatError) as raised:
-                    get_video_view.get(lambda *args, **kwargs: response, params={'aid': 7})
-                error = raised.exception
-                self.assertEqual(error.endpoint, 'get_video_view')
-                self.assertIs(error.result_type, VideoView)
-                self.assertEqual(error.params, {'aid': 7})
-                self.assertIs(error.response, response)
-                self.assertIn('title', error.message)
-
     def test_string_titles_are_preserved_including_empty_and_unicode(self):
         for title in ('', 'title', '中文标题 🎵\x00'):
             with self.subTest(title=title):

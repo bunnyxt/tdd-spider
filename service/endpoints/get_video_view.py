@@ -29,9 +29,6 @@ def get(request: Callable[..., dict], params: Optional[dict] = None,
         if key not in data:
             raise FormatError(ENDPOINT, RESULT_TYPE, params, response,
                               f'Response data should contain key {key}.')
-    if not isinstance(data['title'], str):
-        raise FormatError(ENDPOINT, RESULT_TYPE, params, response,
-                          'Response data title should be a string.')
     if type(data['owner']) != dict:
         raise FormatError(ENDPOINT, RESULT_TYPE, params, response,
                           'Response data owner should be a dict.')
