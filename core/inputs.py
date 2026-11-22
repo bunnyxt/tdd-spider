@@ -1,11 +1,10 @@
-"""Creation contracts follow API response types, not legacy column nullability.
+"""Write inputs for the database layer.
 
-These annotations do not validate raw responses. Generated ids and derived
-references belong to database snapshots.
+Stored TddXXX snapshots are built only by db from rows it reads back.
 """
 from typing import NamedTuple
 
-__all__ = ['NewVideo', 'NewMember']
+__all__ = ['NewVideo', 'NewMember', 'NewVideoLog', 'NewMemberLog']
 
 
 class NewVideo(NamedTuple):
@@ -40,3 +39,19 @@ class NewMember(NamedTuple):
     sex: str
     sign: str
     code: int = 0
+
+
+class NewVideoLog(NamedTuple):
+    added: int
+    aid: int
+    attr: str
+    oldval: str | None = None
+    newval: str | None = None
+
+
+class NewMemberLog(NamedTuple):
+    added: int
+    mid: int
+    attr: str
+    oldval: str | None = None
+    newval: str | None = None

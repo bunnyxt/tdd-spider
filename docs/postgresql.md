@@ -114,6 +114,11 @@ a competing insert after a precheck. Tasks interpret these outcomes as success,
 `AlreadyExistError` or `NotExistError`. Unrelated constraint violations and
 connection errors remain database errors.
 
+`core/inputs.py` contains the database write inputs: `NewVideo`, `NewMember`,
+`NewVideoLog` and `NewMemberLog`. Collected `VideoRecord` and
+`MemberFollowerRecord` stay in `core/record.py` because they also flow to
+downstream CSV and analysis.
+
 Profile differences use `NewVideoLog` / `NewMemberLog` write inputs without
 generated IDs. Their inserts return the complete stored rows; only then does
 the database layer construct `TddVideoLog` / `TddMemberLog` snapshots. Inputs
