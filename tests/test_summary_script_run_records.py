@@ -230,7 +230,50 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         self.assertEqual(status, 'succeeded')
         metrics = self._metrics(run_id)
         self.assertEqual(metrics['follower-fetch']['success'], 100.0)
+        self.assertEqual(metrics['follower-fetch']['fetch_failed'], 0.0)
+        self.assertEqual(metrics['follower-fetch']['unfetched'], 0.0)
         self.assertEqual(metrics['follower-db-writer']['batch_insert'], 1.0)
+
+    def test_17_database_failures_and_queue_drops_have_distinct_metrics_and_guidance(self):
+        m = _load('17_add-member-follower-record.py')
+        fetch = _stat(7, success=5, exception=1, rate_limited=1,
+                      record_dropped_queue_full=1)
+        writer = _stat(5, persisted=3, batch_insert_fail=2)
+        pools = iter([_FakePool(fetch), _FakePool(writer)])
+        with mock.patch.object(m, 'Service', _FakeService), \
+                mock.patch.object(m, 'query_all_member_mids', return_value=[101, 102]), \
+                mock.patch.object(m, 'JobPool', lambda *a, **kw: next(pools)), \
+                mock.patch.object(m, 'logger') as log, \
+                mock.patch.dict(os.environ, {'TDD_FAILURE_DIR': '/tmp/test-failed-writes'}):
+            with self.assertRaisesRegex(RuntimeError, 'separate database-write and fetch/drop counts'):
+                m.add_member_follower_record()
+        (run_id, _, status, _), = self._runs()
+        self.assertEqual(status, 'failed')
+        metrics = self._metrics(run_id)
+        self.assertEqual(metrics['follower-db-writer']['batch_insert_fail'], 2.0)
+        self.assertEqual(metrics['follower-fetch']['fetch_failed'], 2.0)
+        self.assertEqual(metrics['follower-fetch']['record_dropped_queue_full'], 1.0)
+        self.assertEqual(metrics['follower-fetch']['unfetched'], 2.0)
+        self.assertIn('/tmp/test-failed-writes', log.error.call_args.args)
+        self.assertIn('Reconcile the database', log.error.call_args.args[0])
+        self.assertIn('no failed-write file', log.warning.call_args.args[0])
+        self.assertIn(mock.call('Follower mids left unfetched: %s', [101, 102]),
+                      log.warning.call_args_list)
+
+    def test_17_fetch_failure_keeps_existing_run_status_without_claiming_a_saved_batch(self):
+        m = _load('17_add-member-follower-record.py')
+        pools = iter([_FakePool(_stat(2, success=1, exception=1)),
+                      _FakePool(_stat(1, persisted=1))])
+        with mock.patch.object(m, 'Service', _FakeService), \
+                mock.patch.object(m, 'query_all_member_mids', return_value=[]), \
+                mock.patch.object(m, 'JobPool', lambda *a, **kw: next(pools)), \
+                mock.patch.object(m, 'logger') as log:
+            m.add_member_follower_record()
+        (run_id, _, status, _), = self._runs()
+        self.assertEqual(status, 'succeeded')
+        self.assertEqual(self._metrics(run_id)['follower-fetch']['fetch_failed'], 1.0)
+        log.error.assert_not_called()
+        self.assertIn('no failed-write file', log.warning.call_args.args[0])
 
     # ----------------------------------------------------------------- 62_ ---
     def test_62_add_evocalrank_video(self):
@@ -284,14 +327,38 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
 
     def test_71_unconfirmed_record_fails_run(self):
         m = _load('71_add-sprint-video-record.py')
-        stat = _stat(13, success=12, persisted=12, exception=1)
+        stat = _stat(13, success=10, persisted=10, exception=3,
+                     fetch_success=11, fetch_failed=2, db_write_failed=1)
         with mock.patch.object(m, 'Service', _FakeService), \
              mock.patch.object(m, 'query_processing_sprint_aids', return_value=[]), \
-             mock.patch.object(m, 'AddSprintVideoRecordJob', lambda *a, **kw: _FakeJob(stat)):
+             mock.patch.object(m, 'AddSprintVideoRecordJob', lambda *a, **kw: _FakeJob(stat)), \
+             mock.patch.object(m, 'logger') as log:
             with self.assertRaisesRegex(RuntimeError, 'not all confirmed'):
                 m.add_sprint_video_record()
-        (_, _, status, _), = self._runs()
+        (run_id, _, status, _), = self._runs()
         self.assertEqual(status, 'failed')
+        metrics = self._metrics(run_id)['sprint-video-record']
+        self.assertEqual(metrics['db_write_failed'], 1.0)
+        self.assertEqual(metrics['fetch_failed'], 2.0)
+        self.assertEqual(metrics['persisted'], 10.0)
+        self.assertTrue(any('Sprint results:' in call.args[0] for call in log.info.call_args_list))
+        self.assertIn('manual reconciliation', log.error.call_args.args[0])
+        self.assertIn('no failed-write file', log.warning.call_args.args[0])
+
+    def test_71_unfetched_aids_are_reported_without_claiming_write_files(self):
+        m = _load('71_add-sprint-video-record.py')
+        with mock.patch.object(m, 'Service', _FakeService), \
+                mock.patch.object(m, 'query_processing_sprint_aids', return_value=[123]), \
+                mock.patch.object(m, 'AddSprintVideoRecordJob', lambda *a, **kw: _FakeJob(_stat())), \
+                mock.patch.object(m, 'logger') as log:
+            with self.assertRaisesRegex(RuntimeError, 'not all confirmed'):
+                m.add_sprint_video_record()
+        (run_id, _, status, _), = self._runs()
+        self.assertEqual(status, 'failed')
+        self.assertEqual(self._metrics(run_id)['sprint-video-record']['unfetched'], 1.0)
+        log.error.assert_not_called()
+        self.assertIn(mock.call('Sprint aids left unfetched: %s', [123]), log.warning.call_args_list)
+        self.assertIn('no failed-write file', log.warning.call_args.args[0])
 
 
 if __name__ == '__main__':

@@ -367,7 +367,7 @@ class PostgresApplicationTest(unittest.TestCase):
         diagnostic = json.loads(failures[0].read_text())
         self.assertEqual(diagnostic['run_id'],str(self.run_id))
         self.assertEqual(diagnostic['payload']['aid'],self.aid)
-        self.assertEqual(diagnostic['payload']['stat']['values']['view'],1000000)
+        self.assertEqual(diagnostic['payload']['stat']['view'],1000000)
         # Keep this run free of a retry so the privileged evidence checker can
         # independently verify that the failed transaction left zero manifest keys.
         self.expected_manifest({})
@@ -389,7 +389,7 @@ class PostgresApplicationTest(unittest.TestCase):
         for aid,added,view in [(aids[0],start+60,1000),(aids[0],end+60,1000),
                                (aids[1],end-3600,200),(aids[1],end+60,500),
                                (aids[2],start+60,999000)]:
-            stat = VideoViewStat(aid,view,1,1,1,1,1,0,0,1,0,None,None)
+            stat = dict(view=view,danmaku=1,reply=1,favorite=1,coin=1,share=1,like=1)
             stored = insert_sprint_video_record(aid,added,stat)
             self.assertIsInstance(stored,TddSprintVideoRecord)
             row, = read_rows('SELECT * FROM tdd_sprint_video_record WHERE id=%s',(stored.id,))

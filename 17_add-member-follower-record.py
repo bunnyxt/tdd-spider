@@ -5,6 +5,7 @@ from runrecord import track
 from queue import Queue
 from job import FetchMemberFollowerRecordJob, BatchInsertMemberFollowerRecordJob, JobPool
 import logging
+import os
 
 script_id = '17'
 script_name = 'add-member-follower-record'
@@ -63,6 +64,13 @@ def add_member_follower_record():
         record_queue.put(None)
         writer_stat = writer_pool.join()
 
+        fetch_stat.condition['fetch_failed'] = sum(
+            fetch_stat.condition.get(name, 0)
+            for name in ('exception', 'other_exception', 'rate_limited'))
+        with mid_queue.mutex:
+            unfetched_mids = list(mid_queue.queue)
+        fetch_stat.condition['unfetched'] = len(unfetched_mids)
+
         end_ts_ms = get_ts_ms()
 
         # run-record metrics: both pipeline stages, keyed by the same labels the
@@ -77,11 +85,27 @@ def add_member_follower_record():
         logger.info(fetch_stat.get_summary('follower-fetch'))
         logger.info(writer_stat.get_summary('follower-db-writer'))
         service.stats.log_summary(logger)
-        logger.info('%d follower record(s) confirmed persisted.', writer_stat.condition.get('persisted',0))
-        if (writer_stat.condition.get('batch_insert_fail',0)
-                or writer_stat.condition.get('persisted',0) != fetch_stat.condition.get('success',0)
-                or fetch_stat.condition.get('record_dropped_queue_full',0)):
-            raise RuntimeError('Follower write incomplete; resolve saved replay batches')
+        persisted = writer_stat.condition.get('persisted', 0)
+        db_failed = writer_stat.condition.get('batch_insert_fail', 0)
+        dropped = fetch_stat.condition.get('record_dropped_queue_full', 0)
+        fetch_failed = fetch_stat.condition['fetch_failed']
+        logger.info('Follower results: persisted=%d, db_write_failed=%d, '
+                    'queue_full_dropped=%d, fetch_failed=%d, unfetched=%d.',
+                    persisted, db_failed, dropped, fetch_failed, len(unfetched_mids))
+        if db_failed:
+            logger.error('Follower database writes were not confirmed for %d rows. '
+                         'Failure input is saved best-effort under %s; check the write logs '
+                         'for the actual file or a save failure. Reconcile the database '
+                         'before manually resubmitting saved input.', db_failed,
+                         os.environ.get('TDD_FAILURE_DIR', 'data/failed-writes'))
+        if unfetched_mids:
+            logger.warning('Follower mids left unfetched: %s', unfetched_mids)
+        if dropped or fetch_failed or unfetched_mids:
+            logger.warning('Dropped or unfetched follower records have no failed-write file. '
+                           'Re-fetch the mids in the fetch error, queue-drop and unfetched logs.')
+        if (db_failed or persisted != fetch_stat.condition.get('success', 0) or dropped):
+            raise RuntimeError('Follower write incomplete; inspect the separate database-write '
+                               'and fetch/drop counts above')
 
 
 def main():

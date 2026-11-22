@@ -83,10 +83,6 @@ def _update_video_profile(conn: Connection, aid: int, video_view: VideoView | No
     current = _query_video(conn,aid)
     if current is None:
         return None
-    if code_error == -403:
-        # This may be a login failure rather than an unavailable video. Keep
-        # the stored profile unchanged.
-        return []
     changes = {}
     def change(field: str, new: str | int | None) -> None:
         old, new = clean_text(getattr(current,field)), clean_text(new)
@@ -97,8 +93,7 @@ def _update_video_profile(conn: Connection, aid: int, video_view: VideoView | No
                                oldval=None if old is None else str(old),
                                newval=None if new is None else str(new)))
     if code_error is not None:
-        if code_error != -403:
-            change('code',code_error)
+        change('code',code_error)
     else:
         _insert_prepared_members(members,conn)
         change('code',0)
@@ -137,6 +132,7 @@ def _update_video_profile(conn: Connection, aid: int, video_view: VideoView | No
                 conn.execute('DELETE FROM tdd_video_staff WHERE id = %s',(item.id,))
                 logs.append(TddVideoLog(added,aid,attr='staff',oldval=f'mid: {item.mid}; title: {clean_text(item.title)}'))
         if tags is not None:
+            tags = clean_text(tags)
             if sorted(tags.split(';')) != sorted((clean_text(current.tags) or '').split(';')):
                 change('tags',tags)
     if changes:

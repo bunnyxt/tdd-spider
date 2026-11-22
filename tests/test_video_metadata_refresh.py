@@ -7,7 +7,7 @@ from service.endpoints import get_video_view
 from task.task import update_video
 from test_endpoint_get_video_view import expected_result,valid_response
 from profile_support import ProfileConnection
-from db.profiles import _query_video, _query_member, _query_staff
+from db.profiles import _query_video, _query_member, _query_staff, update_video_profile
 
 
 class VideoMetadataRefreshTest(unittest.TestCase):
@@ -53,8 +53,19 @@ class VideoMetadataRefreshTest(unittest.TestCase):
 
     def test_equivalent_tags_and_only_actual_nul_do_not_generate_changes(self):
         self.seed(tags='animation;music',title='ti\x00tle',desc='de\x00sc')
-        self.assertEqual(self.refresh('music;animation'),{})
+        self.assertEqual(self.refresh('mu\x00sic;animation'),{})
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_video_log').fetchone()[0],0)
+
+    def test_tag_nul_is_preserved_until_database_comparison_and_storage(self):
+        self.seed(tags='old;')
+        self.service.get_video_tags.return_value.tags = [mock.Mock(tag_name='mu\x00sic\\u0000')]
+        with mock.patch('task.task.update_video_profile',wraps=update_video_profile) as persist:
+            logs = update_video(self.video_view.aid,self.service)
+        self.assertEqual(persist.call_args.args[3],'mu\x00sic\\u0000;')
+        self.assertEqual({log.attr:(log.oldval,log.newval) for log in logs},
+                         {'tags':('old;','music\\u0000;')})
+        self.assertEqual(_query_video(self.conn,self.video_view.aid).tags,'music\\u0000;')
+        self.assertEqual(update_video(self.video_view.aid,self.service),[])
 
     def test_missing_optional_fields_reset_hasstaff_but_keep_other_metadata(self):
         self.seed()
@@ -162,6 +173,20 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         current = _query_video(self.conn,7)
         self.assertEqual((current.hasstaff,current.code),(1,62002))
         self.assertEqual(len(_query_staff(self.conn,7)),1)
+
+    def test_login_failure_returns_without_database_access_or_enrichment(self):
+        self.seed()
+        response = valid_response()
+        response['code'] = -403
+        self.use_api_response(response)
+        for aid in (self.video_view.aid,999):
+            with self.subTest(aid=aid), \
+                    mock.patch('db.profiles.write') as write, \
+                    mock.patch.object(self.conn,'execute',side_effect=AssertionError('unexpected database access')):
+                self.assertEqual(update_video(aid,self.service),[])
+                write.assert_not_called()
+        self.service.get_video_tags.assert_not_called()
+        self.service.get_member_card.assert_not_called()
 
     def test_explicit_null_and_literal_escape_are_logged_without_nul(self):
         self.seed(desc='old')

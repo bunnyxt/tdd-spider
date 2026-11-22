@@ -14,6 +14,7 @@ from uuid import uuid4
 from psycopg.pq import TransactionStatus
 
 from db import TddSprintVideoRecord
+from db.models import STAT_FIELDS
 from job import AddSprintVideoRecordJob
 from service import Service
 from service.endpoints import get_video_view_trimmed
@@ -24,7 +25,8 @@ from test_ingest_manifest import connection
 
 
 def sprint_stat(**values):
-    return get_video_view_trimmed.get(lambda *args, **kwargs: valid_response()).stat._replace(**values)
+    stat = get_video_view_trimmed.get(lambda *args, **kwargs: valid_response()).stat
+    return {field: values.get(field, getattr(stat, field)) for field in STAT_FIELDS}
 
 
 class SprintNullableRecordTest(unittest.TestCase):
@@ -83,11 +85,11 @@ class SprintNullableRecordTest(unittest.TestCase):
         manifest, = cursors[1].executemany.call_args.args[1]
         self.assertEqual(manifest[2:4], (run_id, 'tdd_sprint_video_record'))
         self.assertEqual(manifest[4].obj, {'id': 31})
-        self.assertIsNone(stat.view)
+        self.assertIsNone(stat['view'])
         self.assertFalse(hasattr(stat, 'id'))
 
-    def test_unavailable_view_is_normalized_only_for_insert(self):
-        stat = sprint_stat(view='--', danmaku=1, reply=2, favorite=3, coin=4, share=5, like=6)
+    def test_normalized_unknown_view_is_stored_without_mutating_input(self):
+        stat = sprint_stat(view=-1, danmaku=1, reply=2, favorite=3, coin=4, share=5, like=6)
         added = datetime.fromtimestamp(123, timezone.utc)
         conn, cursors = connection([[(31, added, 10, -1, 1, 2, 3, 4, 5, 6)]])
         with mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': ''}), \
@@ -95,7 +97,7 @@ class SprintNullableRecordTest(unittest.TestCase):
             record = _insert_sprint_video_record(conn, 10, 123, stat)
         self.assertEqual(cursors[0].executemany.call_args.args[1], [(added, 10, -1, 1, 2, 3, 4, 5, 6)])
         self.assertEqual(record.view, -1)
-        self.assertEqual(stat.view, '--')
+        self.assertEqual(stat['view'], -1)
         conn.cursor.assert_called_once_with()
 
     def test_finished_status_and_result_use_returned_database_values(self):
@@ -108,7 +110,7 @@ class SprintNullableRecordTest(unittest.TestCase):
         self.assertEqual((record.id, record.added, record.view), (31, 124, 1000000))
         self.assertEqual(conn.execute.call_args_list, [mock.call(
             'UPDATE tdd_sprint_video SET status = %s WHERE aid = %s', ('finished', 10))])
-        self.assertEqual(stat.view, 999999)
+        self.assertEqual(stat['view'], 999999)
 
     def test_manifest_failure_prevents_returning_a_confirmed_sprint_record(self):
         conn, cursors = connection([[(
@@ -124,8 +126,8 @@ class SprintNullableRecordTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'complete key'):
             _insert_sprint_video_record(conn, 10, 123, sprint_stat())
 
-    def test_failed_insert_keeps_raw_stat_for_manual_reconciliation(self):
-        stat = sprint_stat(view='--')
+    def test_failed_insert_keeps_converted_stat_for_manual_reconciliation(self):
+        stat = sprint_stat(view=-1)
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.dict(os.environ, {'TDD_FAILURE_DIR': directory, 'TDD_TRIAL_RUN_ID': ''}), \
                 mock.patch('db.transaction.engine.connection', side_effect=RuntimeError('offline')), \
@@ -137,7 +139,7 @@ class SprintNullableRecordTest(unittest.TestCase):
         self.assertEqual(saved['operation'], '_insert_sprint_video_record')
         self.assertEqual(saved['payload']['aid'], 10)
         self.assertEqual(saved['payload']['added'], 123)
-        self.assertEqual(saved['payload']['stat']['values'], stat._asdict())
+        self.assertEqual(saved['payload']['stat'], stat)
         self.assertEqual(saved['commit_status'], 'unconfirmed')
 
     def test_job_counts_confirmed_nullable_record_without_million_status(self):
@@ -145,8 +147,10 @@ class SprintNullableRecordTest(unittest.TestCase):
         queue.put(10)
         job = AddSprintVideoRecordJob('nullable',queue,mock.Mock())
         self.addCleanup(job.cleanup)
-        with mock.patch('job.AddSprintVideoRecordJob.add_sprint_video_record_via_video_view',
-                        return_value=SimpleNamespace(aid=10,view=None)):
+        with mock.patch('job.AddSprintVideoRecordJob.fetch_video_record_via_video_view',
+                        return_value=SimpleNamespace(aid=10,view=None)), \
+                mock.patch('job.AddSprintVideoRecordJob.commit_sprint_video_record',
+                           return_value=SimpleNamespace(aid=10,view=None)):
             job.process()
         self.assertEqual(job.stat.condition['persisted'],1)
         self.assertEqual(job.stat.condition['success'],1)

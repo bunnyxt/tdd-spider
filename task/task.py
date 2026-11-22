@@ -10,7 +10,6 @@ from db.queries import query_video_via_aid, query_member_via_mid
 from db.write import insert_video_records, insert_member_follower_records
 from db.profiles import create_video, update_video_profile, update_member_profile
 from db.sprint import insert_sprint_video_record
-from db.values import clean_text
 from util import get_ts_s
 from core import VideoRecord, MemberFollowerRecord, NewVideo, NewMember
 from .error import AlreadyExistError, NotExistError
@@ -18,7 +17,7 @@ from .error import AlreadyExistError, NotExistError
 logger = logging.getLogger('task')
 STAT_FIELDS = ('view','danmaku','reply','favorite','coin','share','like')
 __all__ = ['add_video_record_via_video_view','fetch_video_record_via_video_view','commit_video_records_batch',
-           'add_sprint_video_record_via_video_view','add_video','update_video','update_member',
+           'add_sprint_video_record_via_video_view','commit_sprint_video_record','add_video','update_video','update_member',
            'fetch_member_follower_record',
            'commit_member_follower_records_batch']
 
@@ -60,8 +59,12 @@ def commit_video_records_batch(records: Sequence[VideoRecord],
 
 
 def add_sprint_video_record_via_video_view(aid: int, service: Service) -> TddSprintVideoRecord:
-    video_view_trimmed = service.get_video_view_trimmed({'aid':aid})
-    return insert_sprint_video_record(aid, get_ts_s(), video_view_trimmed.stat)
+    return commit_sprint_video_record(fetch_video_record_via_video_view(aid, service))
+
+
+def commit_sprint_video_record(record: VideoRecord) -> TddSprintVideoRecord:
+    return insert_sprint_video_record(record.aid, record.added,
+                                      {field: getattr(record, field) for field in STAT_FIELDS})
 
 
 
@@ -123,6 +126,9 @@ def update_video(aid: int, service: Service) -> list[TddVideoLog]:
     try:
         video_view = service.get_video_view({'aid':aid})
     except CodeError as error:
+        if error.code == -403:
+            # A login failure does not establish that the video is unavailable.
+            return []
         code_error = error
     # Keep the view/status observation time for change logs, before enrichment.
     added = get_ts_s()
@@ -183,4 +189,4 @@ def commit_member_follower_records_batch(records: Sequence[MemberFollowerRecord]
 
 
 def _get_video_tags_str(aid: int, service: Service) -> str:
-    return ''.join(clean_text(tag.tag_name) + ';' for tag in service.get_video_tags({'aid':aid}).tags)
+    return ''.join(tag.tag_name + ';' for tag in service.get_video_tags({'aid':aid}).tags)

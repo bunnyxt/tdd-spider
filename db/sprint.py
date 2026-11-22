@@ -2,24 +2,23 @@
 from __future__ import annotations
 
 from psycopg import Connection
-from service.response import VideoViewStat
 from .ingest import append_rows
-from .models import TddSprintVideoRecord
+from .models import STAT_FIELDS, TddSprintVideoRecord
 
 from .transaction import write
 from .values import database_value, epoch
 
 
-def insert_sprint_video_record(aid: int, added: int, stat: VideoViewStat) -> TddSprintVideoRecord:
+def insert_sprint_video_record(aid: int, added: int, stat: dict[str, int | None]) -> TddSprintVideoRecord:
     return write(_insert_sprint_video_record, aid, added, stat)
 
 
-def _insert_sprint_video_record(conn: Connection, aid: int, added: int, stat: VideoViewStat) -> TddSprintVideoRecord:
+def _insert_sprint_video_record(conn: Connection, aid: int, added: int,
+                                stat: dict[str, int | None]) -> TddSprintVideoRecord:
     rows = append_rows(
         conn, 'tdd_sprint_video_record',
         ('added', 'aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'),
-        [(database_value('added', added), aid, -1 if stat.view == '--' else stat.view,
-          stat.danmaku, stat.reply, stat.favorite, stat.coin, stat.share, stat.like)],
+        [(database_value('added', added), aid, *(stat[field] for field in STAT_FIELDS))],
         returning=TddSprintVideoRecord.fields)
     if len(rows) != 1:
         raise RuntimeError('Sprint insert did not return its stored record')
