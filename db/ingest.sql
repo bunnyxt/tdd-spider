@@ -1,7 +1,6 @@
 -- Install as the database owner with collectors stopped. Auxiliary objects
 -- do not alter business tables. Grant the collector role USAGE on this schema,
--- SELECT on control, SELECT/INSERT/UPDATE on profile_observation,
--- and INSERT on manifest.
+-- SELECT on control and INSERT on manifest.
 -- Collectors must not be able to change control or DELETE/TRUNCATE manifests.
 BEGIN;
 CREATE SCHEMA IF NOT EXISTS tdd_ingest;
@@ -17,16 +16,6 @@ CREATE TABLE IF NOT EXISTS tdd_ingest.control (
     CHECK ((mode = 'trial') = (active_run_id IS NOT NULL))
 );
 -- Intentionally no initial row: an unconfigured deployment fails closed.
--- Mutable profiles have immutable creation times in their business tables.
--- Keep the most recent observed second separately so delayed observations
--- cannot replace a newer code, profile field, or staff relationship.
--- This is permanent application state; retain it when retiring migration tools.
-CREATE TABLE IF NOT EXISTS tdd_ingest.profile_observation (
-    entity_kind text NOT NULL CHECK (entity_kind IN ('video', 'member')),
-    entity_id bigint NOT NULL,
-    observed_at bigint NOT NULL,
-    PRIMARY KEY (entity_kind, entity_id)
-);
 -- Migration-only trial cleanup keys; retire after the wrap-up window closes.
 CREATE TABLE IF NOT EXISTS tdd_ingest.manifest (
     batch_id uuid NOT NULL,

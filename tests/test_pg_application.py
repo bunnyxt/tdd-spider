@@ -129,7 +129,7 @@ class PostgresApplicationTest(unittest.TestCase):
         history = read_value('SELECT count(*) FROM tdd_video_record WHERE aid=%s',(self.aid,))
         self.expected_manifest({'tdd_video_log':len(rows),'tdd_video_record':history})
 
-    def test_first_stats_failure_rolls_back_new_video_members_staff_and_watermarks(self):
+    def test_first_stats_failure_rolls_back_new_video_members_and_staff(self):
         captured = {}
         def capture_inputs(video, *, new_members, staff, first_record=None):
             captured.update(video=video,members=new_members,staff=staff,record=first_record,
@@ -147,10 +147,6 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual(read_staff(self.aid),[])
         for mid in (self.mid,self.mid+1):
             self.assertIsNone(query_member_via_mid(mid))
-        self.assertEqual(read_value('SELECT count(*) FROM tdd_ingest.profile_observation '
-                                    'WHERE (entity_kind=%s AND entity_id=%s) '
-                                    'OR (entity_kind=%s AND entity_id=ANY(%s))',
-                                    ('video',self.aid,'member',[self.mid,self.mid+1])),0)
         self.assertEqual(read_value('SELECT count(*) FROM tdd_video_record WHERE aid=%s',(self.aid,)),0)
         self.assertEqual(read_value('SELECT count(*) FROM tdd_video_record_latest WHERE aid=%s',(self.aid,)),0)
         self.assertEqual(len(list(Path(self.directory.name).glob('*.json'))),1)
@@ -239,8 +235,6 @@ class PostgresApplicationTest(unittest.TestCase):
         video_logs = update_video(self.aid,self.service)
         self.assertEqual(query_member_via_mid(self.mid).name,'member')
         self.assertEqual(query_member_via_mid(self.mid).last_video_aid,self.aid)
-        self.assertEqual(read_value('SELECT observed_at FROM tdd_ingest.profile_observation '
-                                    'WHERE entity_kind=%s AND entity_id=%s',('member',self.mid)),ADDED)
         self.service.get_member_card.side_effect = None
         self.service.get_member_card.return_value = MemberCard(self.mid,'member',None,'','\x00')
         logs = update_member(self.mid,self.service)

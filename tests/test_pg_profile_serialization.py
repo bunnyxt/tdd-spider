@@ -1,4 +1,4 @@
-"""Opt-in real PostgreSQL delayed observations, watermark rollback, and row-lock interleaving.
+"""Opt-in PostgreSQL profile serialization and competing creation outcomes.
 
 Uses the same explicitly selected disposable database as test_pg_application.
 All rows and failure inputs are synthetic; no HTTP endpoint is contacted.
@@ -17,17 +17,18 @@ from core import NewVideo
 from db import TddMember,TddVideo
 from db.queries import query_video_via_aid, query_member_via_mid
 from db.values import database_value
-from test_pg_application import read_value
+from test_pg_application import read_rows, read_value
 from db.basic import engine
 from db.ingest import guard_write_transaction
-from db.profiles import update_video_profile, update_member_profile, _update_video_profile
+from db.profiles import _update_video_profile, _update_member_profile
+from service import MemberCard
 from test_endpoint_get_video_view import expected_result
 from util import a2b
 
 
 @unittest.skipUnless(os.environ.get('TDD_PG_INTEGRATION') == '1',
                      'requires an explicitly selected disposable PostgreSQL database')
-class PostgresProfileObservationTest(unittest.TestCase):
+class PostgresProfileSerializationTest(unittest.TestCase):
     def setUp(self):
         self.run_id = uuid4()
         self.aid = 810000000000000 + self.run_id.int % 1000000000000
@@ -48,7 +49,6 @@ class PostgresProfileObservationTest(unittest.TestCase):
                       ('videos','tid','tname','copyright','pic','title','pubdate','desc','state','attribute','forward')}
             video = TddVideo(added=1,aid=self.aid,bvid=a2b(self.aid),mid=self.mid,code=-404,
                              hasstaff=0,tags='',**values)
-            # Seed profiles without a watermark to exercise its first insertion.
             for obj in (member,video):
                 fields = [f for f in obj.fields if f not in ('id','last_video_aid')]
                 connection.execute('INSERT INTO '+obj.table+' ('+','.join('"'+f+'"' for f in fields)+') '
@@ -59,30 +59,7 @@ class PostgresProfileObservationTest(unittest.TestCase):
         return dict(aid=self.aid,video_view=None if code is not None else self.video_view._replace(title=title),
                     code_error=code,tags='',members=[],added=added)
 
-    def apply_in_transaction(self,payload):
-        with engine.connection() as connection, connection.transaction():
-            guard_write_transaction(connection,self.run_id)
-            return _update_video_profile(connection,**payload,run_id=self.run_id)
-
-    def test_delayed_old_status_cannot_undo_newer_video_or_member(self):
-        with mock.patch('db.ingest.run_transaction',side_effect=RuntimeError('injected offline')):
-            with self.assertRaisesRegex(RuntimeError,'injected offline'):
-                update_video_profile(**self.payload(100,code=-404))
-        update_video_profile(**self.payload(200,title='fresh'))
-        before = read_value('SELECT count(*) FROM tdd_video_log WHERE aid=%s',(self.aid,))
-        with self.assertLogs('db.profiles',level='WARNING'):
-            self.assertEqual(update_video_profile(**self.payload(100,code=-404)),[])
-        video = query_video_via_aid(self.aid)
-        self.assertEqual((video.code,video.title,video.added),(0,'fresh',1))
-        self.assertEqual(read_value('SELECT count(*) FROM tdd_video_log WHERE aid=%s',(self.aid,)),before)
-        from service import MemberCard
-        update_member_profile(**dict(mid=self.mid,card=MemberCard(self.mid,'fresh','','',''),code=0,added=200))
-        with self.assertLogs('db.profiles',level='WARNING'):
-            update_member_profile(**dict(mid=self.mid,card=None,code=-404,added=100))
-        member = query_member_via_mid(self.mid)
-        self.assertEqual((member.code,member.name),(0,'fresh'))
-
-    def concurrent(self,first,second):
+    def concurrent(self,function,first,second):
         """Prove the second transaction waits on the actual first row lock."""
         pid_queue = Queue()
         def waiting_writer():
@@ -90,12 +67,12 @@ class PostgresProfileObservationTest(unittest.TestCase):
                 with connection.transaction():
                     guard_write_transaction(connection,self.run_id)
                     pid_queue.put(connection.info.backend_pid)
-                    return _update_video_profile(connection,**second,run_id=self.run_id)
+                    return function(connection,**second,run_id=self.run_id)
         with ThreadPoolExecutor(max_workers=1) as executor:
             with engine.connection() as connection:
                 with connection.transaction():
                     guard_write_transaction(connection,self.run_id)
-                    _update_video_profile(connection,**first,run_id=self.run_id)
+                    function(connection,**first,run_id=self.run_id)
                     future = executor.submit(waiting_writer)
                     waiting_pid = pid_queue.get(timeout=5)
                     deadline = time.monotonic()+5
@@ -107,31 +84,38 @@ class PostgresProfileObservationTest(unittest.TestCase):
                             break
                         time.sleep(0.01)
                     self.assertTrue(blocked,'the second writer must wait for the first business-row lock')
+                    self.assertFalse(future.done())
             return future.result(timeout=10)
 
-    def test_concurrent_first_watermark_rejects_older_waiter_after_newer_commit(self):
-        with self.assertLogs('db.profiles',level='WARNING'):
-            result = self.concurrent(self.payload(200,title='fresh'),self.payload(100,title='stale'))
-        self.assertEqual(result,[])
+    def test_older_video_input_waits_then_logs_the_preceding_committed_value(self):
+        result = self.concurrent(_update_video_profile,
+                                 self.payload(200,title='first commit'),
+                                 self.payload(100,title='second commit'))
         video = query_video_via_aid(self.aid)
-        self.assertEqual((video.code,video.title),(0,'fresh'))
-        self.assertEqual(read_value('SELECT observed_at FROM tdd_ingest.profile_observation '
-                                             'WHERE entity_kind=%s AND entity_id=%s',('video',self.aid)),200)
+        self.assertEqual((video.code,video.title,video.added),(0,'second commit',1))
+        self.assertEqual([(log.attr,log.oldval,log.newval,log.added) for log in result],
+                         [('title','first commit','second commit',100)])
+        self.assertEqual(read_rows('SELECT oldval,newval,added FROM tdd_video_log '
+                                   'WHERE aid=%s AND attr=%s ORDER BY id',(self.aid,'title')),
+                         [{'oldval':self.video_view.title,'newval':'first commit','added':200},
+                          {'oldval':'first commit','newval':'second commit','added':100}])
+        self.assertEqual(list(self.directory.glob('*.json')),[])
 
-    def test_concurrent_newer_waiter_advances_after_older_commit(self):
-        self.concurrent(self.payload(100,title='old'),self.payload(200,title='fresh'))
-        self.assertEqual(query_video_via_aid(self.aid).title,'fresh')
+    def test_older_member_input_waits_then_logs_the_preceding_committed_value(self):
+        first = dict(mid=self.mid,card=MemberCard(self.mid,'first commit','','',''),code=0,added=200)
+        second = dict(mid=self.mid,card=MemberCard(self.mid,'second commit','','',''),code=0,added=100)
+        result = self.concurrent(_update_member_profile,first,second)
+        member = query_member_via_mid(self.mid)
+        self.assertEqual((member.code,member.name,member.added),(0,'second commit',1))
+        self.assertEqual([(log.attr,log.oldval,log.newval,log.added) for log in result],
+                         [('name','first commit','second commit',100)])
+        self.assertEqual(read_rows('SELECT oldval,newval,added FROM tdd_member_log '
+                                   'WHERE mid=%s AND attr=%s ORDER BY id',(self.mid,'name')),
+                         [{'oldval':'baseline','newval':'first commit','added':200},
+                          {'oldval':'first commit','newval':'second commit','added':100}])
+        self.assertEqual(list(self.directory.glob('*.json')),[])
 
-    def test_profile_failure_rolls_back_first_watermark_before_older_observation(self):
-        with mock.patch('db.profiles._append_objects',side_effect=RuntimeError('injected log failure')):
-            with self.assertRaisesRegex(RuntimeError,'injected log failure'):
-                self.apply_in_transaction(self.payload(300,title='rolled back'))
-        self.assertEqual(read_value('SELECT count(*) FROM tdd_ingest.profile_observation '
-                                             'WHERE entity_kind=%s AND entity_id=%s',('video',self.aid)),0)
-        self.apply_in_transaction(self.payload(200,title='accepted'))
-        self.assertEqual(query_video_via_aid(self.aid).title,'accepted')
-
-    def test_member_insert_after_precheck_keeps_profile_and_watermark_and_updates_video(self):
+    def test_member_insert_after_precheck_keeps_profile_and_updates_video(self):
         from db.profiles import _insert_member
         from service import MemberCard, VideoTags, VideoViewStaffItem
         from task import update_video
@@ -153,9 +137,6 @@ class PostgresProfileObservationTest(unittest.TestCase):
                 conn.execute('INSERT INTO tdd_member (added,mid,name,face,sex,sign,code) '
                              'VALUES (%s,%s,%s,%s,%s,%s,%s)',
                              (database_value('added',1),mid,'first','','','keep',0))
-                conn.execute('INSERT INTO tdd_ingest.profile_observation '
-                             '(entity_kind,entity_id,observed_at) VALUES (%s,%s,%s)',
-                             ('member',mid,500))
                 # The uncommitted row is invisible to the task's precheck.
                 self.assertIsNone(query_member_via_mid(mid))
                 with mock.patch('db.profiles._insert_member',side_effect=insert_and_report_pid), \
@@ -176,8 +157,6 @@ class PostgresProfileObservationTest(unittest.TestCase):
         member = query_member_via_mid(mid)
         self.assertEqual((member.name,member.sign,member.added,member.last_video_aid),
                          ('first','keep',1,self.aid))
-        self.assertEqual(read_value('SELECT observed_at FROM tdd_ingest.profile_observation '
-                                    'WHERE entity_kind=%s AND entity_id=%s',('member',mid)),500)
         self.assertEqual(read_value('SELECT count(*) FROM tdd_member_log WHERE mid=%s',(mid,)),0)
         self.assertEqual(read_value('SELECT count(*) FROM tdd_video_staff WHERE aid=%s AND mid=%s',
                                     (self.aid,mid)),1)

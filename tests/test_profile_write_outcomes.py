@@ -37,8 +37,6 @@ class ProfileWriteOutcomesTest(unittest.TestCase):
         self.assertEqual(stored.aid, self.video_view.aid)
         self.assertEqual(_query_member(self.conn, self.video_view.owner.mid).name, 'concurrent')
         self.assertEqual(self.conn.execute(
-            "SELECT count(*) FROM tdd_ingest.profile_observation WHERE entity_kind='member'").fetchone()[0], 0)
-        self.assertEqual(self.conn.execute(
             'SELECT added,aid,view,danmaku,reply,favorite,coin,share,like FROM tdd_video_record').fetchall(),
             [(stored.added,self.video_view.aid,
               *(getattr(self.video_view.stat,field) for field in
@@ -97,9 +95,6 @@ class ProfileWriteOutcomesTest(unittest.TestCase):
             NewMember(added=2,mid=7,name='ignored',face='new-face',code=0)],staff=[]),TddVideo)
         current = _query_member(self.conn,7)
         self.assertEqual(vars(current),vars(inserted))
-        self.assertEqual(self.conn.execute(
-            "SELECT observed_at FROM tdd_ingest.profile_observation WHERE entity_kind='member' AND entity_id=%s",
-            (7,)).fetchone()[0],1)
         self.assertIsNone(create_video(next_video,new_members=[],staff=[]))
         self.assertIsNone(update_member_profile(8, None, -404, 10))
 

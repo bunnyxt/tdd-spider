@@ -204,7 +204,18 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.assertEqual(vars(snapshot),before)
         self.assertEqual(_query_video(self.conn,7).title,'old')
         self.assertEqual(len(_query_staff(self.conn,7)),1)
-        self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_ingest.profile_observation').fetchone()[0],0)
+
+    def test_change_log_time_precedes_slow_enrichment_and_keeps_creation_time(self):
+        self.seed(title='before refresh')
+        now = [100]
+        def slow_tags(*args,**kwargs):
+            now[0] = 300
+            return ''
+        with mock.patch('task.task.get_ts_s',side_effect=lambda:now[0]), \
+                mock.patch('task.task._get_video_tags_str',side_effect=slow_tags):
+            logs = update_video(self.video_view.aid,self.service)
+        self.assertEqual([(log.attr,log.added) for log in logs],[('title',100)])
+        self.assertEqual(_query_video(self.conn,self.video_view.aid).added,1)
 
     def test_new_video_repeated_staff_keeps_first_title_and_commits_video(self):
         from task.task import add_video
@@ -226,7 +237,6 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.assertIs(caught.exception,error)
         self.assertIsNone(_query_video(self.conn,self.video_view.aid))
         self.assertEqual(_query_staff(self.conn,self.video_view.aid),[])
-        self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_ingest.profile_observation').fetchone()[0],0)
         self.service.get_member_card.assert_not_called()
 
     def test_new_video_creation_values_preserve_tag_classification_and_defaults(self):

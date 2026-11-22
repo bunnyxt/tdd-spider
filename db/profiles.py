@@ -1,6 +1,5 @@
-"""Profile persistence: row snapshots, observation ordering, and atomic change logs."""
+"""Profile persistence: row-locked snapshots and atomic change logs."""
 import logging
-from typing import Literal
 from uuid import UUID
 
 from psycopg import Connection
@@ -47,7 +46,6 @@ def _create_video(conn: Connection, video: NewVideo, *, new_members: list[NewMem
         return None
     stored_video = TddVideo(**dict(zip(TddVideo.fields,map(epoch,row))))
     _insert_prepared_members(new_members,conn)
-    _claim_profile_observation('video',video.aid,video.added,conn)
     for item in staff or []:
         if _insert_staff(conn,video.added,video.aid,item.mid,item.title) is None:
             logger.debug('Video staff relationship already exists: aid=%s, mid=%s',video.aid,item.mid)
@@ -70,7 +68,6 @@ def _insert_member(conn: Connection, member: NewMember, *, run_id: UUID | None =
     if row is None:
         return None
     stored_member = TddMember(**dict(zip(TddMember.fields,map(epoch,row))))
-    _claim_profile_observation('member',member.mid,member.added,conn)
     return stored_member
 
 def update_member_profile(mid: int, card: MemberCard | None, code: int, added: int) -> list[TddMemberLog] | None:
@@ -82,29 +79,6 @@ def _insert_prepared_members(prepared: list[NewMember], conn: Connection) -> Non
         _insert_member(conn,member)
 
 
-def _claim_profile_observation(kind: Literal["video", "member"], entity_id: int,
-                               observed_at: int, conn: Connection) -> bool:
-    """Advance a profile watermark inside its row-locked business transaction.
-
-    The UPSERT also serializes the first watermark for an existing migrated
-    profile. Equal-second inputs retain the usual last-write-wins behavior.
-    A failed profile/log transaction rolls its watermark back too.
-    """
-    if kind not in ('video','member') or type(observed_at) is not int:
-        raise ValueError('A profile observation requires a kind and integer Unix seconds')
-    accepted = conn.execute(
-        'INSERT INTO tdd_ingest.profile_observation AS previous '
-        '(entity_kind,entity_id,observed_at) VALUES (%s,%s,%s) '
-        'ON CONFLICT (entity_kind,entity_id) DO UPDATE SET observed_at = EXCLUDED.observed_at '
-        'WHERE previous.observed_at <= EXCLUDED.observed_at RETURNING observed_at',
-        (kind,entity_id,observed_at)).fetchone()
-    if accepted is None:
-        logger.warning('Skip stale profile observation: kind=%s, entity_id=%s, observed_at=%s',
-                       kind,entity_id,observed_at)
-        return False
-    return True
-
-
 def _update_video_profile(conn: Connection, aid: int, video_view: VideoView | None, code_error: int | None,
                           tags: str | None, members: list[NewMember], added: int, *,
                           run_id: UUID | None = None) -> list[TddVideoLog] | None:
@@ -114,9 +88,7 @@ def _update_video_profile(conn: Connection, aid: int, video_view: VideoView | No
         return None
     if code_error == -403:
         # This may be a login failure rather than an unavailable video. Keep
-        # both status and watermark unchanged so it cannot suppress valid observations.
-        return []
-    if not _claim_profile_observation('video',aid,added,conn):
+        # the stored profile unchanged.
         return []
     changes = {}
     def change(field: str, new: str | int | None) -> None:
@@ -184,8 +156,6 @@ def _update_member_profile(conn: Connection, mid: int, card: MemberCard | None, 
     current = _query_member(conn,mid)
     if current is None:
         return None
-    if not _claim_profile_observation('member',mid,added,conn):
-        return []
     changes = {}
     def change(field: str, new: str | int | None) -> None:
         old, new = clean_text(getattr(current,field)), clean_text(new)

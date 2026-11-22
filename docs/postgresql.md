@@ -34,9 +34,8 @@ configuration in `service/endpoints.json`.
 The database must already contain the compatible business tables, partitions
 and maintenance triggers. Install `db/ingest.sql` as the database owner before
 starting collectors. Grant the collector role `USAGE` on `tdd_ingest`,
-`SELECT` on `tdd_ingest.control`, `SELECT, INSERT, UPDATE` on
-`tdd_ingest.profile_observation`, and `INSERT` on
-`tdd_ingest.manifest`, alongside its business-table and identity-sequence
+`SELECT` on `tdd_ingest.control` and `INSERT` on `tdd_ingest.manifest`,
+alongside its business-table and identity-sequence
 permissions. Do not grant collectors `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE`
 on `tdd_ingest.control`. The application does not create or drop business tables.
 
@@ -65,7 +64,7 @@ Empty strings remain valid. `db.write.insert_video_records()` and
 `insert_member_follower_records()` accept the collected lightweight records and
 return complete keys only after commit. `db.profiles.update_video_profile()`
 and `update_member_profile()` lock and read stored snapshots, compare incoming
-values, and commit profile fields, staff, observation watermarks and logs
+values, and commit profile fields, staff and logs
 together. Their SQL stays in the database layer. Standalone queries borrow a
 pooled connection and release it before returning their result. Aid lookups
 return a snapshot or `None`; query errors propagate. An insert reports whether
@@ -134,38 +133,24 @@ convert them. Rerunning `db/ingest.sql` removes the manifest's old receipt
 foreign key, but leaves any legacy receipt table and its rows untouched. The
 new collector neither reads nor writes those receipts.
 
-## Profile observation order
+## Concurrent profile updates
 
-Mutable video and member profiles also record their most recent observed
-Unix second in `tdd_ingest.profile_observation`. A profile transaction locks
-the business row and advances this watermark atomically with profile fields,
-status, staff relationships and change logs. An older observation is treated
-as a no-op and logs a warning; it cannot undo a newer successful observation.
-Independent observations in the same second retain last-write-wins behavior.
-Video view/status time is captured before slower member/tag enrichment. The
-business row's `added` remains its original creation time. An ignored `-403`
-does not advance the watermark, and immutable statistics appends remain
-independent of profile ordering.
+Video and member updates lock the business row with `FOR UPDATE` before
+comparing fields. Profile changes, staff relationships and change logs share
+one transaction. A waiting updater compares against the preceding committed
+values, and its changes take effect when it commits, even if its HTTP input
+was observed earlier. Profile updates do not reject inputs by observation time.
 
-When upgrading an existing collector database, rerun `db/ingest.sql` and grant
-the collector `SELECT, INSERT, UPDATE` on the new watermark table before
-starting this code. For an existing baseline, initialize each video's and
-member's watermark with the baseline's source cutoff second before accepting
-profile updates. During a baseline replacement, stop collectors and drain
-transactions, hold the exclusive maintenance lock, retire failed inputs for
-the old run, then replace the profiles and their watermark entries in the
-same maintenance step. Seed `('video', aid, source_cutoff_second)` for every
-replaced video and `('member', mid, source_cutoff_second)` for every replaced
-member. Do not infer the cutoff from a business row's creation time or the
-later import completion time. The cutoff is an ordering fence for the
-installed baseline, not a claim that every source profile was fetched at that
-second. Do not submit pre-upgrade profile inputs whose ordering relative to
-that baseline is unknown.
-Keep watermark rows with their matching profiles when backing up or restoring
-a live deployment. Preserving watermarks from a different baseline can reject
-valid observations; clearing them while retaining failed old observations can
-allow stale state to return. Keep these watermarks when accepting a trial's
-profiles into formal mode; changing the run ID alone does not reset ordering.
+The update's `added` remains the business time of its change logs; video
+view/status time is captured before slower member/tag enrichment. It does not
+change the profile's original creation time. An ignored `-403` leaves the
+profile unchanged. Statistics retain their collection timestamps and their
+independent latest-table rules.
+
+During baseline replacement, stop collectors, drain transactions and hold the
+exclusive maintenance lock. Isolate failed inputs from the previous run for
+inspection; never replay them into the new baseline. There is no database
+ordering check that makes such a replay safe.
 
 Set `TDD_TRIAL_RUN_ID` to the active run UUID when collecting a trial run. This
 additionally records the complete primary keys of the seven immutable append
@@ -223,8 +208,8 @@ setting for a managed trial or formal deployment.
 Trial manifests are retained for the migration tools to reconcile or reset a
 trial. Those tools own cleanup and the protection that prevents an accepted
 trial from being deleted after formalization. The collector does not delete
-manifests or reset data. Restore profiles, their observation watermarks and
-trial metadata as a matching set.
+manifests or reset data. Restore business data and trial metadata as a matching
+set, and keep obsolete failed inputs isolated from the restored baseline.
 
 The input queue between HTTP fetchers and the batch writer remains in memory.
 A process or machine failure can lose fetched results that have not committed.
@@ -254,7 +239,7 @@ bypass flag or an empty control table.
 | --- | --- |
 | Connection pool, selected INI settings, timeout validation and transaction handling | Deployment/run control lookup, trial UUID configuration and unmanaged-test bypass |
 | Direct batch inserts and explicit generated-key returns | Trial-only manifest insertion, complete-key cleanup tables and migration-specific tests |
-| Profile snapshots, explicit field differences, row locks and observation watermarks | Baseline reset/import tools and the migration-wide shared/exclusive advisory-lock protocol |
+| Profile snapshots, explicit field differences and row locks | Baseline reset/import tools and the migration-wide shared/exclusive advisory-lock protocol |
 | Best-effort failure diagnostics and manual reconciliation of uncertain commits | Obsolete receipt/pending replay compatibility and migration-only installers |
 | Latest/last-video triggers, random-pool refresh and partition maintenance | Maintenance jobs' `require-active-run.sql` include and trial/control bindings |
 
@@ -274,12 +259,12 @@ the `formal` flag:
 3. Remove the temporary code, tests, grants and install/upgrade instructions.
    Retire `tdd_ingest.control` and `tdd_ingest.manifest` only after no live caller
    needs them; archive required migration evidence before deleting temporary
-   migration database objects and runtime files. Do not `DROP SCHEMA ... CASCADE`:
-   `tdd_ingest.profile_observation` and its permissions are permanent state.
+   migration database objects and runtime files. Remove the migration schema
+   only after checking its remaining objects and dependencies.
 4. Verify the resulting collector against an isolated database with no control
    or manifest tables: profile refresh, video/follower batches, hourly derived
    writes and scheduled maintenance must succeed. Check failure propagation,
-   uncertain-commit handling and watermark ordering still work. Confirm no
+   uncertain-commit handling and row-locked profile updates still work. Confirm no
    active code/configuration references the retired objects or trial flags.
 5. Deploy the reviewed steady-state version, resume schedules and verify actual
    writes and logs. If recovery uses an old backup, keep writers disabled until

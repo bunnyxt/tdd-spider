@@ -13,10 +13,6 @@ class ProfileConnection:
     def __init__(self):
         self.db = sqlite3.connect(':memory:')
         self.statements = []
-        self.db.execute("ATTACH DATABASE ':memory:' AS tdd_ingest")
-        self.db.execute('CREATE TABLE tdd_ingest.profile_observation '
-                        '(entity_kind TEXT NOT NULL,entity_id INTEGER NOT NULL,observed_at INTEGER NOT NULL,'
-                        'PRIMARY KEY(entity_kind,entity_id))')
         self.db.execute('CREATE TABLE tdd_video_record (id INTEGER PRIMARY KEY, '
                         + ','.join('"'+field+'"' for field in VIDEO_RECORD_COLUMNS) + ')')
         for model in (TddVideo,TddMember,TddVideoStaff,TddVideoLog,TddMemberLog):

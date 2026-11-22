@@ -58,7 +58,7 @@ class VideoMemberProfilesTest(unittest.TestCase):
         member = _query_member(self.conn,10)
         self.assertEqual((member.sex,member.sign,member.added),(None,'',1))
 
-    def test_member_log_failure_rolls_back_profile_and_watermark_without_mutating_snapshot(self):
+    def test_member_log_failure_rolls_back_profile_without_mutating_snapshot(self):
         self.conn.seed(TddMember(added=1,mid=10,name='old',face='',sex='',sign='',code=0))
         snapshot = _query_member(self.conn,10)
         before = vars(snapshot).copy()
@@ -69,7 +69,6 @@ class VideoMemberProfilesTest(unittest.TestCase):
                 update_member(10,self.service)
         self.assertEqual(vars(snapshot),before)
         self.assertEqual(_query_member(self.conn,10).name,'old')
-        self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_ingest.profile_observation').fetchone()[0],0)
 
     def test_query_failure_propagates_without_fetch_or_insert(self):
         with mock.patch.object(self.conn,'execute',side_effect=RuntimeError('query failed')):

@@ -124,8 +124,7 @@ def update_video(aid: int, service: Service) -> list[TddVideoLog]:
         video_view = service.get_video_view({'aid':aid})
     except CodeError as error:
         code_error = error
-    # Metadata enrichment may take much longer than the view request. Order
-    # profile changes by when the view/status was observed, before enrichment.
+    # Keep the view/status observation time for change logs, before enrichment.
     added = get_ts_s()
     tags = None
     members = {}
