@@ -24,10 +24,22 @@
 
 ## 安装
 
+### 长期配置（迁移结束后保留）
+
 1. 下载代码，`git clone https://github.com/bunnyxt/tdd-spider.git && cd tdd-spider`。
-2. 使用 Python 3.12 创建虚拟环境，运行 `pip install -r requirements.txt` 安装锁定依赖。
-3. 将 `conf/conf.ini.example` 复制为 `conf/conf.ini`，填写 PostgreSQL 连接配置；将 `service/endpoints.json.example` 复制为 `service/endpoints.json`，配置自己的 HTTP worker。
-4. 确认目标数据库已安装业务表、分区、维护 trigger 和 `db/ingest.sql` 中的写入控制辅助表。配置及失败留档、人工核对方式见 [PostgreSQL 运行说明](docs/postgresql.md)。写入失败后会尽力保存本次输入；如果提交状态不确定，操作者须先核对数据库，再决定是否重新提交。
+2. 运行 `python3.12 -m venv .venv` 创建虚拟环境，再用 `.venv/bin/python -m pip install -r requirements.txt` 安装锁定依赖。
+3. 将 `conf/conf.ini.example` 复制为 `conf/conf.ini`，填写 `[db_postgresql]` 连接配置；将 `service/endpoints.json.example` 复制为 `service/endpoints.json`，配置自己的 HTTP worker。
+4. 在仓库外安装兼容的业务表、分区、维护 trigger，并授予采集角色所需的业务表和 identity sequence 权限；应用不会创建这些对象。详见 [长期配置](docs/postgresql.md#permanent-setup)。
+5. 准备受限的失败留档目录；写入失败后会尽力保存输入。提交状态不确定时必须先人工核对数据库，任何重新提交也由人工处理，没有自动重放或重新提交命令。旧试跑轮次的失败文件不得回放到新基线。详见 [失败留档与人工核对](docs/postgresql.md#failed-writes)。
+
+### 迁移期配置（迁移收尾后移除）
+
+当前版本在正式采集期间也需要迁移保护；完成以下配置后才能启动写入。
+
+1. 停止采集后，以数据库 owner 安装 `db/ingest.sql`，建立迁移专用的 `tdd_ingest.control`、`manifest`；给采集角色 schema `USAGE`、control `SELECT`、manifest `INSERT` 权限，不授予修改 control 的权限。详见 [迁移期配置](docs/postgresql.md#migration-only-setup)；收尾按 [Retiring migration tooling](docs/postgresql.md#retiring-migration-tooling) 移除这些对象与授权。
+2. **首次写入前配置 control 行。** 安装 SQL 不会创建该行，空 control 会拒绝写入。正式模式设置 `formal`、`active_run_id=NULL`，不设置 `TDD_TRIAL_RUN_ID`；试跑模式设置 `trial` 和非 NULL 的 `active_run_id`，进程的 `TDD_TRIAL_RUN_ID` 必须与之相同。由 owner/维护角色按 [运行控制](docs/postgresql.md#migration-period-deployment-and-run-control) 配置；这套控制及试跑环境变量按 [Retiring migration tooling](docs/postgresql.md#retiring-migration-tooling) 退役。
+3. `TDD_ALLOW_UNMANAGED_INGEST=1` 仅允许一次性、可丢弃测试库使用空 control，不适用于托管试跑或正式部署，也不能覆盖已有 control 行。该测试兼容开关按 [Retiring migration tooling](docs/postgresql.md#retiring-migration-tooling) 移除。
+4. 保留 `db/migration.py` 及两处钩子：`transaction.write` 调用 `before_write`，`append_rows` 调用 `record_keys`。它们与迁移控制一同按 [Retiring migration tooling](docs/postgresql.md#retiring-migration-tooling) 移除；当前版本不能提前删表绕过保护。
 
 ## 运行
 

@@ -1,11 +1,16 @@
 # PostgreSQL collector runtime
 
+## Permanent setup
+
+These requirements remain after migration tooling is retired.
+
 Use Python 3.12 and the locked dependencies in `requirements.txt`:
 
 ```sh
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 cp conf/conf.ini.example conf/conf.ini
+cp service/endpoints.json.example service/endpoints.json
 ```
 
 Configure `[db_postgresql]` in `conf/conf.ini`. `TDD_CONFIG_PATH` selects a
@@ -31,13 +36,49 @@ integer (default `4`). This is a per-process connection limit; choose the deploy
 value after testing representative workloads and concurrent scripts. HTTP fetchers keep their existing worker
 configuration in `service/endpoints.json`.
 
-The database must already contain the compatible business tables, partitions
-and maintenance triggers. Install `db/ingest.sql` as the database owner before
-starting collectors. Grant the collector role `USAGE` on `tdd_ingest`,
-`SELECT` on `tdd_ingest.control` and `INSERT` on `tdd_ingest.manifest`,
-alongside its business-table and identity-sequence
-permissions. Do not grant collectors `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE`
-on `tdd_ingest.control`. The application does not create or drop business tables.
+Install compatible business tables, partitions and maintenance triggers outside
+this repository. Grant the collector role the business-table and identity-sequence
+permissions its operations require. The application does not create or drop
+business tables.
+
+Prepare a restricted directory for best-effort failed-write files (by default
+`data/failed-writes/`, configurable with `TDD_FAILURE_DIR`). Reconciliation of
+uncertain commits and any resubmission are manual; no automatic replay or
+resubmission command is provided. Never replay an earlier trial's failure files
+into a new baseline. See [Failed writes](#failed-writes).
+
+## Migration-only setup
+
+The following requirements are temporary, but remain mandatory in the current
+version through trials, cutover and the migration wrap-up window, including
+formal collection. Installing the SQL alone does not enable writes.
+
+1. With collectors stopped, install `db/ingest.sql` as the database owner. The
+   entire `tdd_ingest` schema (`control`, `manifest`) is migration-only. Grant
+   the collector role `USAGE` on `tdd_ingest`, `SELECT` on `tdd_ingest.control`
+   and `INSERT` on `tdd_ingest.manifest`. Do not grant collectors `INSERT`,
+   `UPDATE`, `DELETE` or `TRUNCATE` on control, or cleanup rights on manifest.
+   Remove these objects, grants and installation instructions through
+   [Retiring migration tooling](#retiring-migration-tooling).
+2. **Configure control before starting writers.** Installation leaves it empty
+   and writes fail closed. The owner or maintenance role must configure `formal`
+   with `active_run_id=NULL` and no process `TDD_TRIAL_RUN_ID`, or `trial` with
+   a non-NULL `active_run_id` and the identical process `TDD_TRIAL_RUN_ID`.
+   Follow [deployment and run control](#migration-period-deployment-and-run-control),
+   including the maintenance lock. Remove control and trial environment settings
+   through [Retiring migration tooling](#retiring-migration-tooling).
+3. `TDD_ALLOW_UNMANAGED_INGEST=1` is only for disposable, one-off test databases
+   with an installed but empty control table. It cannot bypass a missing table
+   or an existing row, including `stopped`, and is not a managed-deployment setup
+   option. Remove this compatibility flag through
+   [Retiring migration tooling](#retiring-migration-tooling).
+4. Keep `db/migration.py` and the two hooks: `transaction.write` calls
+   `before_write`; `append_rows` calls `record_keys`. They provide run control,
+   the maintenance lock and trial manifests. Remove the module and hooks through
+   [Retiring migration tooling](#retiring-migration-tooling), together with their
+   database dependencies.
+
+## Database writes and data semantics
 
 Application timestamps remain integer Unix seconds. PostgreSQL stores `added`
 and diagnostic snapshot timestamps as whole-second `timestamptz`. Only actual
@@ -144,8 +185,10 @@ diagnostics. If connection acquisition or the gate itself fails, no business
 callback has run and that label is absent. It is never passed into business SQL.
 
 A lost connection during COMMIT may mean the data was committed even though
-the caller received an error. Before manually submitting a failed input,
-compare it with the database and its trial manifest where applicable. Do not
+the caller received an error. Reconciliation and any resubmission are manual;
+there is no resubmission command. Compare the input with the database and its
+trial manifest where applicable. Isolate failure files from earlier trial
+rounds; never replay them into a new baseline. Do not
 blindly repeat or split a transaction whose commit outcome is unknown: there
 is no receipt-based deduplication. Repeated submissions can create additional
 valid same-second records. Confirmed batches alone continue to downstream
@@ -210,6 +253,31 @@ The owner or a separate maintenance role configures the single row in
 | `stopped` | None: all writes are rejected. |
 | `trial` | Exactly `active_run_id`, which must be a non-NULL UUID. |
 | `formal` | SQL NULL only; `active_run_id` must also be NULL. |
+
+For a new installation with an empty control table, the owner can initialize
+formal mode in a single `psql` session as follows. Stop and drain collectors
+and scheduled maintenance first, supply a deployment UUID with the `psql`
+option `--set=deployment_id=YOUR_DEPLOYMENT_UUID` using the maintenance connection's normal
+authentication, and leave `TDD_TRIAL_RUN_ID` unset in collector processes:
+
+```sql
+\set ON_ERROR_STOP on
+SELECT pg_advisory_lock(141376009, 169);
+BEGIN;
+INSERT INTO tdd_ingest.control (singleton, deployment_id, mode, active_run_id)
+VALUES (true, :'deployment_id'::uuid, 'formal', NULL);
+COMMIT;
+SELECT pg_advisory_unlock(141376009, 169);
+```
+
+For a new trial, use `'trial', :'trial_run_id'::uuid` in place of `'formal', NULL`,
+supply `trial_run_id` as a `psql` variable, and start collectors with exactly that
+UUID as `TDD_TRIAL_RUN_ID`. These examples deliberately reject an existing
+control row; changing an existing deployment requires the maintenance procedure
+below, not rerunning initialization. If an error interrupts an interactive
+session, roll back and disconnect to release its session lock. Control and its
+environment settings are removed through
+[Retiring migration tooling](#retiring-migration-tooling).
 
 Each observation, append, and hourly `recent`/`activity`/`freq` write transaction
 takes transaction-level shared advisory lock
