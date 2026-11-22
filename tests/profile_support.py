@@ -4,7 +4,7 @@ import sqlite3
 from unittest import mock
 
 from db import TddVideo,TddMember,TddVideoStaff,TddVideoLog,TddMemberLog
-from db.values import epoch
+from db.values import database_value, epoch
 from db.profiles import _query_video, _query_member
 from db.write import VIDEO_RECORD_COLUMNS
 
@@ -49,9 +49,25 @@ class ProfileConnection:
         return [(obj.id,) for obj in objects]
 
     def write(self,function,*args,**kwargs):
-        with self.transaction(), mock.patch('db.profiles._append_objects',side_effect=self.append), \
+        with self.transaction(), \
+                mock.patch('db.profiles.append_video_logs',side_effect=self.append_video_logs), \
+                mock.patch('db.profiles.append_member_logs',side_effect=self.append_member_logs), \
                 mock.patch('db.profiles.append_video_records',side_effect=self.append_video_records):
             return function(self,*args,**kwargs)
+
+    def _append_logs(self,model,logs):
+        columns = model.fields[1:]
+        statement = ('INSERT INTO ' + model.table + ' (' + ','.join(columns) + ') VALUES (' +
+                     ','.join(['%s']*len(columns)) + ') RETURNING ' + ','.join(model.fields))
+        return [model(**dict(zip(model.fields,map(epoch,self.execute(
+            statement,tuple(database_value(field,getattr(log,field)) for field in columns)).fetchone()))))
+            for log in logs]
+
+    def append_video_logs(self,conn,logs):
+        return self._append_logs(TddVideoLog,logs)
+
+    def append_member_logs(self,conn,logs):
+        return self._append_logs(TddMemberLog,logs)
 
     def append_video_records(self,conn,records):
         return [self.execute(

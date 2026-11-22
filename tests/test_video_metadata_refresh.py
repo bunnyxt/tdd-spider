@@ -224,7 +224,7 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         def fail(*args,**kwargs):
             raise RuntimeError('log insert failed')
         with mock.patch('db.profiles._query_video',return_value=snapshot),\
-             mock.patch.object(self.conn,'append',side_effect=fail), self.assertRaisesRegex(RuntimeError,'log insert'):
+             mock.patch.object(self.conn,'append_video_logs',side_effect=fail), self.assertRaisesRegex(RuntimeError,'log insert'):
             self.refresh()
         self.assertEqual(vars(snapshot),before)
         self.assertEqual(_query_video(self.conn,7).title,'old')

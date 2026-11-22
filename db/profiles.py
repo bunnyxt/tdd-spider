@@ -2,11 +2,11 @@
 import logging
 
 from psycopg import Connection
-from core import NewVideo, NewMember, VideoRecord
+from core import NewVideo, NewMember, VideoRecord, NewVideoLog, NewMemberLog
 from service import MemberCard, VideoView, VideoViewStaffItem
 from .models import TddVideo, TddMember, TddVideoLog, TddMemberLog, TddVideoStaff
 from .values import clean_text, database_value, epoch
-from .write import _append_objects, append_video_records
+from .write import append_video_logs, append_member_logs, append_video_records
 from .transaction import write
 from util import a2b, same_pic_url
 
@@ -79,7 +79,7 @@ def _insert_prepared_members(prepared: list[NewMember], conn: Connection) -> Non
 
 def _update_video_profile(conn: Connection, aid: int, video_view: VideoView | None, code_error: int | None,
                           tags: str | None, members: list[NewMember], added: int) -> list[TddVideoLog] | None:
-    logs = []
+    logs: list[NewVideoLog] = []
     current = _query_video(conn,aid)
     if current is None:
         return None
@@ -89,7 +89,7 @@ def _update_video_profile(conn: Connection, aid: int, video_view: VideoView | No
         if old == new:
             return
         changes[field] = (old,new)
-        logs.append(TddVideoLog(added,aid,attr=field,
+        logs.append(NewVideoLog(added,aid,attr=field,
                                oldval=None if old is None else str(old),
                                newval=None if new is None else str(new)))
     if code_error is not None:
@@ -121,16 +121,16 @@ def _update_video_profile(conn: Connection, aid: int, video_view: VideoView | No
                 if old is None:
                     new_staff = _insert_staff(conn,added,aid,item.mid,title)
                     if new_staff is not None:
-                        logs.append(TddVideoLog(added,aid,attr='staff',newval=f'mid: {new_staff.mid}; title: {title}'))
+                        logs.append(NewVideoLog(added,aid,attr='staff',newval=f'mid: {new_staff.mid}; title: {title}'))
                 elif clean_text(old.title) != title:
-                    logs.append(TddVideoLog(added,aid,attr='staff',oldval=f'mid: {old.mid}; title: {clean_text(old.title)}',newval=f'mid: {item.mid}; title: {title}'))
+                    logs.append(NewVideoLog(added,aid,attr='staff',oldval=f'mid: {old.mid}; title: {clean_text(old.title)}',newval=f'mid: {item.mid}; title: {title}'))
                     conn.execute('UPDATE tdd_video_staff SET title = %s WHERE id = %s',
                                     (title,old.id))
             for mid,item in existing.items():
                 if mid not in remaining:
                     continue
                 conn.execute('DELETE FROM tdd_video_staff WHERE id = %s',(item.id,))
-                logs.append(TddVideoLog(added,aid,attr='staff',oldval=f'mid: {item.mid}; title: {clean_text(item.title)}'))
+                logs.append(NewVideoLog(added,aid,attr='staff',oldval=f'mid: {item.mid}; title: {clean_text(item.title)}'))
         if tags is not None:
             tags = clean_text(tags)
             if sorted(tags.split(';')) != sorted((clean_text(current.tags) or '').split(';')):
@@ -139,13 +139,12 @@ def _update_video_profile(conn: Connection, aid: int, video_view: VideoView | No
         assignments = ', '.join('"' + field + '" = %s' for field in changes)
         conn.execute('UPDATE tdd_video SET ' + assignments + ' WHERE id = %s',
                         tuple(database_value(field,new) for field,(_,new) in changes.items()) + (current.id,))
-    _append_objects(conn,logs)
-    return logs
+    return append_video_logs(conn,logs)
 
 
 def _update_member_profile(conn: Connection, mid: int, card: MemberCard | None, code: int,
                            added: int) -> list[TddMemberLog] | None:
-    logs = []
+    logs: list[NewMemberLog] = []
     current = _query_member(conn,mid)
     if current is None:
         return None
@@ -155,7 +154,7 @@ def _update_member_profile(conn: Connection, mid: int, card: MemberCard | None, 
         if old == new:
             return
         changes[field] = (old,new)
-        logs.append(TddMemberLog(added,mid,attr=field,
+        logs.append(NewMemberLog(added,mid,attr=field,
                                 oldval=None if old is None else str(old),
                                 newval=None if new is None else str(new)))
     change('code',code)
@@ -169,8 +168,7 @@ def _update_member_profile(conn: Connection, mid: int, card: MemberCard | None, 
         assignments = ', '.join('"' + field + '" = %s' for field in changes)
         conn.execute('UPDATE tdd_member SET ' + assignments + ' WHERE id = %s',
                         tuple(database_value(field,new) for field,(_,new) in changes.items()) + (current.id,))
-    _append_objects(conn,logs)
-    return logs
+    return append_member_logs(conn,logs)
 
 
 def _insert_staff(conn: Connection, added: int, aid: int, mid: int, title: str) -> TddVideoStaff | None:

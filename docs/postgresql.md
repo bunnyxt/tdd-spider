@@ -114,6 +114,13 @@ a competing insert after a precheck. Tasks interpret these outcomes as success,
 `AlreadyExistError` or `NotExistError`. Unrelated constraint violations and
 connection errors remain database errors.
 
+Profile differences use `NewVideoLog` / `NewMemberLog` write inputs without
+generated IDs. Their inserts return the complete stored rows; only then does
+the database layer construct `TddVideoLog` / `TddMemberLog` snapshots. Inputs
+are never patched with generated IDs. Log inserts, trial keys and profile/staff
+changes remain in the same transaction, and the public return types stay the
+same.
+
 `db.profiles.create_video()` accepts a `NewVideo`, prepared `NewMember` inputs,
 staff relationships and an optional first `VideoRecord`. Creation inputs carry
 no generated IDs. Database-defaulted columns are omitted; business values such

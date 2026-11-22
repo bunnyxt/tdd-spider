@@ -34,22 +34,8 @@ TddVideoStaff = row_type('TddVideoStaff', 'tdd_video_staff', ('id','added','aid'
 TddSprintVideoRecord = row_type('TddSprintVideoRecord', 'tdd_sprint_video_record', ('id','added','aid') + STAT_FIELDS)
 
 
-class TddVideoLog(Row):
-    table = 'tdd_video_log'
-    fields = ('id','added','aid','attr','oldval','newval')
-    def __init__(self, added: int | None = None, aid: int | None = None,
-                 attr: str | None = None,
-                 oldval: str | None = None, newval: str | None = None, **values: Any) -> None:
-        super().__init__(added=added, aid=aid, attr=attr, oldval=oldval, newval=newval, **values)
-
-
-class TddMemberLog(Row):
-    table = 'tdd_member_log'
-    fields = ('id','added','mid','attr','oldval','newval')
-    def __init__(self, added: int | None = None, mid: int | None = None,
-                 attr: str | None = None, oldval: str | None = None,
-                 newval: str | None = None, **values: Any) -> None:
-        super().__init__(added=added, mid=mid, attr=attr, oldval=oldval, newval=newval, **values)
+TddVideoLog = row_type('TddVideoLog', 'tdd_video_log', ('id','added','aid','attr','oldval','newval'))
+TddMemberLog = row_type('TddMemberLog', 'tdd_member_log', ('id','added','mid','attr','oldval','newval'))
 
 
 __all__ = [name for name in globals() if name.startswith('Tdd')]

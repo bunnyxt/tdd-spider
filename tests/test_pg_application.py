@@ -102,7 +102,7 @@ class PostgresApplicationTest(unittest.TestCase):
             self.assertEqual(query_member_via_mid(mid).last_video_aid,self.aid)
         self.assertEqual(read_value('SELECT added FROM tdd_video_record_latest WHERE aid=%s',(self.aid,)),ADDED)
         self.service.get_video_view.return_value = self.video_view()._replace(title='changed',state=-4,staff=[])
-        with mock.patch('db.profiles._append_objects',side_effect=RuntimeError('injected log failure')):
+        with mock.patch('db.profiles.append_video_logs',side_effect=RuntimeError('injected log failure')):
             with self.assertRaisesRegex(RuntimeError,'injected log failure'):
                 update_video(self.aid,self.service)
         current = query_video_via_aid(self.aid)
@@ -113,7 +113,10 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual(len(pending),1)
         # The injected log failure proved rollback; retry the original business
         # operation explicitly. The failure diagnostic is retained for review.
-        update_video(self.aid,self.service)
+        stored_logs = update_video(self.aid,self.service)
+        self.assertEqual([vars(log) for log in stored_logs], read_rows(
+            'SELECT id,added,aid,attr,oldval,newval FROM tdd_video_log WHERE id=ANY(%s) ORDER BY id',
+            ([log.id for log in stored_logs],)))
         self.assertTrue(pending[0].exists())
         current = query_video_via_aid(self.aid)
         self.assertEqual((current.title,current.state),('changed',-4))

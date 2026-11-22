@@ -4,12 +4,12 @@ from collections.abc import Mapping, Sequence
 from typing import cast
 
 from psycopg import Connection
-from core import VideoRecord, MemberFollowerRecord
-from .ingest import AppendKey, HistoryKey
-from .models import Row
+from core import VideoRecord, MemberFollowerRecord, NewVideoLog, NewMemberLog
+from .ingest import HistoryKey
+from .models import TddVideoLog, TddMemberLog
 from .transaction import write
 
-from .values import database_value
+from .values import database_value, epoch
 
 VIDEO_RECORD_COLUMNS = ('added', 'aid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like')
 
@@ -24,20 +24,26 @@ def append_video_records(conn: Connection, records: Sequence[VideoRecord]) -> li
     return cast(list[HistoryKey], append_rows(conn, 'tdd_video_record', VIDEO_RECORD_COLUMNS, rows))
 
 
-def _append_objects(conn: Connection, objects: Sequence[Row]) -> list[AppendKey]:
-    """Internal homogeneous append used by profile logs and legacy record writes."""
-    if not objects:
+def append_video_logs(conn: Connection, logs: Sequence[NewVideoLog]) -> list[TddVideoLog]:
+    """Append profile differences and return stored snapshots in the same transaction."""
+    if not logs:
         return []
     from .ingest import append_rows
-    model = type(objects[0])
-    if any(type(obj) is not model for obj in objects):
-        raise ValueError('An append batch must contain one row type')
-    columns = tuple(field for field in model.fields if field != 'id')
-    rows = [tuple(database_value(field, getattr(obj, field)) for field in columns) for obj in objects]
-    keys = append_rows(conn, model.table, columns, rows)
-    for obj, key in zip(objects, keys):
-        obj.id = key[-1]
-    return keys
+    columns = ('added', 'aid', 'attr', 'oldval', 'newval')
+    rows = [tuple(database_value(field, getattr(log, field)) for field in columns) for log in logs]
+    stored = append_rows(conn, 'tdd_video_log', columns, rows, returning=TddVideoLog.fields)
+    return [TddVideoLog(**dict(zip(TddVideoLog.fields, map(epoch, row)))) for row in stored]
+
+
+def append_member_logs(conn: Connection, logs: Sequence[NewMemberLog]) -> list[TddMemberLog]:
+    """Append profile differences and return stored snapshots in the same transaction."""
+    if not logs:
+        return []
+    from .ingest import append_rows
+    columns = ('added', 'mid', 'attr', 'oldval', 'newval')
+    rows = [tuple(database_value(field, getattr(log, field)) for field in columns) for log in logs]
+    stored = append_rows(conn, 'tdd_member_log', columns, rows, returning=TddMemberLog.fields)
+    return [TddMemberLog(**dict(zip(TddMemberLog.fields, map(epoch, row)))) for row in stored]
 
 
 def append_member_follower_records(conn: Connection, records: Sequence[MemberFollowerRecord]) -> list[HistoryKey]:

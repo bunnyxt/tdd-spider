@@ -64,7 +64,7 @@ class VideoMemberProfilesTest(unittest.TestCase):
         before = vars(snapshot).copy()
         self.service.get_member_card.return_value = MemberCard(10,'new','','','')
         with mock.patch('db.profiles._query_member',return_value=snapshot),\
-             mock.patch.object(self.conn,'append',side_effect=RuntimeError('log failed')):
+             mock.patch.object(self.conn,'append_member_logs',side_effect=RuntimeError('log failed')):
             with self.assertRaisesRegex(RuntimeError,'log failed'):
                 update_member(10,self.service)
         self.assertEqual(vars(snapshot),before)
