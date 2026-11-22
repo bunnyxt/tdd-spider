@@ -15,9 +15,9 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.conn = ProfileConnection()
         self.addCleanup(self.conn.close)
         self.conn.patch_task_reads(self)
-        self.view = expected_result()._replace(bvid='BV1234567890',pic='https://example.test/cover.jpg')
+        self.video_view = expected_result()._replace(bvid='BV1234567890',pic='https://example.test/cover.jpg')
         self.service = mock.Mock()
-        self.service.get_video_view.return_value = self.view
+        self.service.get_video_view.return_value = self.video_view
         self.service.get_video_tags.return_value.tags = []
         self.conn.seed(TddMember(added=1,mid=8,name='owner',face='',code=0))
         self.conn.seed(TddMember(added=1,mid=10,name='staff',face='',code=0))
@@ -26,29 +26,29 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def seed(self,**overrides):
-        view = self.view
-        values = {field:getattr(view,field) for field in ('videos','tid','tname','copyright','pic','title','pubdate','desc','state','attribute','forward')}
-        values.update(added=1,aid=view.aid,bvid=view.bvid.removeprefix('BV'),mid=view.owner.mid,hasstaff=1,tags='',code=0)
+        video_view = self.video_view
+        values = {field:getattr(video_view,field) for field in ('videos','tid','tname','copyright','pic','title','pubdate','desc','state','attribute','forward')}
+        values.update(added=1,aid=video_view.aid,bvid=video_view.bvid.removeprefix('BV'),mid=video_view.owner.mid,hasstaff=1,tags='',code=0)
         values.update(overrides)
         self.conn.seed(TddVideo(**values))
-        self.conn.seed(TddVideoStaff(added=1,aid=view.aid,bvid='1234567890',mid=10,title='producer'))
+        self.conn.seed(TddVideoStaff(added=1,aid=video_view.aid,bvid='1234567890',mid=10,title='producer'))
 
     def refresh(self,tags=''):
         with mock.patch('task.task._get_video_tags_str',return_value=tags):
-            logs = update_video(self.view.aid,self.service)
+            logs = update_video(self.video_view.aid,self.service)
         return {log.attr:(log.oldval,log.newval) for log in logs}
 
     def use_api_response(self,response):
-        response['data'].update(bvid=self.view.bvid,pic=self.view.pic)
+        response['data'].update(bvid=self.video_view.bvid,pic=self.video_view.pic)
         self.service.get_video_view.side_effect = lambda params: get_video_view.get(
             lambda *args,**kwargs:response,params=params)
 
     def test_null_cover_pubdate_owner_and_sorted_tags(self):
         self.seed(pic=None,pubdate=None,mid=None,tags=None)
         changes = self.refresh('music;animation')
-        self.assertEqual(changes,{'pic':(None,self.view.pic),'pubdate':(None,'10'),'mid':(None,'8'),'tags':(None,'music;animation')})
+        self.assertEqual(changes,{'pic':(None,self.video_view.pic),'pubdate':(None,'10'),'mid':(None,'8'),'tags':(None,'music;animation')})
         current = _query_video(self.conn,7)
-        self.assertEqual((current.pic,current.pubdate,current.mid),(self.view.pic,10,8))
+        self.assertEqual((current.pic,current.pubdate,current.mid),(self.video_view.pic,10,8))
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_video_log').fetchone()[0],4)
 
     def test_equivalent_tags_and_only_actual_nul_do_not_generate_changes(self):
@@ -96,7 +96,7 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.use_api_response(response)
         with self.assertRaises(FormatError):
             self.refresh()
-        self.assertEqual(_query_video(self.conn,7).title, self.view.title)
+        self.assertEqual(_query_video(self.conn,7).title, self.video_view.title)
         self.assertEqual(len(_query_staff(self.conn,7)), 1)
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_video_log').fetchone()[0], 0)
 
@@ -109,15 +109,15 @@ class VideoMetadataRefreshTest(unittest.TestCase):
             with self.subTest(operation=operation.__name__):
                 if operation is update_video:
                     self.seed(title='stored title')
-                with mock.patch('task.task.create_video') as create, \
+                with mock.patch('task.task.create_video') as create,\
                         mock.patch('task.task.update_video_profile') as update:
                     with self.assertRaises(FormatError):
-                        operation(self.view.aid,self.service)
+                        operation(self.video_view.aid,self.service)
                 create.assert_not_called()
                 update.assert_not_called()
                 self.service.get_member_card.assert_not_called()
                 self.service.get_video_tags.assert_not_called()
-                current = _query_video(self.conn,self.view.aid)
+                current = _query_video(self.conn,self.video_view.aid)
                 if operation is add_video:
                     self.assertIsNone(current)
                 else:
@@ -165,7 +165,7 @@ class VideoMetadataRefreshTest(unittest.TestCase):
 
     def test_explicit_null_and_literal_escape_are_logged_without_nul(self):
         self.seed(desc='old')
-        self.service.get_video_view.return_value = self.view._replace(desc='中\x00文\\u0000',attribute=None)
+        self.service.get_video_view.return_value = self.video_view._replace(desc='中\x00文\\u0000',attribute=None)
         changes = self.refresh()
         self.assertEqual(changes['desc'],('old','中文\\u0000'))
         self.assertEqual(changes['attribute'],('16',None))
@@ -173,32 +173,32 @@ class VideoMetadataRefreshTest(unittest.TestCase):
 
     def test_refresh_keeps_locked_profile_and_staff_snapshots_unchanged(self):
         self.seed(title='old',desc='old description')
-        snapshot = _query_video(self.conn,self.view.aid)
-        staff = _query_staff(self.conn,self.view.aid)
+        snapshot = _query_video(self.conn,self.video_view.aid)
+        staff = _query_staff(self.conn,self.video_view.aid)
         before = vars(snapshot).copy()
         staff_before = [vars(item).copy() for item in staff]
-        self.service.get_video_view.return_value = self.view._replace(
-            desc=None,staff=[self.view.staff[0]._replace(title='new role')])
-        with mock.patch('db.profiles._query_video',return_value=snapshot) as read, \
+        self.service.get_video_view.return_value = self.video_view._replace(
+            desc=None,staff=[self.video_view.staff[0]._replace(title='new role')])
+        with mock.patch('db.profiles._query_video',return_value=snapshot) as read,\
              mock.patch('db.profiles._query_staff',return_value=staff):
             changes = self.refresh()
-        read.assert_called_once_with(self.conn,self.view.aid)
+        read.assert_called_once_with(self.conn,self.video_view.aid)
         self.assertEqual(vars(snapshot),before)
         self.assertEqual([vars(item) for item in staff],staff_before)
-        self.assertEqual(changes,{'title':('old',self.view.title),'desc':('old description',None),
+        self.assertEqual(changes,{'title':('old',self.video_view.title),'desc':('old description',None),
                                   'staff':('mid: 10; title: producer','mid: 10; title: new role')})
-        stored = _query_video(self.conn,self.view.aid)
-        self.assertEqual((stored.title,stored.desc,stored.added),(self.view.title,None,1))
-        self.assertEqual(_query_staff(self.conn,self.view.aid)[0].title,'new role')
+        stored = _query_video(self.conn,self.video_view.aid)
+        self.assertEqual((stored.title,stored.desc,stored.added),(self.video_view.title,None,1))
+        self.assertEqual(_query_staff(self.conn,self.video_view.aid)[0].title,'new role')
 
     def test_log_failure_rolls_back_profile_and_staff(self):
         self.seed(title='old')
-        snapshot = _query_video(self.conn,self.view.aid)
+        snapshot = _query_video(self.conn,self.video_view.aid)
         before = vars(snapshot).copy()
-        self.service.get_video_view.return_value = self.view._replace(staff=[])
+        self.service.get_video_view.return_value = self.video_view._replace(staff=[])
         def fail(*args,**kwargs):
             raise RuntimeError('log insert failed')
-        with mock.patch('db.profiles._query_video',return_value=snapshot), \
+        with mock.patch('db.profiles._query_video',return_value=snapshot),\
              mock.patch.object(self.conn,'append',side_effect=fail), self.assertRaisesRegex(RuntimeError,'log insert'):
             self.refresh()
         self.assertEqual(vars(snapshot),before)
@@ -209,12 +209,12 @@ class VideoMetadataRefreshTest(unittest.TestCase):
     def test_new_video_repeated_staff_keeps_first_title_and_commits_video(self):
         from task.task import add_video
         from service import VideoViewStaffItem
-        self.service.get_video_view.return_value = self.view._replace(
+        self.service.get_video_view.return_value = self.video_view._replace(
             staff=[VideoViewStaffItem(10,'first','',''),VideoViewStaffItem(10,'second','','')])
-        video = add_video(self.view.aid,self.service,commit_video_record=False)
+        video = add_video(self.video_view.aid,self.service)
         self.assertIsNotNone(video.id)
-        self.assertEqual(_query_video(self.conn,self.view.aid).title,self.view.title)
-        staff = _query_staff(self.conn,self.view.aid)
+        self.assertEqual(_query_video(self.conn,self.video_view.aid).title,self.video_view.title)
+        staff = _query_staff(self.conn,self.video_view.aid)
         self.assertEqual([(item.mid,item.title) for item in staff],[(10,'first')])
 
     def test_new_video_tags_failure_aborts_before_database_writes(self):
@@ -222,10 +222,10 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         error = ServiceError()
         self.service.get_video_tags.side_effect = error
         with self.assertRaises(ServiceError) as caught:
-            add_video(self.view.aid,self.service)
+            add_video(self.video_view.aid,self.service)
         self.assertIs(caught.exception,error)
-        self.assertIsNone(_query_video(self.conn,self.view.aid))
-        self.assertEqual(_query_staff(self.conn,self.view.aid),[])
+        self.assertIsNone(_query_video(self.conn,self.video_view.aid))
+        self.assertEqual(_query_staff(self.conn,self.video_view.aid),[])
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_ingest.profile_observation').fetchone()[0],0)
         self.service.get_member_card.assert_not_called()
 
@@ -233,9 +233,9 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         from task.task import add_video
         for aid,tag,isvc in ((7,'vocaloid中文曲',2),(9,'other',-1)):
             with self.subTest(tag=tag):
-                self.service.get_video_view.return_value = self.view._replace(aid=aid,staff=None)
+                self.service.get_video_view.return_value = self.video_view._replace(aid=aid,staff=None)
                 self.service.get_video_tags.return_value.tags = [mock.Mock(tag_name=tag)]
-                video = add_video(aid,self.service,commit_video_record=False)
+                video = add_video(aid,self.service)
                 self.assertEqual((video.code,video.recent,video.freq,video.activity),(0,2,0,0))
                 self.assertEqual((video.solo,video.original,video.employed,video.engine),(-1,-1,-1,-1))
                 self.assertEqual((video.hasstaff,video.isvc,video.tags),(0,isvc,tag+';'))
@@ -245,24 +245,24 @@ class VideoMetadataRefreshTest(unittest.TestCase):
         self.seed(title='old title',tags='stored tags;')
         self.service.get_video_tags.side_effect = ServiceError()
         with self.assertLogs('task',level='WARNING'):
-            logs = update_video(self.view.aid,self.service)
-        current = _query_video(self.conn,self.view.aid)
-        self.assertEqual((current.tags,current.title),('stored tags;',self.view.title))
+            logs = update_video(self.video_view.aid,self.service)
+        current = _query_video(self.conn,self.video_view.aid)
+        self.assertEqual((current.tags,current.title),('stored tags;',self.video_view.title))
         self.assertEqual({log.attr:(log.oldval,log.newval) for log in logs},
-                         {'title':('old title',self.view.title)})
+                         {'title':('old title',self.video_view.title)})
 
     def test_refresh_repeated_existing_and_new_staff_preserves_first_logs_and_other_changes(self):
         from service import VideoViewStaffItem
         self.seed()
         self.conn.seed(TddMember(added=1,mid=11,name='staff',face='',code=0))
-        self.conn.seed(TddVideoStaff(added=1,aid=self.view.aid,bvid='1234567890',mid=12,title='removed'))
-        self.service.get_video_view.return_value = self.view._replace(title='changed',staff=[
+        self.conn.seed(TddVideoStaff(added=1,aid=self.video_view.aid,bvid='1234567890',mid=12,title='removed'))
+        self.service.get_video_view.return_value = self.video_view._replace(title='changed',staff=[
             VideoViewStaffItem(10,'first-existing','',''),VideoViewStaffItem(10,'second-existing','',''),
             VideoViewStaffItem(11,'first-new','',''),VideoViewStaffItem(11,'second-new','','')])
         with mock.patch('task.task._get_video_tags_str',return_value=''),self.assertLogs('db.profiles',level='WARNING'):
-            logs = update_video(self.view.aid,self.service)
-        self.assertEqual(_query_video(self.conn,self.view.aid).title,'changed')
-        staff = _query_staff(self.conn,self.view.aid)
+            logs = update_video(self.video_view.aid,self.service)
+        self.assertEqual(_query_video(self.conn,self.video_view.aid).title,'changed')
+        staff = _query_staff(self.conn,self.video_view.aid)
         self.assertEqual({item.mid:item.title for item in staff},{10:'first-existing',11:'first-new'})
         staff_logs = [(item.oldval,item.newval) for item in logs if item.attr == 'staff']
         self.assertEqual(staff_logs,[('mid: 10; title: producer','mid: 10; title: first-existing'),

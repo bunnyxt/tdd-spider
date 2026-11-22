@@ -26,7 +26,7 @@ from psycopg.rows import dict_row
 from db.values import timestamp, epoch
 from job import FetchMemberFollowerRecordJob,BatchInsertMemberFollowerRecordJob
 from service import CodeError,MemberCard,VideoView,VideoViewOwner,VideoViewStaffItem,VideoViewStat,VideoTags
-from task import add_video,update_video,add_member,update_member,commit_video_records_batch,commit_member_follower_records_batch
+from task import add_video,update_video,update_member,commit_video_records_batch,commit_member_follower_records_batch
 from util import a2b
 from util.member_total_stat import aggregate_member_stats
 from util.member_total_stat_writer import write_member_stats
@@ -69,7 +69,7 @@ class PostgresApplicationTest(unittest.TestCase):
         self.service = mock.Mock()
         self.service.get_member_card.side_effect = lambda params,**kwargs: MemberCard(params['mid'],'member','','','sign\x00')
         self.service.get_video_tags.return_value = VideoTags([])
-        self.service.get_video_view.return_value = self.view()
+        self.service.get_video_view.return_value = self.video_view()
 
     def expected_manifest(self, counts):
         # The writer can append to the manifest, but cannot read or delete it.
@@ -80,7 +80,7 @@ class PostgresApplicationTest(unittest.TestCase):
             with open(path,'a',encoding='utf-8') as stream:
                 stream.write(json.dumps(result,sort_keys=True)+'\n')
 
-    def view(self,aid=None,mid=None,view=10,staff=True,pubdate=100):
+    def video_view(self,aid=None,mid=None,view=10,staff=True,pubdate=100):
         aid = self.aid if aid is None else aid
         mid = self.mid if mid is None else mid
         return VideoView(bvid='BV'+a2b(aid),aid=aid,videos=1,tid=30,tname='music',copyright=1,
@@ -101,7 +101,7 @@ class PostgresApplicationTest(unittest.TestCase):
         for mid in (self.mid,self.mid+1):
             self.assertEqual(query_member_via_mid(mid).last_video_aid,self.aid)
         self.assertEqual(read_value('SELECT added FROM tdd_video_record_latest WHERE aid=%s',(self.aid,)),ADDED)
-        self.service.get_video_view.return_value = self.view()._replace(title='changed',state=-4,staff=[])
+        self.service.get_video_view.return_value = self.video_view()._replace(title='changed',state=-4,staff=[])
         with mock.patch('db.profiles._append_objects',side_effect=RuntimeError('injected log failure')):
             with self.assertRaisesRegex(RuntimeError,'injected log failure'):
                 update_video(self.aid,self.service)
@@ -120,7 +120,7 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual(read_staff(self.aid),[])
         for mid in (self.mid,self.mid+1):
             self.assertIsNone(query_member_via_mid(mid).last_video_aid)
-        self.service.get_video_view.return_value = self.view()._replace(title='changed')
+        self.service.get_video_view.return_value = self.video_view()._replace(title='changed')
         update_video(self.aid,self.service)
         self.assertEqual(query_member_via_mid(self.mid+1).last_video_aid,self.aid)
         rows = read_rows('SELECT attr,oldval,newval FROM tdd_video_log WHERE aid=%s',(self.aid,))
@@ -222,7 +222,7 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertEqual(update_video(self.aid,self.service),[])
         self.assertEqual(query_video_via_aid(self.aid).code,0)
         self.service.get_video_view.side_effect = None
-        self.service.get_video_view.return_value = self.view()._replace(staff=None,attribute=None,
+        self.service.get_video_view.return_value = self.video_view()._replace(staff=None,attribute=None,
             response_has_attribute=False,response_has_forward=False)
         logs = update_video(self.aid,self.service)
         self.assertEqual({row.attr:(row.oldval,row.newval) for row in logs},{'hasstaff':('1','0')})
@@ -234,21 +234,24 @@ class PostgresApplicationTest(unittest.TestCase):
     def test_member_null_empty_optional_missing_and_late_profile(self):
         create_video(NewVideo(added=ADDED,aid=self.aid,bvid=a2b(self.aid),mid=self.mid,
                               state=0,title='late profile',pubdate=100),staff=[],new_members=[])
-        inserted_member = add_member(self.mid,self.service)
-        self.assertEqual(vars(inserted_member),vars(query_member_via_mid(self.mid)))
-        self.assertEqual(inserted_member.last_video_aid,self.aid)
+        self.assertIsNone(query_member_via_mid(self.mid))
+        self.service.get_video_view.return_value = self.video_view(staff=False)._replace(title='late profile')
+        video_logs = update_video(self.aid,self.service)
+        self.assertEqual(query_member_via_mid(self.mid).name,'member')
         self.assertEqual(query_member_via_mid(self.mid).last_video_aid,self.aid)
+        self.assertEqual(read_value('SELECT observed_at FROM tdd_ingest.profile_observation '
+                                    'WHERE entity_kind=%s AND entity_id=%s',('member',self.mid)),ADDED)
         self.service.get_member_card.side_effect = None
         self.service.get_member_card.return_value = MemberCard(self.mid,'member',None,'','\x00')
         logs = update_member(self.mid,self.service)
         self.assertEqual({r.attr:(r.oldval,r.newval) for r in logs},{'sex':('',None),'sign':('sign','')})
         self.assertEqual(query_member_via_mid(self.mid).sign,'')
-        self.expected_manifest({'tdd_member_log':2})
+        self.expected_manifest({'tdd_video_log':len(video_logs),'tdd_member_log':2})
 
     def test_same_second_independent_observations_and_bigint_total(self):
-        self.service.get_video_view.return_value = self.view(view=2147483647,staff=False)
+        self.service.get_video_view.return_value = self.video_view(view=2147483647,staff=False)
         add_video(self.aid,self.service)
-        self.service.get_video_view.return_value = self.view(aid=self.aid+1,view=2147483647,staff=False)
+        self.service.get_video_view.return_value = self.video_view(aid=self.aid+1,view=2147483647,staff=False)
         add_video(self.aid+1,self.service)
         record = VideoRecord(ADDED,self.aid,a2b(self.aid),2147483647,1,2,3,4,5,6)
         first = commit_video_records_batch([record])
@@ -276,11 +279,11 @@ class PostgresApplicationTest(unittest.TestCase):
 
     def test_repeated_staff_and_nullable_sprint_preserve_the_observation(self):
         from job import AddSprintVideoRecordJob
-        self.service.get_video_view.return_value = self.view()._replace(staff=[
+        self.service.get_video_view.return_value = self.video_view()._replace(staff=[
             VideoViewStaffItem(self.mid+1,'first','',''),VideoViewStaffItem(self.mid+1,'second','','')])
         add_video(self.aid,self.service)
         self.assertEqual([(item.mid,item.title) for item in read_staff(self.aid)],[(self.mid+1,'first')])
-        self.service.get_video_view.return_value = self.view()._replace(title='changed',staff=[
+        self.service.get_video_view.return_value = self.video_view()._replace(title='changed',staff=[
             VideoViewStaffItem(self.mid+1,'first-existing','',''),VideoViewStaffItem(self.mid+1,'second-existing','',''),
             VideoViewStaffItem(self.mid+2,'first-new','',''),VideoViewStaffItem(self.mid+2,'second-new','','')])
         with self.assertLogs('db.profiles',level='WARNING'):
@@ -292,8 +295,8 @@ class PostgresApplicationTest(unittest.TestCase):
         with engine.connection() as conn, conn.transaction():
             conn.execute('INSERT INTO tdd_sprint_video (added,aid,title,created,status) VALUES (%s,%s,%s,%s,%s)',
                                  (timestamp(ADDED),self.aid,'nullable sprint',100,'processing'))
-        nullable = self.view()._replace(stat=self.view().stat._replace(view=None))
-        self.service.get_video_view_trimmed.return_value = nullable
+        nullable_video_view = self.video_view()._replace(stat=self.video_view().stat._replace(view=None))
+        self.service.get_video_view_trimmed.return_value = nullable_video_view
         queue = Queue()
         queue.put(self.aid)
         job = AddSprintVideoRecordJob('nullable',queue,self.service)
@@ -329,6 +332,50 @@ class PostgresApplicationTest(unittest.TestCase):
         self.assertIsNone(actual[0]['last_record_id'])
         self.expected_manifest({'tdd_video_record':1,'tdd_video_record_abnormal_change':1})
 
+    def test_sprint_failure_after_record_manifest_and_status_rolls_back_together(self):
+        from db.sprint import _insert_sprint_video_record
+        from task import add_sprint_video_record_via_video_view
+
+        with engine.connection() as conn, conn.transaction():
+            conn.execute('INSERT INTO tdd_sprint_video (added,aid,title,created,status) '
+                         'VALUES (%s,%s,%s,%s,%s)',
+                         (timestamp(ADDED),self.aid,'atomic sprint',100,'processing'))
+        self.service.get_video_view_trimmed.return_value = self.video_view(view=1000000)
+        completed = []
+
+        def insert_then_fail(conn, aid, added, stat, *, run_id=None):
+            stored = _insert_sprint_video_record(conn,aid,added,stat,run_id=run_id)
+            # Inspect this same transaction after all three real writes ran.
+            self.assertEqual(conn.execute('SELECT count(*) FROM tdd_sprint_video_record WHERE id=%s',
+                                          (stored.id,)).fetchone()[0],1)
+            self.assertEqual(conn.execute('SELECT status FROM tdd_sprint_video WHERE aid=%s',
+                                          (aid,)).fetchone()[0],'finished')
+            completed.append(stored)
+            raise RuntimeError('injected failure after sprint status update')
+
+        with mock.patch('db.sprint._insert_sprint_video_record',new=insert_then_fail), \
+                self.assertLogs('db.observation',level='ERROR'), \
+                self.assertRaisesRegex(RuntimeError,'after sprint status update'):
+            add_sprint_video_record_via_video_view(self.aid,self.service)
+
+        self.service.get_video_view_trimmed.assert_called_once_with({'aid':self.aid})
+        self.assertEqual(len(completed),1)
+        self.assertEqual((completed[0].aid,completed[0].added,completed[0].view),
+                         (self.aid,ADDED,1000000))
+        self.assertEqual(read_value('SELECT count(*) FROM tdd_sprint_video_record WHERE aid=%s',
+                                    (self.aid,)),0)
+        self.assertEqual(read_value('SELECT status FROM tdd_sprint_video WHERE aid=%s',
+                                    (self.aid,)),'processing')
+        failures = list(Path(self.directory.name).glob('*.json'))
+        self.assertEqual(len(failures),1)
+        diagnostic = json.loads(failures[0].read_text())
+        self.assertEqual(diagnostic['run_id'],str(self.run_id))
+        self.assertEqual(diagnostic['payload']['aid'],self.aid)
+        self.assertEqual(diagnostic['payload']['stat']['values']['view'],1000000)
+        # Keep this run free of a retry so the privileged evidence checker can
+        # independently verify that the failed transaction left zero manifest keys.
+        self.expected_manifest({})
+
     def test_sprint_million_status_and_daily_legacy_windows_and_sentinels(self):
         import datetime
         from db import TddSprintVideoRecord
@@ -342,16 +389,19 @@ class PostgresApplicationTest(unittest.TestCase):
             for aid in aids:
                 conn.execute('INSERT INTO tdd_sprint_video (added,aid,title,created,status) VALUES (%s,%s,%s,%s,%s)',
                                      (timestamp(start),aid,'sprint',end-3*86400,'processing'))
-        def record(aid,added,view):
-            return TddSprintVideoRecord(added=added,aid=aid,view=view,danmaku=1,reply=1,favorite=1,coin=1,share=1,like=1)
         from db.sprint import insert_sprint_video_record
-        for item in [record(aids[0],start+60,1000),record(aids[0],end+60,1000),
-                     record(aids[1],end-3600,200),record(aids[1],end+60,500),
-                     record(aids[2],start+60,999000)]:
-            insert_sprint_video_record(item)
+        for aid,added,view in [(aids[0],start+60,1000),(aids[0],end+60,1000),
+                               (aids[1],end-3600,200),(aids[1],end+60,500),
+                               (aids[2],start+60,999000)]:
+            stat = VideoViewStat(aid,view,1,1,1,1,1,0,0,1,0,None,None)
+            stored = insert_sprint_video_record(aid,added,stat)
+            self.assertIsInstance(stored,TddSprintVideoRecord)
+            row, = read_rows('SELECT * FROM tdd_sprint_video_record WHERE id=%s',(stored.id,))
+            self.assertEqual(vars(stored),row)
+            self.assertEqual((stored.aid,stored.added,stored.view),(aid,added,view))
         queue = Queue()
         queue.put(aids[2])
-        self.service.get_video_view_trimmed.return_value = self.view(aid=aids[2],view=1000000)
+        self.service.get_video_view_trimmed.return_value = self.video_view(aid=aids[2],view=1000000)
         job = AddSprintVideoRecordJob('sprint',queue,self.service)
         self.addCleanup(job.cleanup)
         with mock.patch('task.task.get_ts_s',return_value=end-3600):
@@ -377,8 +427,8 @@ class PostgresApplicationTest(unittest.TestCase):
         from test_remaining_script_run_records import _load
 
         file_aid, rank_aid = self.aid, self.aid + 1
-        self.service.get_video_view.side_effect = lambda params: self.view(aid=params['aid'])
-        self.service.get_video_view_trimmed.side_effect = lambda params: self.view(aid=params['aid'])
+        self.service.get_video_view.side_effect = lambda params: self.video_view(aid=params['aid'])
+        self.service.get_video_view_trimmed.side_effect = lambda params: self.video_view(aid=params['aid'])
         path = Path(self.directory.name) / 'aids.txt'
         path.write_text(str(file_aid) + '\n')
 

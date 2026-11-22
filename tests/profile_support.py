@@ -6,6 +6,7 @@ from unittest import mock
 from db import TddVideo,TddMember,TddVideoStaff,TddVideoLog,TddMemberLog
 from db.values import epoch
 from db.profiles import _query_video, _query_member
+from db.write import VIDEO_RECORD_COLUMNS
 
 
 class ProfileConnection:
@@ -16,6 +17,8 @@ class ProfileConnection:
         self.db.execute('CREATE TABLE tdd_ingest.profile_observation '
                         '(entity_kind TEXT NOT NULL,entity_id INTEGER NOT NULL,observed_at INTEGER NOT NULL,'
                         'PRIMARY KEY(entity_kind,entity_id))')
+        self.db.execute('CREATE TABLE tdd_video_record (id INTEGER PRIMARY KEY, '
+                        + ','.join('"'+field+'"' for field in VIDEO_RECORD_COLUMNS) + ')')
         for model in (TddVideo,TddMember,TddVideoStaff,TddVideoLog,TddMemberLog):
             defaults = {'solo':-1,'original':-1,'employed':-1,'engine':-1,'freq':0,'activity':0} if model is TddVideo else {}
             fields = ','.join('"'+field+'"'+(' INTEGER PRIMARY KEY' if field == 'id' else ' NOT NULL' if model is TddVideo and field == 'title' else '') + (' DEFAULT '+str(defaults[field]) if field in defaults else '') for field in model.fields)
@@ -50,8 +53,16 @@ class ProfileConnection:
         return [(obj.id,) for obj in objects]
 
     def execute_write(self,function,*args,**kwargs):
-        with self.transaction(), mock.patch('db.profiles._append_objects',side_effect=self.append):
+        with self.transaction(), mock.patch('db.profiles._append_objects',side_effect=self.append), \
+                mock.patch('db.profiles.append_video_records',side_effect=self.append_video_records):
             return function(self,*args,run_id=None,**kwargs)
+
+    def append_video_records(self,conn,records,*,run_id=None):
+        return [self.execute(
+            'INSERT INTO tdd_video_record (' + ','.join('"'+f+'"' for f in VIDEO_RECORD_COLUMNS) +
+            ') VALUES (' + ','.join(['%s']*len(VIDEO_RECORD_COLUMNS)) + ') RETURNING aid,added,id',
+            tuple(getattr(record,field) for field in VIDEO_RECORD_COLUMNS)).fetchone()
+            for record in records]
 
     def patch_task_reads(self,test):
         for name,query in (('query_video_via_aid',_query_video),('query_member_via_mid',_query_member)):

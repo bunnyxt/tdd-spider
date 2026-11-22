@@ -34,7 +34,6 @@ class VideoRecordWriteTest(unittest.TestCase):
             return callback(conn)
         with mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': str(run_id)}), \
                 mock.patch('db.ingest.run_transaction', side_effect=run), \
-                mock.patch('db.models.TddVideoRecord', side_effect=AssertionError('no mutable record')), \
                 mock.patch('db.observation._save_failure') as save:
             result = commit_video_records_batch(records)
         self.assertEqual(result, expected)
@@ -49,15 +48,15 @@ class VideoRecordWriteTest(unittest.TestCase):
         save.assert_not_called()
 
     def test_fetch_returns_shared_record_and_keeps_counter_normalization(self):
-        view = expected_result()
-        view = view._replace(stat=view.stat._replace(view='--'))
+        video_view_trimmed = expected_result()
+        video_view_trimmed = video_view_trimmed._replace(stat=video_view_trimmed.stat._replace(view='--'))
         service = mock.Mock()
-        service.get_video_view_trimmed.return_value = view
+        service.get_video_view_trimmed.return_value = video_view_trimmed
         with mock.patch('task.task.get_ts_s', return_value=123):
             record = fetch_video_record_via_video_view(7, service)
         self.assertIs(type(record), VideoRecord)
         self.assertEqual((record.added, record.aid, record.bvid, record.view),
-                         (123, 7, view.bvid.removeprefix('BV'), -1))
+                         (123, 7, video_view_trimmed.bvid.removeprefix('BV'), -1))
 
     def test_failed_batch_preserves_original_collected_input_for_manual_reconciliation(self):
         record = self.record()

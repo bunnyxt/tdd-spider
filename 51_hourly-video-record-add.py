@@ -1,4 +1,3 @@
-from db import TddVideoRecordAbnormalChange
 from db.queries import (query_all_update_video_aids, query_freq_update_video_aids,
                         query_video_pubdate_all, query_video_records_of_given_aid_added_before_given_ts)
 from db.hourly import update_video_recent, update_video_activity, update_video_freq
@@ -429,34 +428,11 @@ class RecentRecordsAnalystRunner(CheckedRunner):
                                          speed_now, speed_last, speed_now_incr_rate,
                                          period_range, speed_period, speed_overall,
                                          this_record, last_record, description):
-        change_obj = TddVideoRecordAbnormalChange()
-        change_obj.added = added
-        change_obj.aid = aid
-        change_obj.attr = attr
-        change_obj.speed_now = speed_now
-        change_obj.speed_last = speed_last
-        change_obj.speed_now_incr_rate = speed_now_incr_rate
-        change_obj.period_range = period_range
-        change_obj.speed_period = speed_period
-        change_obj.speed_overall = speed_overall
-        change_obj.this_added = this_record.added
-        change_obj.this_view = this_record.view
-        change_obj.this_danmaku = this_record.danmaku
-        change_obj.this_reply = this_record.reply
-        change_obj.this_favorite = this_record.favorite
-        change_obj.this_coin = this_record.coin
-        change_obj.this_share = this_record.share
-        change_obj.this_like = this_record.like
-        change_obj.last_added = last_record.added
-        change_obj.last_view = last_record.view
-        change_obj.last_danmaku = last_record.danmaku
-        change_obj.last_reply = last_record.reply
-        change_obj.last_favorite = last_record.favorite
-        change_obj.last_coin = last_record.coin
-        change_obj.last_share = last_record.share
-        change_obj.last_like = last_record.like
-        change_obj.description = description
-        return change_obj
+        return dict(added=added, aid=aid, attr=attr, speed_now=speed_now,
+                    speed_last=speed_last, speed_now_incr_rate=speed_now_incr_rate,
+                    period_range=period_range, speed_period=speed_period,
+                    speed_overall=speed_overall, this_record=this_record,
+                    last_record=last_record, description=description)
 
     def process(self):
         self.logger.info('Now start analysing recent records...')
@@ -593,7 +569,7 @@ class RecentRecordsAnalystRunner(CheckedRunner):
             for idx2, prop in enumerate(RecordSpeed._fields[4:], 4):
                 value = speed_now[idx2]
                 if value < -10:
-                    change_obj = self._assemble_record_abnormal_change(
+                    change = self._assemble_record_abnormal_change(
                         added=records[-1].added, aid=aid, attr=prop,
                         speed_now=speed_now[idx2], speed_last=speed_last[idx2],
                         speed_now_incr_rate=speed_ratio[idx2 - 4],
@@ -604,16 +580,16 @@ class RecentRecordsAnalystRunner(CheckedRunner):
                             prop, value)
                     )
                     self.logger.info('Found unexpected drop of video aid %d, description: %s' % (
-                        aid, change_obj.description))
+                        aid, change['description']))
                     result_status_dict['unexpected_drop'].append(aid)
-                    record_abnormal_change_list.append(change_obj)
+                    record_abnormal_change_list.append(change)
 
             # check unexpected speed now value increase
             # rule: speed_ratio.prop > 2 and speed_now.prop > 50
             for idx2, prop in enumerate(RecordSpeedRatio._fields[:7]):
                 value = speed_ratio[idx2]
                 if value > 2 and speed_now[idx2 + 4] > 50:
-                    change_obj = self._assemble_record_abnormal_change(
+                    change = self._assemble_record_abnormal_change(
                         added=records[-1].added, aid=aid, attr=prop,
                         speed_now=speed_now[idx2 +
                                             4], speed_last=speed_last[idx2 + 4],
@@ -625,14 +601,14 @@ class RecentRecordsAnalystRunner(CheckedRunner):
                             prop, '%.2f' % value if abs(value) is not 99999999 else '%sinf' % '-' if value < 0 else '')
                     )
                     self.logger.info('Found unexpected increase of video aid %d, description: %s' % (
-                        aid, change_obj.description))
+                        aid, change['description']))
                     result_status_dict['unexpected_increase'].append(aid)
-                    record_abnormal_change_list.append(change_obj)
+                    record_abnormal_change_list.append(change)
 
             # commit changes
             try:
-                for change_obj in record_abnormal_change_list:
-                    insert_video_record_abnormal_change(change_obj)
+                for change in record_abnormal_change_list:
+                    insert_video_record_abnormal_change(**change)
             except Exception as e:
                 self.logger.error('Fail to add abnormal change of video aid %d to db. Exception caught. Detail: %s' % (
                     aid, e))
@@ -767,8 +743,8 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     logger.info('Now check duplicate records...')
     duplicate_records_item_list = list(
         filter(lambda item: item[1] > 1, Counter(
-            map(lambda r: r.bvid, records)).items())
-    )  # bvid -> count of records of video with this bvid
+            map(lambda r: r.aid, records)).items())
+    )  # aid -> count of records of this video
     if len(duplicate_records_item_list) == 0:
         logger.info('No duplicate records detected!')
     else:

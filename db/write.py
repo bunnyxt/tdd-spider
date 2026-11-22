@@ -6,7 +6,7 @@ from typing import cast
 from psycopg import Connection
 from core import VideoRecord, MemberFollowerRecord
 from .ingest import AppendKey, HistoryKey
-from .models import Row, TddVideoRecordAbnormalChange
+from .models import Row
 
 import os
 from uuid import UUID
@@ -83,12 +83,35 @@ def _insert_member_total_stat_records(conn: Connection, records: Sequence[Mappin
     return cast(list[HistoryKey], append_rows(conn, 'tdd_member_total_stat_record', columns, rows, run_id=run_id))
 
 
-def insert_video_record_abnormal_change(change: TddVideoRecordAbnormalChange) -> TddVideoRecordAbnormalChange:
+def insert_video_record_abnormal_change(*, added: int, aid: int, attr: str,
+                                       speed_now: float, speed_last: float, speed_now_incr_rate: float,
+                                       period_range: int, speed_period: float, speed_overall: float,
+                                       this_record: VideoRecord, last_record: VideoRecord,
+                                       description: str, comment: str | None = None) -> None:
     from .observation import execute_write
-    return execute_write(_insert_video_record_abnormal_change, change)
+    execute_write(_insert_video_record_abnormal_change, added=added, aid=aid, attr=attr,
+                  speed_now=speed_now, speed_last=speed_last, speed_now_incr_rate=speed_now_incr_rate,
+                  period_range=period_range, speed_period=speed_period, speed_overall=speed_overall,
+                  this_record=this_record, last_record=last_record, description=description, comment=comment)
 
 
-def _insert_video_record_abnormal_change(conn: Connection, change: TddVideoRecordAbnormalChange, *,
-                                       run_id: UUID | None = None) -> TddVideoRecordAbnormalChange:
-    _append_objects(conn, [change], run_id=run_id)
-    return change
+def _insert_video_record_abnormal_change(conn: Connection, *, added: int, aid: int, attr: str,
+                                        speed_now: float, speed_last: float, speed_now_incr_rate: float,
+                                        period_range: int, speed_period: float, speed_overall: float,
+                                        this_record: VideoRecord, last_record: VideoRecord,
+                                        description: str, comment: str | None = None,
+                                        run_id: UUID | None = None) -> None:
+    from .ingest import append_rows
+    columns = ('added', 'aid', 'attr', 'speed_now', 'speed_last', 'speed_now_incr_rate',
+               'period_range', 'speed_period', 'speed_overall', 'this_record_id', 'this_added',
+               'this_view', 'this_danmaku', 'this_reply', 'this_favorite', 'this_coin', 'this_share', 'this_like',
+               'last_record_id', 'last_added', 'last_view', 'last_danmaku', 'last_reply', 'last_favorite',
+               'last_coin', 'last_share', 'last_like', 'description', 'comment')
+    values = (added, aid, attr, speed_now, speed_last, speed_now_incr_rate,
+              period_range, speed_period, speed_overall, None, this_record.added,
+              this_record.view, this_record.danmaku, this_record.reply, this_record.favorite,
+              this_record.coin, this_record.share, this_record.like, None, last_record.added,
+              last_record.view, last_record.danmaku, last_record.reply, last_record.favorite,
+              last_record.coin, last_record.share, last_record.like, description, comment)
+    row = tuple(database_value(field, value) for field, value in zip(columns, values))
+    append_rows(conn, 'tdd_video_record_abnormal_change', columns, [row], run_id=run_id)

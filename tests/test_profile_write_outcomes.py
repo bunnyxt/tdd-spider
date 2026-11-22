@@ -5,10 +5,10 @@ from unittest import mock
 
 from db import TddMember, TddVideo
 from core import NewVideo, NewMember
-from db.profiles import create_video, insert_member, update_member_profile, _query_member
+from db.profiles import create_video, update_member_profile, _query_member
 from service import MemberCard, VideoViewStaffItem
 from task.error import AlreadyExistError, NotExistError
-from task.task import add_member, add_video, update_member, update_video
+from task.task import add_video, update_member, update_video
 from profile_support import ProfileConnection
 from test_endpoint_get_video_view import expected_result
 
@@ -25,36 +25,41 @@ class ProfileWriteOutcomesTest(unittest.TestCase):
         self.card = MemberCard(7, 'fetched', '', '', '')
         self.service.get_member_card.return_value = self.card
         self.service.get_video_tags.return_value.tags = []
-        self.view = expected_result()._replace(staff=[])
-        self.service.get_video_view.return_value = self.view
+        self.video_view = expected_result()._replace(staff=[])
+        self.service.get_video_view.return_value = self.video_view
 
-    def test_explicit_member_add_reports_competing_insert_after_precheck(self):
+    def test_competing_member_insert_after_precheck_does_not_block_video_creation(self):
         def fetch(*args, **kwargs):
-            self.conn.seed(TddMember(added=1, mid=7, name='concurrent', code=0))
+            self.conn.seed(TddMember(added=1, mid=self.video_view.owner.mid, name='concurrent', code=0))
             return self.card
         self.service.get_member_card.side_effect = fetch
-        with self.assertRaises(AlreadyExistError):
-            add_member(7, self.service)
-        self.assertEqual(_query_member(self.conn, 7).name, 'concurrent')
-        self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_ingest.profile_observation').fetchone()[0], 0)
+        stored = add_video(self.video_view.aid, self.service)
+        self.assertEqual(stored.aid, self.video_view.aid)
+        self.assertEqual(_query_member(self.conn, self.video_view.owner.mid).name, 'concurrent')
+        self.assertEqual(self.conn.execute(
+            "SELECT count(*) FROM tdd_ingest.profile_observation WHERE entity_kind='member'").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute(
+            'SELECT added,aid,view,danmaku,reply,favorite,coin,share,like FROM tdd_video_record').fetchall(),
+            [(stored.added,self.video_view.aid,
+              *(getattr(self.video_view.stat,field) for field in
+                ('view','danmaku','reply','favorite','coin','share','like')))])
 
     def test_explicit_video_add_reports_competing_insert_after_precheck(self):
         def fetch(*args, **kwargs):
-            self.conn.seed(TddVideo(added=1, aid=self.view.aid, bvid='old', title='concurrent', code=0))
-            return self.view
+            self.conn.seed(TddVideo(added=1, aid=self.video_view.aid, bvid='old', title='concurrent', code=0))
+            return self.video_view
         self.service.get_video_view.side_effect = fetch
-        with mock.patch('db.profiles.append_video_records') as append:
-            with self.assertRaises(AlreadyExistError):
-                add_video(self.view.aid, self.service)
-        append.assert_not_called()
+        with self.assertRaises(AlreadyExistError):
+            add_video(self.video_view.aid, self.service)
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_video_record').fetchone()[0],0)
         self.assertEqual(self.conn.execute('SELECT title FROM tdd_video').fetchone()[0], 'concurrent')
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_member').fetchone()[0], 0)
 
     def test_unrelated_not_null_constraint_is_not_an_existing_aid_outcome(self):
         with self.assertRaises(sqlite3.IntegrityError):
-            create_video(NewVideo(added=1, aid=self.view.aid,
-                         bvid=self.view.bvid.removeprefix('BV'), mid=self.view.owner.mid,
-                         title=None, pubdate=self.view.pubdate), staff=[], new_members=[])
+            create_video(NewVideo(added=1, aid=self.video_view.aid,
+                         bvid=self.video_view.bvid.removeprefix('BV'), mid=self.video_view.owner.mid,
+                         title=None, pubdate=self.video_view.pubdate), staff=[], new_members=[])
         self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_video').fetchone()[0], 0)
 
     def test_existing_prepared_member_does_not_block_remaining_creation(self):
@@ -64,9 +69,8 @@ class ProfileWriteOutcomesTest(unittest.TestCase):
         members = [NewMember(added=20,mid=8,name='ignored',face='new-face'),
                    NewMember(added=20,mid=10,name='staff',face='staff-face')]
         first_record = VideoRecord(20,7,'1234567890',1,2,3,4,5,6,7)
-        with mock.patch('db.profiles.append_video_records') as append:
-            stored = create_video(video,new_members=members,
-                staff=[VideoViewStaffItem(10,'producer','staff','staff-face')],first_record=first_record)
+        stored = create_video(video,new_members=members,
+            staff=[VideoViewStaffItem(10,'producer','staff','staff-face')],first_record=first_record)
         self.assertIsInstance(stored,TddVideo)
         self.assertIsNotNone(stored.id)
         self.assertFalse(hasattr(video,'id'))
@@ -75,24 +79,35 @@ class ProfileWriteOutcomesTest(unittest.TestCase):
         self.assertEqual(_query_member(self.conn,10).name,'staff')
         self.assertEqual(self.conn.execute('SELECT mid,title FROM tdd_video_staff WHERE aid=%s',(7,)).fetchall(),
                          [(10,'producer')])
-        append.assert_called_once_with(self.conn,[first_record],run_id=None)
+        self.assertEqual(self.conn.execute(
+            'SELECT added,aid,view,danmaku,reply,favorite,coin,share,like FROM tdd_video_record').fetchall(),
+            [(20,7,1,2,3,4,5,6,7)])
 
     def test_database_reports_absence_and_duplicate_without_task_errors(self):
         row = NewMember(added=1, mid=7, name='first', face='', code=0)
-        inserted = insert_member(row)
+        video = NewVideo(added=1, aid=100, bvid='1234567890', mid=7, title='first', pubdate=1)
+        self.assertIsInstance(create_video(video,new_members=[row],staff=[]),TddVideo)
+        inserted = _query_member(self.conn,7)
         self.assertIsInstance(inserted,TddMember)
         self.assertIsNot(inserted,row)
         self.assertIsNotNone(inserted.id)
         self.assertFalse(hasattr(row,'id'))
-        self.assertIsNone(insert_member(NewMember(added=2, mid=7, name='ignored', face='', code=0)))
+        next_video = video._replace(added=2,aid=101,title='next')
+        self.assertIsInstance(create_video(next_video,new_members=[
+            NewMember(added=2,mid=7,name='ignored',face='new-face',code=0)],staff=[]),TddVideo)
+        current = _query_member(self.conn,7)
+        self.assertEqual(vars(current),vars(inserted))
+        self.assertEqual(self.conn.execute(
+            "SELECT observed_at FROM tdd_ingest.profile_observation WHERE entity_kind='member' AND entity_id=%s",
+            (7,)).fetchone()[0],1)
+        self.assertIsNone(create_video(next_video,new_members=[],staff=[]))
         self.assertIsNone(update_member_profile(8, None, -404, 10))
-        self.assertEqual(_query_member(self.conn, 7).name, 'first')
 
     def test_update_tasks_interpret_missing_profiles(self):
         with self.assertRaises(NotExistError):
             update_member(7, self.service)
         with self.assertRaises(NotExistError):
-            update_video(self.view.aid, self.service)
+            update_video(self.video_view.aid, self.service)
 
     def test_database_exception_is_not_reclassified_as_profile_absence(self):
         error = TimeoutError('database timeout')

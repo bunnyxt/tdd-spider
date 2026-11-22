@@ -21,10 +21,11 @@ def query_member_via_mid(mid: int) -> TddMember | None:
         return TddMember(**{key: epoch(value) for key, value in row.items()}) if row else None
 
 
-def query_all_video_bvids() -> list[str]:
+def query_all_video_aids() -> list[int]:
+    # Metadata refresh includes unavailable videos so their status can recover.
     # Preserve the existing candidate enumeration; no implicit regrouping.
     with engine.connection() as conn:
-        return [row[0] for row in conn.execute('SELECT bvid FROM tdd_video').fetchall()]
+        return [row[0] for row in conn.execute('SELECT aid FROM tdd_video').fetchall()]
 
 
 def query_all_member_mids() -> list[int]:

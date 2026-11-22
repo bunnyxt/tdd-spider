@@ -4,7 +4,7 @@ from contextlib import AbstractContextManager
 from threading import Lock
 from typing import TYPE_CHECKING
 
-from conf import get_db_args
+from conf import get_db_args, get_db_pool_max_size
 
 if TYPE_CHECKING:
     from psycopg import Connection
@@ -25,7 +25,7 @@ class Engine:
                     args['dbname'] = args.pop('database', args.get('dbname'))
                     args.pop('max_connections', None)
                     self._pool = ConnectionPool('', kwargs={**args, 'autocommit': True},
-                                                min_size=0, max_size=4, timeout=60)
+                                                min_size=0, max_size=get_db_pool_max_size(), timeout=60)
         return self._pool
 
     def connection(self) -> AbstractContextManager[Connection]:

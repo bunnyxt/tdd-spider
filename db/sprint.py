@@ -3,23 +3,36 @@ from __future__ import annotations
 from uuid import UUID
 
 from psycopg import Connection
+from service.response import VideoViewStat
+from .ingest import record_trial_keys
 from .models import TddSprintVideoRecord
 
 from .observation import execute_write
-from .write import _append_objects
-from .values import database_value
+from .values import database_value, epoch
 
 
-def insert_sprint_video_record(record: TddSprintVideoRecord) -> TddSprintVideoRecord:
-    return execute_write(_insert_sprint_video_record, record)
+def insert_sprint_video_record(aid: int, added: int, stat: VideoViewStat) -> TddSprintVideoRecord:
+    return execute_write(_insert_sprint_video_record, aid, added, stat)
 
 
-def _insert_sprint_video_record(conn: Connection, record: TddSprintVideoRecord, *,
+def _insert_sprint_video_record(conn: Connection, aid: int, added: int, stat: VideoViewStat, *,
                                 run_id: UUID | None = None) -> TddSprintVideoRecord:
-    _append_objects(conn, [record], run_id=run_id)
+    row = conn.execute(
+        'INSERT INTO tdd_sprint_video_record '
+        '(added,aid,view,danmaku,reply,favorite,coin,share,"like") '
+        'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) '
+        'RETURNING id,added,aid,view,danmaku,reply,favorite,coin,share,"like"',
+        (database_value('added', added), aid, -1 if stat.view == '--' else stat.view,
+         stat.danmaku, stat.reply, stat.favorite, stat.coin, stat.share, stat.like)).fetchone()
+    if row is None:
+        raise RuntimeError('Sprint insert did not return its stored record')
+    record = TddSprintVideoRecord(id=row[0], added=epoch(row[1]), aid=row[2],
+                                  view=row[3], danmaku=row[4], reply=row[5], favorite=row[6],
+                                  coin=row[7], share=row[8], like=row[9])
+    record_trial_keys(conn, 'tdd_sprint_video_record', [(record.id,)], run_id=run_id)
     if record.view is not None and record.view >= 1000000:
         conn.execute('UPDATE tdd_sprint_video SET status = %s WHERE aid = %s',
-                        ('finished', record.aid))
+                     ('finished', record.aid))
     return record
 
 

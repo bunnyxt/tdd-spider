@@ -2,7 +2,6 @@ import time
 from .Job import Job
 from service import Service, CodeError
 from queue import Queue, Empty
-from core import VideoRecord
 from util import format_ts_ms, get_ts_s, ts_s_to_str
 from task import add_video_record_via_video_view, update_video
 from typing import Optional
@@ -11,11 +10,10 @@ __all__ = ['AddVideoRecordJob']
 
 
 class AddVideoRecordJob(Job):
-    def __init__(self, name: str, aid_queue: Queue[int], video_record_queue: Queue[VideoRecord], service: Service,
+    def __init__(self, name: str, aid_queue: Queue[int], service: Service,
                  update_if_code_error: bool = True, duration_limit_s: Optional[int] = None):
         super().__init__(name)
         self.aid_queue = aid_queue
-        self.video_record_queue = video_record_queue
         self.service = service
         self.update_if_code_error = update_if_code_error
         self.duration_limit_s = duration_limit_s
@@ -63,7 +61,6 @@ class AddVideoRecordJob(Job):
                 self.logger.error(f'Fail to add video record. aid: {aid}, error: {e}')
                 self.stat.condition['other_exception'] += 1
             else:
-                self.video_record_queue.put(new_video_record)
                 self.logger.debug(f'New video record {new_video_record} added. aid: {aid}')
                 self.stat.condition['success'] += 1
 

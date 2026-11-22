@@ -7,6 +7,8 @@ dbname = tdd
 sslmode = prefer
 # Connection establishment timeout, in seconds.
 connect_timeout = 10
+# Maximum connections per collector process; omitted settings default to 4.
+pool_max_size = 4
 # Shared connection-startup and transaction-local deadlines, in milliseconds.
 lock_timeout_ms = 10000
 statement_timeout_ms = 60000

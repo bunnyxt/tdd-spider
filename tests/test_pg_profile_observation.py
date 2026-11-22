@@ -39,12 +39,12 @@ class PostgresProfileObservationTest(unittest.TestCase):
                                                   'TDD_FAILURE_DIR':directory.name})
         environment.start()
         self.addCleanup(environment.stop)
-        self.view = expected_result()._replace(aid=self.aid,bvid='BV'+a2b(self.aid),staff=[],
+        self.video_view = expected_result()._replace(aid=self.aid,bvid='BV'+a2b(self.aid),staff=[],
                     owner=expected_result().owner._replace(mid=self.mid))
         with engine.connection() as connection, connection.transaction():
             guard_write_transaction(connection,self.run_id)
             member = TddMember(added=1,mid=self.mid,name='baseline',face='',sex='',sign='',code=0)
-            values = {field:getattr(self.view,field) for field in
+            values = {field:getattr(self.video_view,field) for field in
                       ('videos','tid','tname','copyright','pic','title','pubdate','desc','state','attribute','forward')}
             video = TddVideo(added=1,aid=self.aid,bvid=a2b(self.aid),mid=self.mid,code=-404,
                              hasstaff=0,tags='',**values)
@@ -56,7 +56,7 @@ class PostgresProfileObservationTest(unittest.TestCase):
                                    tuple(database_value(f,getattr(obj,f)) for f in fields))
 
     def payload(self,added,*,title='new',code=None):
-        return dict(aid=self.aid,view=None if code is not None else self.view._replace(title=title),
+        return dict(aid=self.aid,video_view=None if code is not None else self.video_view._replace(title=title),
                     code_error=code,tags='',members=[],added=added)
 
     def apply_in_transaction(self,payload):
@@ -131,14 +131,17 @@ class PostgresProfileObservationTest(unittest.TestCase):
         self.apply_in_transaction(self.payload(200,title='accepted'))
         self.assertEqual(query_video_via_aid(self.aid).title,'accepted')
 
-    def test_member_insert_after_precheck_reports_expected_conflict(self):
+    def test_member_insert_after_precheck_keeps_profile_and_watermark_and_updates_video(self):
         from db.profiles import _insert_member
-        from service import MemberCard
-        from task import add_member, AlreadyExistError
+        from service import MemberCard, VideoTags, VideoViewStaffItem
+        from task import update_video
         mid = self.mid + 1
         pid_queue = Queue()
         service = mock.Mock()
-        service.get_member_card.return_value = MemberCard(mid,'second','','','')
+        service.get_member_card.return_value = MemberCard(mid,'second','','','replace')
+        service.get_video_view.return_value = self.video_view._replace(
+            title='updated',staff=[VideoViewStaffItem(mid,'producer','','')])
+        service.get_video_tags.return_value = VideoTags([])
 
         def insert_and_report_pid(conn, member, *, run_id=None):
             pid_queue.put(conn.info.backend_pid)
@@ -149,11 +152,15 @@ class PostgresProfileObservationTest(unittest.TestCase):
                 guard_write_transaction(conn,self.run_id)
                 conn.execute('INSERT INTO tdd_member (added,mid,name,face,sex,sign,code) '
                              'VALUES (%s,%s,%s,%s,%s,%s,%s)',
-                             (database_value('added',1),mid,'first','','','',0))
+                             (database_value('added',1),mid,'first','','','keep',0))
+                conn.execute('INSERT INTO tdd_ingest.profile_observation '
+                             '(entity_kind,entity_id,observed_at) VALUES (%s,%s,%s)',
+                             ('member',mid,500))
                 # The uncommitted row is invisible to the task's precheck.
                 self.assertIsNone(query_member_via_mid(mid))
-                with mock.patch('db.profiles._insert_member',side_effect=insert_and_report_pid):
-                    future = executor.submit(add_member,mid,service)
+                with mock.patch('db.profiles._insert_member',side_effect=insert_and_report_pid), \
+                        mock.patch('task.task.get_ts_s',return_value=100):
+                    future = executor.submit(update_video,self.aid,service)
                     waiting_pid = pid_queue.get(timeout=5)
                     deadline = time.monotonic()+5
                     blocked = False
@@ -164,9 +171,18 @@ class PostgresProfileObservationTest(unittest.TestCase):
                             break
                         time.sleep(0.01)
                     self.assertTrue(blocked,'the insert must wait for the competing business key')
-            with self.assertRaises(AlreadyExistError):
-                future.result(timeout=10)
-        self.assertEqual(query_member_via_mid(mid).name,'first')
+            logs = future.result(timeout=10)
+        self.assertTrue(any(log.attr == 'staff' for log in logs))
+        member = query_member_via_mid(mid)
+        self.assertEqual((member.name,member.sign,member.added,member.last_video_aid),
+                         ('first','keep',1,self.aid))
+        self.assertEqual(read_value('SELECT observed_at FROM tdd_ingest.profile_observation '
+                                    'WHERE entity_kind=%s AND entity_id=%s',('member',mid)),500)
+        self.assertEqual(read_value('SELECT count(*) FROM tdd_member_log WHERE mid=%s',(mid,)),0)
+        self.assertEqual(read_value('SELECT count(*) FROM tdd_video_staff WHERE aid=%s AND mid=%s',
+                                    (self.aid,mid)),1)
+        video = query_video_via_aid(self.aid)
+        self.assertEqual((video.code,video.title),(0,'updated'))
         self.assertEqual(list(self.directory.glob('*.json')),[])
 
     def test_video_insert_race_and_unrelated_constraint_are_distinct(self):
@@ -181,7 +197,7 @@ class PostgresProfileObservationTest(unittest.TestCase):
         def fetch_after_competing_insert(params):
             with ThreadPoolExecutor(max_workers=1) as executor:
                 self.assertIsNotNone(executor.submit(create_video,video,staff=[],new_members=[]).result(timeout=10))
-            return self.view._replace(aid=aid,bvid='BV'+a2b(aid),title='second')
+            return self.video_view._replace(aid=aid,bvid='BV'+a2b(aid),title='second')
 
         service.get_video_view.side_effect = fetch_after_competing_insert
         service.get_video_tags.return_value.tags = []

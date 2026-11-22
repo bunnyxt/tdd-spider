@@ -13,7 +13,8 @@ from unittest import mock
 
 from psycopg import pq
 from psycopg.conninfo import make_conninfo
-from conf.conf import get_db_args
+from conf.conf import get_db_args, get_db_pool_max_size
+from db.basic import Engine
 from db.ingest import _set_transaction_limits
 
 
@@ -45,6 +46,44 @@ class PostgreSQLConfigTest(unittest.TestCase):
         self.assertEqual(option_settings(args['options']), {
             'lock_timeout': '10000', 'statement_timeout': '60000', 'transaction_timeout': '120000',
             'idle_in_transaction_session_timeout': '60000'})
+
+    def test_pool_max_size_defaults_to_four_and_uses_only_ini(self):
+        with self.configured(environment={'TDD_DB_POOL_MAX_SIZE': '999'}):
+            self.assertEqual(get_db_pool_max_size(), 4)
+        for value in (1, 8, 100000):
+            with self.subTest(value=value), self.configured({'pool_max_size': str(value)}):
+                self.assertEqual(get_db_pool_max_size(), value)
+
+    def test_pool_setting_is_not_a_libpq_connection_parameter(self):
+        with self.configured({'pool_max_size': '8'}):
+            args = get_db_args()
+        self.assertNotIn('pool_max_size', args)
+        # libpq rejects unsupported keywords, without opening a connection.
+        make_conninfo(**args)
+
+    def test_engine_constructs_pool_with_selected_max_size(self):
+        for values, expected in (({}, 4), ({'pool_max_size': '1'}, 1), ({'pool_max_size': '8'}, 8)):
+            with self.subTest(values=values), self.configured(values), \
+                 mock.patch('psycopg_pool.ConnectionPool') as pool_class:
+                engine = Engine()
+                self.assertIs(engine.pool, pool_class.return_value)
+                self.assertIs(engine.pool, pool_class.return_value)
+                pool_class.assert_called_once_with(
+                    '', kwargs={**get_db_args(), 'autocommit': True},
+                    min_size=0, max_size=expected, timeout=60)
+                self.assertNotIn('pool_max_size', pool_class.call_args.kwargs['kwargs'])
+                engine.dispose()
+                pool_class.return_value.close.assert_called_once_with()
+
+    def test_invalid_pool_size_fails_before_constructing_pool(self):
+        for value in ('0', '-1', '1.5', 'invalid', ''):
+            with self.subTest(value=value), self.configured({'pool_max_size': value}), \
+                 mock.patch('psycopg_pool.ConnectionPool') as pool_class:
+                with self.assertRaisesRegex(ValueError, 'pool_max_size.*positive integer'):
+                    get_db_pool_max_size()
+                with self.assertRaisesRegex(ValueError, 'pool_max_size.*positive integer'):
+                    Engine().pool
+                pool_class.assert_not_called()
 
     def test_ini_timeouts_override_earlier_zero_options_at_both_application_sites(self):
         values = {'lock_timeout_ms': '1', 'statement_timeout_ms': '300000',
@@ -128,11 +167,14 @@ class PostgreSQLConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'collector.ini'
             path.write_text('[db_postgresql]\ndbname = chosen\nuser = chosen_user\npassword = chosen_password\n'
-                            'statement_timeout_ms = 12345\n')
+                            'statement_timeout_ms = 12345\npool_max_size = 9\n')
             result = subprocess.run([sys.executable, '-c',
-                'import json; from conf import get_db_args; print(json.dumps(get_db_args()))'],
+                'import json; from conf import get_db_args, get_db_pool_max_size; '
+                'print(json.dumps({"args": get_db_args(), "pool_max_size": get_db_pool_max_size()}))'],
                 env={**os.environ, 'TDD_CONFIG_PATH': str(path), 'PGDATABASE': 'wrong'},
                 capture_output=True, text=True, check=True)
-        args = json.loads(result.stdout)
+        selected = json.loads(result.stdout)
+        args = selected['args']
         self.assertEqual((args['dbname'], args['user']), ('chosen', 'chosen_user'))
         self.assertEqual(option_settings(args['options'])['statement_timeout'], '12345')
+        self.assertEqual(selected['pool_max_size'], 9)

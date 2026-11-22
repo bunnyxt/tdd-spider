@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from core import MemberFollowerRecord
 from job import BatchInsertMemberFollowerRecordJob
-from task import add_member_follower_record, commit_member_follower_records_batch
+from task import commit_member_follower_records_batch
 from test_ingest_manifest import connection
 
 
@@ -22,8 +22,7 @@ class MemberFollowerWriteTest(unittest.TestCase):
         def run(factory, callback, *, run_id):
             return callback(conn)
         with mock.patch.dict(os.environ, {'TDD_TRIAL_RUN_ID': str(run_id)}), \
-             mock.patch('db.ingest.run_transaction', side_effect=run), \
-             mock.patch('db.models.TddMemberFollowerRecord', side_effect=AssertionError('no mutable copy')):
+             mock.patch('db.ingest.run_transaction', side_effect=run):
             keys = commit_member_follower_records_batch([record, record])
         self.assertEqual(keys, expected)
         query, rows = cursors[0].executemany.call_args.args
@@ -33,14 +32,6 @@ class MemberFollowerWriteTest(unittest.TestCase):
         self.assertEqual([row[4].obj['id'] for row in manifests], [10, 11])
         self.assertTrue(all(set(row[4].obj) == {'mid', 'added', 'id'} for row in manifests))
         self.assertEqual(record, MemberFollowerRecord(123, 2147483648, 100))
-
-    def test_single_record_caller_returns_the_generated_key(self):
-        record = MemberFollowerRecord(123, 7, 100)
-        key = (7, datetime.fromtimestamp(123, timezone.utc), 10)
-        with mock.patch('task.task.fetch_member_follower_record', return_value=record), \
-             mock.patch('task.task.insert_member_follower_records', return_value=[key]) as write:
-            self.assertEqual(add_member_follower_record(7, mock.Mock()), key)
-        write.assert_called_once_with([record])
 
     def test_batch_job_counts_only_confirmed_rows(self):
         record = MemberFollowerRecord(123, 7, 100)

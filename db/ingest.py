@@ -124,16 +124,32 @@ def append_rows(conn: Connection, table: str, columns: Sequence[str],
                 keys.append(tuple(key))
                 if index + 1 < len(chunk) and not cursor.nextset():
                     raise RuntimeError('An append batch has missing result sets')
-    if run_id is not None and keys:
-        batch_id = uuid4()
-        with conn.cursor() as cursor:
-            cursor.executemany(
-                'INSERT INTO tdd_ingest.manifest(batch_id,ordinal,run_id,table_name,key) '
-                'VALUES(%s,%s,%s,%s,%s)',
-                [(UUID(str(batch_id)), i, UUID(str(run_id)), table,
-                  Jsonb({field: _encode(value) for field, value in zip(pk, key)}))
-                 for i, key in enumerate(keys)])
+    record_trial_keys(conn, table, keys, run_id=run_id)
     return cast(list[AppendKey], keys)
+
+
+def record_trial_keys(conn: Connection, table: str, keys: Sequence[AppendKey], *,
+                      run_id: UUID | None = None) -> None:
+    """Record returned keys in the same guarded transaction as their inserts.
+
+    A single-row writer returning a stored snapshot can use this without going
+    through append_rows. Formal writes do not allocate a manifest batch.
+    """
+    if run_id is None or not keys:
+        return
+    if table not in _SPEC:
+        raise ValueError('Table is not an approved append target')
+    pk = _SPEC[table][1]
+    if any(len(key) != len(pk) for key in keys):
+        raise ValueError('Trial manifest requires complete primary keys')
+    batch_id = uuid4()
+    with conn.cursor() as cursor:
+        cursor.executemany(
+            'INSERT INTO tdd_ingest.manifest(batch_id,ordinal,run_id,table_name,key) '
+            'VALUES(%s,%s,%s,%s,%s)',
+            [(batch_id, i, UUID(str(run_id)), table,
+              Jsonb({field: _encode(value) for field, value in zip(pk, key)}))
+             for i, key in enumerate(keys)])
 
 
 def run_transaction(connection_factory: Callable[[], AbstractContextManager[Connection]],

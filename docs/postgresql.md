@@ -25,8 +25,10 @@ unset `PGSERVICE` and do not add `service` to this section. This restriction is
 for the Python collector; the separate `psql` maintenance commands retain
 their documented authentication setup.
 
-Connections open only when needed; all collector threads share a pool capped
-at four database connections. HTTP fetchers keep their existing worker
+Connections open only when needed; all threads in one collector process share
+a pool. Set `pool_max_size` in the selected `[db_postgresql]` section to a positive
+integer (default `4`). This is a per-process connection limit; choose the deployed
+value after testing representative workloads and concurrent scripts. HTTP fetchers keep their existing worker
 configuration in `service/endpoints.json`.
 
 The database must already contain the compatible business tables, partitions
@@ -79,6 +81,14 @@ as `recent=2` remain explicit. All related writes share one transaction, and the
 function returns a separate `TddVideo` snapshot from the stored row only after
 commit. An existing video aid returns `None` before any related writes; the
 task translates that outcome to `AlreadyExistError`.
+
+The active `task.add_video()` always includes the first collected statistics in
+that transaction. Member creation is part of video creation or refresh; there
+is no separate member-creation task. Sprint tasks pass aid, collection time and
+the API statistics directly to their SQL writer, which returns a stored snapshot
+and commits any million-view status transition in the same transaction. Abnormal
+statistics writes bind the analyst's values and two original collected records
+directly; callers do not construct or mutate database row objects.
 
 Prepared members are candidates found missing during an earlier lookup. If a
 member mid now exists, keep its stored profile and continue creating the video,

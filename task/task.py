@@ -3,13 +3,12 @@ import logging
 import time
 from collections.abc import Iterable, Sequence
 
-from service import (Service, ServiceError, CodeError, MemberCard, VideoView, VideoViewTrimmed,
-                     VideoViewStat)
-from db import TddVideo, TddMember, TddVideoLog, TddMemberLog, TddSprintVideoRecord
+from service import Service, ServiceError, CodeError, MemberCard, VideoViewStat
+from db import TddVideo, TddVideoLog, TddMemberLog, TddSprintVideoRecord
 from db.ingest import HistoryKey
 from db.queries import query_video_via_aid, query_member_via_mid
 from db.write import insert_video_records, insert_member_follower_records
-from db.profiles import create_video, update_video_profile, insert_member, update_member_profile
+from db.profiles import create_video, update_video_profile, update_member_profile
 from db.sprint import insert_sprint_video_record
 from db.values import clean_text
 from util import get_ts_s
@@ -19,9 +18,8 @@ from .error import AlreadyExistError, NotExistError
 logger = logging.getLogger('task')
 STAT_FIELDS = ('view','danmaku','reply','favorite','coin','share','like')
 __all__ = ['add_video_record_via_video_view','fetch_video_record_via_video_view','commit_video_records_batch',
-           'commit_video_record_via_video_view',
-           'add_sprint_video_record_via_video_view','add_video','update_video','add_member','update_member',
-           'add_member_follower_record','fetch_member_follower_record',
+           'add_sprint_video_record_via_video_view','add_video','update_video','update_member',
+           'fetch_member_follower_record',
            'commit_member_follower_records_batch']
 
 
@@ -34,10 +32,11 @@ def _stats(stat: VideoViewStat) -> dict[str, int | None]:
 def fetch_video_record_via_video_view(aid: int, service: Service,
                                      out_stat: dict[str, int] | None = None) -> VideoRecord:
     start = time.perf_counter()
-    view = service.get_video_view_trimmed({'aid': aid})
+    video_view_trimmed = service.get_video_view_trimmed({'aid': aid})
     if out_stat is not None:
         out_stat['http_ms'] = int((time.perf_counter() - start) * 1000)
-    return VideoRecord(added=get_ts_s(), aid=aid, bvid=view.bvid.removeprefix('BV'), **_stats(view.stat))
+    return VideoRecord(added=get_ts_s(), aid=aid, bvid=video_view_trimmed.bvid.removeprefix('BV'),
+                       **_stats(video_view_trimmed.stat))
 
 
 
@@ -60,16 +59,9 @@ def commit_video_records_batch(records: Sequence[VideoRecord],
 
 
 
-def commit_video_record_via_video_view(video_view: VideoView | VideoViewTrimmed, added: int) -> HistoryKey:
-    record = VideoRecord(added=added, aid=video_view.aid, bvid=video_view.bvid.removeprefix('BV'),
-                    **_stats(video_view.stat))
-    return commit_video_records_batch([record])[0]
-
-
-
 def add_sprint_video_record_via_video_view(aid: int, service: Service) -> TddSprintVideoRecord:
-    view = service.get_video_view_trimmed({'aid':aid})
-    return insert_sprint_video_record(TddSprintVideoRecord(added=get_ts_s(), aid=aid, **_stats(view.stat)))
+    video_view_trimmed = service.get_video_view_trimmed({'aid':aid})
+    return insert_sprint_video_record(aid, get_ts_s(), video_view_trimmed.stat)
 
 
 
@@ -99,8 +91,7 @@ def _prepare_members(aid: int, mids: Iterable[int], service: Service,
 
 
 
-def add_video(aid: int, service: Service, test_exist: bool = True,
-              commit_video_record: bool = True) -> TddVideo:
+def add_video(aid: int, service: Service, test_exist: bool = True) -> TddVideo:
     if test_exist and query_video_via_aid(aid) is not None:
         raise AlreadyExistError(table='tdd_video',params={'aid':aid})
     video_view = service.get_video_view({'aid':aid})
@@ -110,7 +101,7 @@ def add_video(aid: int, service: Service, test_exist: bool = True,
     members = _prepare_members(aid,[video_view.owner.mid] + [s.mid for s in staff],service,strict=True)
     isvc = 2 if any(tag.upper() == 'VOCALOID中文曲' for tag in tags.split(';')) else -1
     record = VideoRecord(added=added,aid=aid,bvid=video_view.bvid.removeprefix('BV'),
-                         **_stats(video_view.stat)) if commit_video_record else None
+                         **_stats(video_view.stat))
     new_video = NewVideo(
         added=added, aid=aid, bvid=video_view.bvid.removeprefix('BV'), mid=video_view.owner.mid,
         videos=video_view.videos, tid=video_view.tid, tname=video_view.tname,
@@ -126,14 +117,11 @@ def add_video(aid: int, service: Service, test_exist: bool = True,
 
 
 
-def update_video(aid: int, service: Service,
-                 out_context: dict[str, VideoView] | None = None) -> list[TddVideoLog]:
+def update_video(aid: int, service: Service) -> list[TddVideoLog]:
     # Fetch can be slow. No database write lock is held while waiting for HTTP.
-    code_error, view = None, None
+    code_error, video_view = None, None
     try:
-        view = service.get_video_view({'aid':aid})
-        if out_context is not None:
-            out_context['video_view'] = view
+        video_view = service.get_video_view({'aid':aid})
     except CodeError as error:
         code_error = error
     # Metadata enrichment may take much longer than the view request. Order
@@ -141,31 +129,20 @@ def update_video(aid: int, service: Service,
     added = get_ts_s()
     tags = None
     members = {}
-    if view is not None:
-        mids = [view.owner.mid] + [s.mid for s in (view.staff or [])]
+    if video_view is not None:
+        mids = [video_view.owner.mid] + [s.mid for s in (video_view.staff or [])]
+        # Retry missing member cards even when owner/staff relationships are unchanged.
         members = _prepare_members(aid,mids,service)
         try:
             tags = _get_video_tags_str(aid,service)
         except ServiceError as error:
+            # Keep old tags for a later retry while persisting successful view/status changes.
             logger.warning('Skip tags update (view changes kept). aid: %s, error: %s',aid,error)
-    logs = update_video_profile(aid,view,None if code_error is None else code_error.code,
+    logs = update_video_profile(aid,video_view,None if code_error is None else code_error.code,
                                 tags,list(members.values()),added)
     if logs is None:
         raise NotExistError(table='tdd_video',params={'aid':aid})
     return logs
-
-
-
-def add_member(mid: int, service: Service, test_exist: bool = True) -> TddMember:
-    if type(mid) is not int or mid <= 0:
-        raise ValueError(f'Member mid must be a positive integer: {mid!r}')
-    if test_exist and query_member_via_mid(mid) is not None:
-        raise AlreadyExistError(table='member',params={'mid':mid})
-    member = _new_member(mid,service.get_member_card({'mid':mid},timeout=1.5,colddown_factor=0.1),get_ts_s())
-    inserted = insert_member(member)
-    if inserted is None:
-        raise AlreadyExistError(table='member',params={'mid':mid})
-    return inserted
 
 
 
@@ -174,6 +151,8 @@ def update_member(mid: int, service: Service) -> list[TddMemberLog]:
     try:
         card = service.get_member_card({'mid':mid},timeout=1.5,colddown_factor=0.1)
     except CodeError as error:
+        # Only -404 means a missing member: retain known profile fields and record status.
+        # Anti-crawler/request errors must propagate without overwriting that status.
         if error.code != -404:
             raise
         code = error.code
@@ -191,12 +170,6 @@ def fetch_member_follower_record(mid: int, service: Service,
     if out_stat is not None:
         out_stat['http_ms'] = int((time.perf_counter()-start)*1000)
     return MemberFollowerRecord(added=get_ts_s(),mid=mid,follower=relation.follower)
-
-
-
-def add_member_follower_record(mid: int, service: Service) -> HistoryKey:
-    record = fetch_member_follower_record(mid,service)
-    return commit_member_follower_records_batch([record])[0]
 
 
 

@@ -55,23 +55,10 @@ def _create_video(conn: Connection, video: NewVideo, *, new_members: list[NewMem
         append_video_records(conn,[first_record],run_id=run_id)
     return stored_video
 
-def update_video_profile(aid: int, view: VideoView | None, code_error: int | None,
+def update_video_profile(aid: int, video_view: VideoView | None, code_error: int | None,
                          tags: str | None, members: list[NewMember], added: int) -> list[TddVideoLog] | None:
     """Return change logs (possibly empty), or None when the video is missing."""
-    return execute_write(_update_video_profile, aid, view, code_error, tags, members, added)
-
-def insert_member(member: NewMember) -> TddMember | None:
-    """Return the inserted member, or None when its mid already exists."""
-    return execute_write(_insert_member_snapshot, member)
-
-
-def _insert_member_snapshot(conn: Connection, member: NewMember, *,
-                            run_id: UUID | None = None) -> TddMember | None:
-    if _insert_member(conn,member,run_id=run_id) is None:
-        return None
-    # The AFTER INSERT trigger may update last_video_aid after RETURNING.
-    # Only standalone adds need this final snapshot; prepared members need no reread.
-    return _query_member(conn,member.mid)
+    return execute_write(_update_video_profile, aid, video_view, code_error, tags, members, added)
 
 def _insert_member(conn: Connection, member: NewMember, *, run_id: UUID | None = None) -> TddMember | None:
     row = conn.execute(
@@ -118,7 +105,7 @@ def _claim_profile_observation(kind: Literal["video", "member"], entity_id: int,
     return True
 
 
-def _update_video_profile(conn: Connection, aid: int, view: VideoView | None, code_error: int | None,
+def _update_video_profile(conn: Connection, aid: int, video_view: VideoView | None, code_error: int | None,
                           tags: str | None, members: list[NewMember], added: int, *,
                           run_id: UUID | None = None) -> list[TddVideoLog] | None:
     logs = []
@@ -126,6 +113,8 @@ def _update_video_profile(conn: Connection, aid: int, view: VideoView | None, co
     if current is None:
         return None
     if code_error == -403:
+        # This may be a login failure rather than an unavailable video. Keep
+        # both status and watermark unchanged so it cannot suppress valid observations.
         return []
     if not _claim_profile_observation('video',aid,added,conn):
         return []
@@ -145,19 +134,19 @@ def _update_video_profile(conn: Connection, aid: int, view: VideoView | None, co
         _insert_prepared_members(members,conn)
         change('code',0)
         for field in ('videos','tid','tname','copyright','pic','title','pubdate','desc','state','attribute','forward'):
-            if field in ('attribute','forward') and not getattr(view,'response_has_'+field):
+            if field in ('attribute','forward') and not getattr(video_view,'response_has_'+field):
                 continue
-            new = clean_text(getattr(view,field))
+            new = clean_text(getattr(video_view,field))
             if field == 'pic' and current.pic is not None and new is not None and same_pic_url(new,current.pic):
                 continue
             change(field,new)
-        change('mid',view.owner.mid)
+        change('mid',video_view.owner.mid)
         # A successful full view response without staff means no staff flag.
-        change('hasstaff',1 if view.staff is not None else 0)
-        if view.staff is not None:
+        change('hasstaff',1 if video_view.staff is not None else 0)
+        if video_view.staff is not None:
             existing = {item.mid:item for item in _query_staff(conn,aid)}
             remaining,seen = set(existing),set()
-            for item in view.staff or []:
+            for item in video_view.staff or []:
                 if item.mid in seen:
                     logger.warning('Skip repeated video staff relationship: aid=%s, mid=%s',aid,item.mid)
                     continue
@@ -222,15 +211,13 @@ def _update_member_profile(conn: Connection, mid: int, card: MemberCard | None, 
 
 
 def _insert_staff(conn: Connection, added: int, aid: int, mid: int, title: str) -> TddVideoStaff | None:
-    obj = TddVideoStaff(added=added,aid=aid,bvid=a2b(aid),mid=mid,title=clean_text(title))
     row = conn.execute(
         'INSERT INTO tdd_video_staff (added,aid,bvid,mid,title) VALUES (%s,%s,%s,%s,%s) '
-        'ON CONFLICT (aid,mid) DO NOTHING RETURNING id',
-        (database_value('added',added),aid,obj.bvid,mid,obj.title)).fetchone()
+        'ON CONFLICT (aid,mid) DO NOTHING RETURNING id,added,aid,bvid,mid,title',
+        (database_value('added',added),aid,a2b(aid),mid,clean_text(title))).fetchone()
     if row is None:
         return None
-    obj.id = row[0]
-    return obj
+    return TddVideoStaff(**dict(zip(TddVideoStaff.fields,map(epoch,row))))
 
 
 def _query_video(conn: Connection, aid: int) -> TddVideo | None:

@@ -1,10 +1,21 @@
 import configparser
 import os
 
-__all__ = ['CONFIG_PATH', 'CONFIG', 'get_db_args', 'get_db_timeouts']
+__all__ = ['CONFIG_PATH', 'CONFIG', 'get_db_args', 'get_db_timeouts', 'get_db_pool_max_size']
 CONFIG_PATH = os.environ.get('TDD_CONFIG_PATH', os.path.join(os.path.dirname(__file__), 'conf.ini'))
 CONFIG = configparser.ConfigParser(interpolation=None)
 CONFIG.read(CONFIG_PATH)
+
+
+def get_db_pool_max_size():
+    """Maximum PostgreSQL connections held by this collector process."""
+    try:
+        value = CONFIG.getint('db_postgresql', 'pool_max_size', fallback=4)
+    except ValueError as exc:
+        raise ValueError('Database pool_max_size must be a positive integer') from exc
+    if value < 1:
+        raise ValueError('Database pool_max_size must be a positive integer')
+    return value
 
 
 def get_db_timeouts():
@@ -25,6 +36,8 @@ def get_db_args():
     if not CONFIG.has_section('db_postgresql'):
         raise RuntimeError('Configure [db_postgresql] in the selected INI file before opening the database')
     values = dict(CONFIG.items('db_postgresql'))
+    # Collector pool options are not libpq connection parameters.
+    values.pop('pool_max_size', None)
     for field in ('dbname', 'user', 'password'):
         if not values.get(field):
             raise ValueError('[db_postgresql] requires a nonempty ' + field)

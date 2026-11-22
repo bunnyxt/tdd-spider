@@ -158,10 +158,9 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         service = _FakeServiceWithApiStats()
 
         with mock.patch.object(m, 'Service', return_value=service), \
-             mock.patch.object(m, 'query_all_video_bvids',
+             mock.patch.object(m, 'query_all_video_aids',
                                lambda: []), \
-             mock.patch.object(m, 'JobPool', lambda *a, **kw: _FakePool(merged)), \
-             mock.patch.object(m, 'b2a', lambda bv: 1):
+             mock.patch.object(m, 'JobPool', lambda *a, **kw: _FakePool(merged)):
             m.update_video_info()
 
         (run_id, script_name, status, _), = self._runs()

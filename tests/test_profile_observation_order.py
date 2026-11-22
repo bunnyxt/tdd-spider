@@ -4,7 +4,7 @@ from unittest import mock
 from db import TddMember,TddVideo
 from core import NewMember
 from service import MemberCard,VideoViewStaffItem
-from task.task import add_member,add_video,update_video
+from task.task import add_video,update_video
 from profile_support import ProfileConnection
 from db.profiles import _query_video, _query_member, _query_staff
 from db.profiles import update_video_profile, update_member_profile
@@ -16,15 +16,15 @@ class ProfileObservationOrderTest(unittest.TestCase):
         self.conn = ProfileConnection()
         self.addCleanup(self.conn.close)
         self.conn.patch_task_reads(self)
-        self.view = expected_result()._replace(bvid='BV1234567890',pic='',staff=[])
-        self.aid = self.view.aid
-        self.mid = self.view.owner.mid
+        self.video_view = expected_result()._replace(bvid='BV1234567890',pic='',staff=[])
+        self.aid = self.video_view.aid
+        self.mid = self.video_view.owner.mid
         self.service = mock.Mock()
-        self.service.get_video_view.return_value = self.view
+        self.service.get_video_view.return_value = self.video_view
         self.service.get_video_tags.return_value.tags = []
         self.service.get_member_card.return_value = MemberCard(self.mid,'member','','','')
         self.conn.seed(TddMember(added=1,mid=self.mid,name='original',face='',sex='',sign='',code=0))
-        values = {field:getattr(self.view,field) for field in
+        values = {field:getattr(self.video_view,field) for field in
                   ('videos','tid','tname','copyright','pic','title','pubdate','desc','state','attribute','forward')}
         self.conn.seed(TddVideo(added=1,aid=self.aid,bvid='1234567890',mid=self.mid,code=-404,
                                   hasstaff=0,tags='',**values))
@@ -32,8 +32,8 @@ class ProfileObservationOrderTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def video_payload(self,added,*,view=None,code=None,tags=''):
-        return dict(aid=self.aid,view=self.view if view is None and code is None else view,
+    def video_payload(self,added,*,video_view=None,code=None,tags=''):
+        return dict(aid=self.aid,video_view=self.video_view if video_view is None and code is None else video_view,
                     code_error=code,tags=tags,members=[],added=added)
 
     def member_payload(self,added,*,card=None,code=0):
@@ -62,12 +62,12 @@ class ProfileObservationOrderTest(unittest.TestCase):
         with self.assertLogs('db.profiles',level='WARNING'):
             self.assertEqual(self.apply(update_video_profile,self.video_payload(100)),[])
         video = _query_video(self.conn,self.aid)
-        self.assertEqual((video.code,video.title),(62002,self.view.title))
+        self.assertEqual((video.code,video.title),(62002,self.video_view.title))
 
     def test_older_success_keeps_newer_title_owner_and_staff(self):
-        newer = self.view._replace(title='new title',owner=self.view.owner._replace(mid=self.mid+1),
+        newer = self.video_view._replace(title='new title',owner=self.video_view.owner._replace(mid=self.mid+1),
                                   staff=[VideoViewStaffItem(self.mid+2,'new role','','')])
-        self.apply(update_video_profile,self.video_payload(200,view=newer,tags='new tags'))
+        self.apply(update_video_profile,self.video_payload(200,video_view=newer,tags='new tags'))
         before = self.conn.execute('SELECT count(*) FROM tdd_video_log').fetchone()[0]
         with self.assertLogs('db.profiles',level='WARNING'):
             self.apply(update_video_profile,self.video_payload(100))
@@ -89,8 +89,8 @@ class ProfileObservationOrderTest(unittest.TestCase):
         self.assertEqual(self.watermark('member',self.mid),200)
 
     def test_equal_second_independent_inputs_keep_last_write(self):
-        self.apply(update_video_profile,self.video_payload(200,view=self.view._replace(title='first')))
-        self.apply(update_video_profile,self.video_payload(200,view=self.view._replace(title='second')))
+        self.apply(update_video_profile,self.video_payload(200,video_view=self.video_view._replace(title='first')))
+        self.apply(update_video_profile,self.video_payload(200,video_view=self.video_view._replace(title='second')))
         self.assertEqual(_query_video(self.conn,self.aid).title,'second')
         self.apply(update_member_profile,self.member_payload(200,card=MemberCard(self.mid,'first','','','')))
         self.apply(update_member_profile,self.member_payload(200,card=MemberCard(self.mid,'second','','','')))
@@ -100,16 +100,16 @@ class ProfileObservationOrderTest(unittest.TestCase):
         self.apply(update_video_profile,self.video_payload(100))
         with mock.patch.object(self.conn,'append',side_effect=RuntimeError('log failure')):
             with self.assertRaisesRegex(RuntimeError,'log failure'):
-                self.apply(update_video_profile,self.video_payload(300,view=self.view._replace(title='failed')))
+                self.apply(update_video_profile,self.video_payload(300,video_view=self.video_view._replace(title='failed')))
         self.assertEqual(self.watermark('video',self.aid),100)
-        self.apply(update_video_profile,self.video_payload(200,view=self.view._replace(title='accepted')))
+        self.apply(update_video_profile,self.video_payload(200,video_view=self.video_view._replace(title='accepted')))
         self.assertEqual(_query_video(self.conn,self.aid).title,'accepted')
 
     def test_ignored_403_does_not_block_older_valid_metadata(self):
         self.apply(update_video_profile,self.video_payload(100))
         self.assertEqual(self.apply(update_video_profile,self.video_payload(300,code=-403)),[])
         self.assertEqual(self.watermark('video',self.aid),100)
-        self.apply(update_video_profile,self.video_payload(200,view=self.view._replace(title='valid')))
+        self.apply(update_video_profile,self.video_payload(200,video_view=self.video_view._replace(title='valid')))
         self.assertEqual(_query_video(self.conn,self.aid).title,'valid')
 
     def test_view_observation_time_precedes_slow_enrichment(self):
@@ -117,20 +117,23 @@ class ProfileObservationOrderTest(unittest.TestCase):
         def tags(*args,**kwargs):
             now[0] = 300
             return ''
-        with mock.patch('task.task.get_ts_s',side_effect=lambda:now[0]), \
+        with mock.patch('task.task.get_ts_s',side_effect=lambda:now[0]),\
              mock.patch('task.task._get_video_tags_str',side_effect=tags):
             update_video(self.aid,self.service)
         self.assertEqual(self.watermark('video',self.aid),100)
 
     def test_new_member_and_prepared_member_start_with_observation_watermark(self):
-        for operation in ('member-add','video-update'):
-            mid = self.mid + (10 if operation == 'member-add' else 20)
+        for operation in ('video-add','video-update'):
+            mid = self.mid + (10 if operation == 'video-add' else 20)
             self.service.get_member_card.return_value = MemberCard(mid,'fresh','','','')
             with mock.patch('task.task.get_ts_s',return_value=200):
-                if operation == 'member-add':
-                    add_member(mid,self.service)
+                if operation == 'video-add':
+                    aid = self.aid+1
+                    self.service.get_video_view.return_value = self.video_view._replace(
+                        aid=aid,owner=self.video_view.owner._replace(mid=mid))
+                    add_video(aid,self.service)
                 else:
-                    self.service.get_video_view.return_value = self.view._replace(
+                    self.service.get_video_view.return_value = self.video_view._replace(
                         staff=[VideoViewStaffItem(mid,'role','','')])
                     update_video(self.aid,self.service)
             old = dict(mid=mid,card=None,code=-404,added=100)
@@ -144,7 +147,7 @@ class ProfileObservationOrderTest(unittest.TestCase):
         self.apply(update_member_profile,self.member_payload(100))
         # A member may be inserted after enrichment's existence check.
         candidate = NewMember(added=300,mid=self.mid,name='ignored',face='',code=-404)
-        with mock.patch('task.task._prepare_members',return_value={self.mid:candidate}), \
+        with mock.patch('task.task._prepare_members',return_value={self.mid:candidate}),\
              mock.patch('task.task.get_ts_s',return_value=300):
             update_video(self.aid,self.service)
         self.assertEqual((_query_member(self.conn,self.mid).name,_query_member(self.conn,self.mid).code),
@@ -155,9 +158,9 @@ class ProfileObservationOrderTest(unittest.TestCase):
 
     def test_new_video_starts_with_observation_watermark(self):
         aid = self.aid+1
-        self.service.get_video_view.return_value = self.view._replace(aid=aid)
+        self.service.get_video_view.return_value = self.video_view._replace(aid=aid)
         with mock.patch('task.task.get_ts_s',return_value=200):
-            add_video(aid,self.service,commit_video_record=False)
+            add_video(aid,self.service)
         payload = self.video_payload(100,code=-404)
         payload['aid'] = aid
         with self.assertLogs('db.profiles',level='WARNING'):

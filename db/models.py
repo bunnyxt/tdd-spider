@@ -31,21 +31,14 @@ TddVideo = row_type('TddVideo', 'tdd_video',
 TddMember = row_type('TddMember', 'tdd_member',
     ('id','added','mid','sex','name','face','sign','code','last_video_aid'))
 TddVideoStaff = row_type('TddVideoStaff', 'tdd_video_staff', ('id','added','aid','bvid','mid','title'))
-TddVideoRecord = row_type('TddVideoRecord', 'tdd_video_record', ('id','added','aid') + STAT_FIELDS)
-TddMemberFollowerRecord = row_type('TddMemberFollowerRecord', 'tdd_member_follower_record', ('id','added','mid','follower'))
-TddMemberTotalStatRecord = row_type('TddMemberTotalStatRecord', 'tdd_member_total_stat_record', ('id','added','mid','video_count') + STAT_FIELDS)
 TddSprintVideoRecord = row_type('TddSprintVideoRecord', 'tdd_sprint_video_record', ('id','added','aid') + STAT_FIELDS)
-TddVideoRecordAbnormalChange = row_type('TddVideoRecordAbnormalChange', 'tdd_video_record_abnormal_change',
-    ('id','added','aid','attr','speed_now','speed_last','speed_now_incr_rate','period_range','speed_period','speed_overall',
-     'this_record_id','this_added') + tuple('this_' + f for f in STAT_FIELDS) +
-    ('last_record_id','last_added') + tuple('last_' + f for f in STAT_FIELDS) + ('description','comment'))
 
 
 class TddVideoLog(Row):
     table = 'tdd_video_log'
     fields = ('id','added','aid','attr','oldval','newval')
     def __init__(self, added: int | None = None, aid: int | None = None,
-                 bvid: str | None = None, attr: str | None = None,
+                 attr: str | None = None,
                  oldval: str | None = None, newval: str | None = None, **values: Any) -> None:
         super().__init__(added=added, aid=aid, attr=attr, oldval=oldval, newval=newval, **values)
 
