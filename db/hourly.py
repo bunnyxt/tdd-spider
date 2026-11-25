@@ -15,10 +15,15 @@ def update_video_recent(now_ts: int) -> None:
 def _update_video_recent(conn: Connection, now_ts: int) -> None:
     last_1d_ts = timestamp(now_ts - 24 * 60 * 60)
     last_7d_ts = timestamp(now_ts - 7 * 24 * 60 * 60)
-    conn.execute('update tdd_video set recent = 0 where added < %s', (last_7d_ts,))
-    conn.execute('update tdd_video set recent = 1 where added >= %s AND added < %s',
+    # Unchanged rows still incur writes and enter statement-trigger transition
+    # tables. Limit those tables to videos whose classification really changes.
+    conn.execute('update tdd_video set recent = 0 where added < %s '
+                 'AND recent IS DISTINCT FROM 0', (last_7d_ts,))
+    conn.execute('update tdd_video set recent = 1 where added >= %s AND added < %s '
+                 'AND recent IS DISTINCT FROM 1',
                  (last_7d_ts, last_1d_ts))
-    conn.execute('update tdd_video set recent = 2 where added >= %s', (last_1d_ts,))
+    conn.execute('update tdd_video set recent = 2 where added >= %s '
+                 'AND recent IS DISTINCT FROM 2', (last_1d_ts,))
 
 
 def update_video_activity(desired: Mapping[int, Sequence[int]]) -> int:
@@ -43,6 +48,7 @@ def update_video_freq() -> None:
 
 
 def _update_video_freq(conn: Connection) -> None:
-    conn.execute('update tdd_video set freq = 0')
-    conn.execute('update tdd_video set freq = 1 where activity = 1')
-    conn.execute('update tdd_video set freq = 2 where activity = 2 OR recent = 1')
+    # The final legacy UPDATE wins: recent=1 also overrides activity=1.
+    desired = 'CASE WHEN activity = 2 OR recent = 1 THEN 2 WHEN activity = 1 THEN 1 ELSE 0 END'
+    conn.execute(f'update tdd_video set freq = {desired} '
+                 f'where freq IS DISTINCT FROM ({desired})')
