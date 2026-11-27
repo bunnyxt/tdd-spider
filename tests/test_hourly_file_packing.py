@@ -1,4 +1,4 @@
-"""Hourly CSV failures do not stop packing, and cleanup requires an archive."""
+"""Hourly cleanup preserves every CSV unless the archive contains its data."""
 import os
 from pathlib import Path
 import subprocess
@@ -136,6 +136,69 @@ class HourlyFilePackingTest(unittest.TestCase):
         self.assertFalse(old_csv.exists())
         self.assertTrue(archive_path.exists())
         self.assertTrue(newer_csv.exists())
+        self.assertEqual(runner.failure_count, 0)
+        self.assertEqual(runner.metrics, {})
+
+    def test_incomplete_archive_keeps_all_csvs_including_already_archived_ones(self):
+        earlier = self.folder / f'{OLD_DAY} 10:00.csv'
+        earlier.write_text('earlier records\n')
+        with tarfile.open(self.folder / f'{OLD_DAY}.tar.gz', 'w:gz') as archive:
+            archive.add(earlier, arcname=f'{OLD_DAY}/{earlier.name}')
+        late = self.folder / f'{OLD_DAY} 23:00.csv'
+        late.write_text('late records\n')
+        runner = self.runner()
+        with self.assertLogs(runner.logger, level='ERROR'):
+            runner.run()
+        self.assertEqual(earlier.read_text(), 'earlier records\n')
+        self.assertEqual(late.read_text(), 'late records\n')
+        self.assertEqual(runner.metrics, {'cleanup_failed': 1})
+        self.assertEqual(runner.failure_count, 1)
+
+    def test_changed_csv_is_kept_even_when_archive_name_and_size_match(self):
+        old_csv = self.folder / f'{OLD_DAY} 10:00.csv'
+        old_csv.write_bytes(b'old records\n')
+        with tarfile.open(self.folder / f'{OLD_DAY}.tar.gz', 'w:gz') as archive:
+            archive.add(old_csv, arcname=f'{OLD_DAY}/{old_csv.name}')
+        old_csv.write_bytes(b'new records\n')
+        runner = self.runner()
+        with self.assertLogs(runner.logger, level='ERROR'):
+            runner.run()
+        self.assertEqual(old_csv.read_bytes(), b'new records\n')
+        self.assertEqual(runner.metrics, {'cleanup_failed': 1})
+
+    def test_corrupt_archive_keeps_csv(self):
+        old_csv = self.folder / f'{OLD_DAY} 10:00.csv'
+        old_csv.write_text('records\n')
+        (self.folder / f'{OLD_DAY}.tar.gz').write_bytes(b'not a tar archive')
+        runner = self.runner()
+        with self.assertLogs(runner.logger, level='ERROR'):
+            runner.run()
+        self.assertTrue(old_csv.exists())
+        self.assertEqual(runner.metrics, {'cleanup_failed': 1})
+
+    def test_archive_link_does_not_authorize_csv_deletion(self):
+        old_csv = self.folder / f'{OLD_DAY} 10:00.csv'
+        old_csv.write_text('records\n')
+        with tarfile.open(self.folder / f'{OLD_DAY}.tar.gz', 'w:gz') as archive:
+            entry = tarfile.TarInfo(f'{OLD_DAY}/{old_csv.name}')
+            entry.type = tarfile.SYMTYPE
+            entry.linkname = old_csv.name
+            archive.addfile(entry)
+        runner = self.runner()
+        with self.assertLogs(runner.logger, level='ERROR'):
+            runner.run()
+        self.assertTrue(old_csv.exists())
+        self.assertEqual(runner.metrics, {'cleanup_failed': 1})
+
+    def test_complete_archive_allows_deleting_multiple_csvs(self):
+        files = [self.folder / f'{OLD_DAY} {hour}:00.csv' for hour in ('10', '23')]
+        with tarfile.open(self.folder / f'{OLD_DAY}.tar.gz', 'w:gz') as archive:
+            for index, path in enumerate(files):
+                path.write_bytes(bytes([index]) * (1024 * 1024 + 17))
+                archive.add(path, arcname=f'{OLD_DAY}/{path.name}')
+        runner = self.runner()
+        runner.run()
+        self.assertTrue(all(not path.exists() for path in files))
         self.assertEqual(runner.failure_count, 0)
         self.assertEqual(runner.metrics, {})
 

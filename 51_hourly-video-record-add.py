@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from collections import namedtuple, defaultdict, Counter
 from typing import Optional
 from core import VideoRecord
@@ -377,7 +378,7 @@ class RecordsSaveToFileRunner(CheckedRunner):
         else:
             self.logger.info('Finish packing daily CSV files into %s!', archive)
 
-        # Cleanup is independent, but only a completed archive permits deletion.
+        # Verify the entire deletion set before removing any original CSV.
         old_prefix = self.data_folder + ts_s_to_str(get_ts_s() - 3 * 24 * 60 * 60)[:10]
         old_files = glob.glob(old_prefix + '*.csv')
         if not old_files:
@@ -386,6 +387,7 @@ class RecordsSaveToFileRunner(CheckedRunner):
         try:
             if not os.path.isfile(old_archive) or os.path.getsize(old_archive) == 0:
                 raise RuntimeError('Keep old CSV files: missing or empty archive ' + old_archive)
+            self._verify_archived_csvs(old_archive, old_files)
             for filename in old_files:
                 os.remove(filename)
             self.logger.info('Removed %d archived CSV files for %s.', len(old_files), old_prefix)
@@ -393,6 +395,31 @@ class RecordsSaveToFileRunner(CheckedRunner):
             self.failure_count += 1
             self.metrics['cleanup_failed'] = 1
             self.logger.error('Fail to clean up old CSV files for %s. Detail: %s', old_prefix, e)
+
+    @staticmethod
+    def _verify_archived_csvs(archive_path, filenames):
+        day = os.path.basename(archive_path).removesuffix('.tar.gz')
+        expected = {day + '/' + os.path.basename(name): name for name in filenames}
+        verified = set()
+        # One decompression pass, bounded buffers, and no extraction to disk.
+        with tarfile.open(archive_path, 'r|gz') as archive:
+            for member in archive:
+                if member.name not in expected:
+                    continue
+                filename = expected[member.name]
+                if not member.isfile() or member.name in verified:
+                    raise RuntimeError('Keep old CSV files: invalid archive member ' + member.name)
+                with open(filename, 'rb') as original, archive.extractfile(member) as archived:
+                    while True:
+                        chunk = original.read(1024 * 1024)
+                        if archived.read(1024 * 1024) != chunk:
+                            raise RuntimeError('Keep old CSV files: archive content differs for ' + filename)
+                        if not chunk:
+                            break
+                verified.add(member.name)
+        missing = expected.keys() - verified
+        if missing:
+            raise RuntimeError('Keep old CSV files: archive missing ' + ', '.join(sorted(missing)))
 
 
 # TODO: change to record new
