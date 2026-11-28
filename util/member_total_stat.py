@@ -58,8 +58,6 @@ def aggregate_member_stats(rows, members, added, logger):
                 note('unknown_stat', (aid, field))
                 value = 0
             total[field] += value
-            if total[field] > 2147483647:
-                raise ValueError(f'Aggregate exceeds signed INT: mid={mid}, field={field}')
         total['video_count'] += 1
         counts['eligible_rows'] += 1
 

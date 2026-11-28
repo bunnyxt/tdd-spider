@@ -1,4 +1,3 @@
-from .AddMemberFollowerRecordJob import *
 from .FetchMemberFollowerRecordJob import *
 from .BatchInsertMemberFollowerRecordJob import *
 from .AddSprintVideoRecordJob import *

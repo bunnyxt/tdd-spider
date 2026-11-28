@@ -26,6 +26,28 @@ See the structure below.
 
 ![TianDian Daily structure](./tdd-structure.png "TianDian Daily structure")
 
+## Collector runtime
+
+The PostgreSQL collector uses Python 3.12 and parameterized SQL.
+
+### Permanent setup (kept after migration)
+
+1. Clone the repository and enter its directory.
+2. Create a virtual environment with `python3.12 -m venv .venv`, then install the locked dependencies with `.venv/bin/python -m pip install -r requirements.txt`.
+3. Copy `conf/conf.ini.example` to `conf/conf.ini` and configure `[db_postgresql]`. Copy `service/endpoints.json.example` to `service/endpoints.json` and configure your HTTP workers.
+4. Install compatible business tables, partitions and maintenance triggers outside this repository, and grant the collector its business-table and identity-sequence permissions. The application does not create these objects. See [permanent setup](docs/postgresql.md#permanent-setup).
+5. Prepare a restricted failure-file directory. Failed writes trigger a best-effort save of their input. Uncertain commits require manual database reconciliation; any resubmission is also manual, with no automatic replay or resubmission command. Never replay an earlier trial's failure files into a new baseline. See [failed writes](docs/postgresql.md#failed-writes).
+
+### Migration-only setup (removed after wrap-up)
+
+The current version requires migration protection even during formal collection.
+Complete this setup before starting writers.
+
+1. With collectors stopped, install `db/ingest.sql` as the database owner. It creates the migration-only `tdd_ingest.control` and `manifest` tables. Grant the collector schema `USAGE`, control `SELECT` and manifest `INSERT`, but no control mutations. See [migration-only setup](docs/postgresql.md#migration-only-setup); remove these objects and grants through [Retiring migration tooling](docs/postgresql.md#retiring-migration-tooling).
+2. **Configure the control row before the first write.** The SQL installation leaves it empty, which rejects writes. Use `formal` with `active_run_id=NULL` and no `TDD_TRIAL_RUN_ID`, or `trial` with a non-NULL `active_run_id` and the identical `TDD_TRIAL_RUN_ID` in collector processes. The owner or maintenance role must follow [run control](docs/postgresql.md#migration-period-deployment-and-run-control). Retire this control and trial environment setting through [Retiring migration tooling](docs/postgresql.md#retiring-migration-tooling).
+3. `TDD_ALLOW_UNMANAGED_INGEST=1` permits empty control only in disposable, one-off test databases. It is not for managed trials or formal deployments and cannot override an existing control row. Remove this test compatibility setting through [Retiring migration tooling](docs/postgresql.md#retiring-migration-tooling).
+4. Keep `db/migration.py` and its two hooks: `transaction.write` calls `before_write`, and `append_rows` calls `record_keys`. Remove them with the temporary controls through [Retiring migration tooling](docs/postgresql.md#retiring-migration-tooling); do not drop their tables while the current implementation still needs them.
+
 ## Run records
 
 Some scripts persist one structured row per run into a SQLite store

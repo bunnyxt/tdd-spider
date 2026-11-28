@@ -1,4 +1,4 @@
-from db import DBOperation, Session
+from db.queries import query_all_member_mids
 from util import logging_init, get_week_day, fullname, get_ts_ms, format_duration_summary
 from queue import Queue
 from service import Service
@@ -17,11 +17,10 @@ def update_member_info():
     start_ts_ms = get_ts_ms()
 
     with track(script_fullname) as recorder:
-        session = Session()
         service = Service(mode='worker')
 
         # get all mids
-        all_mids: list[int] = DBOperation.query_all_member_mids(session)
+        all_mids: list[int] = query_all_member_mids()
         logger.info(f'Total {len(all_mids)} members got.')
 
         # add latest 1000 mids first
@@ -68,7 +67,6 @@ def update_member_info():
         logger.info(f'{job_num} job(s) started.')
         job_stat_merged = pool.join()
 
-        session.close()
 
         end_ts_ms = get_ts_ms()
 

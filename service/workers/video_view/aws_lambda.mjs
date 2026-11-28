@@ -1,6 +1,6 @@
 // Trimmed video_view worker: fetches the full view from bilibili, then
 // returns only the fields stat-record jobs consume (see VideoViewTrimmed /
-// RecordNew in the spider). Full view responses run 200KB-2.8MB for
+// VideoRecord in the spider). Full view responses run 200KB-2.8MB for
 // season/multi-part videos while the record path needs ~250B of it; trimming
 // here keeps that bloat off the spider's constrained inbound link.
 //

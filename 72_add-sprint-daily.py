@@ -1,5 +1,6 @@
-import time
-from db import Session
+from db.queries import (query_sprint_records_in_window, query_first_sprint_record,
+                        query_sprint_video_created, query_last_sprint_daily_view_incr)
+from db.sprint import insert_sprint_daily_record, insert_sprint_daily_summary
 import datetime
 from runrecord import track
 from util import logging_init, get_ts_s, ts_s_to_str, \
@@ -18,20 +19,17 @@ def add_sprint_daily():
     start_ts_ms = get_ts_ms()
 
     with track(script_fullname) as recorder:
-        session = Session()
-
         try:
             # get now time to format as date
-            date = datetime.datetime.now().strftime('%Y%m%d')
+            cst = datetime.timezone(datetime.timedelta(hours=8))
+            date = datetime.datetime.fromtimestamp(get_ts_s(), cst).strftime('%Y%m%d')
 
             # calc start ts and end ts
-            end_ts = int(time.mktime(time.strptime(date, "%Y%m%d"))) + 60 * 60 * 6
+            end_ts = int(datetime.datetime.strptime(date, '%Y%m%d').replace(tzinfo=cst).timestamp()) + 60 * 60 * 6
             start_ts = end_ts - 60 * 60 * 24
 
             # get start records
-            result = session.execute(f'select aid, `view` from tdd_sprint_video_record '
-                                     f'where added >= {start_ts} && added < {start_ts + 30 * 60}')
-            start_records = [(r['aid'], r['view']) for r in result]
+            start_records = query_sprint_records_in_window(start_ts, start_ts + 30 * 60)
             start_records_view = {}
             for (aid, view) in start_records:
                 if aid not in start_records_view.keys():
@@ -39,9 +37,7 @@ def add_sprint_daily():
             logger.info(f'Total {len(start_records_view)} start video got.')
 
             # get end records
-            result = session.execute(f'select aid, `view` from tdd_sprint_video_record '
-                                     f'where added >= {end_ts} && added < {end_ts + 30 * 60}')
-            end_records = [(r['aid'], r['view']) for r in result]
+            end_records = query_sprint_records_in_window(end_ts, end_ts + 30 * 60)
             end_records_view = {}
             for (aid, view) in end_records:
                 if aid not in end_records_view.keys():
@@ -57,9 +53,10 @@ def add_sprint_daily():
                 if aid not in start_records_view.keys():
                     logger.info(f'New video detected. aid: {aid}')
                     new_video_aids.append(aid)
-                    result = session.execute(f'select `view` from tdd_sprint_video_record '
-                                             f'where aid = {aid} order by added limit 1')
-                    start_view = [r['view'] for r in result][0]
+                    first_record = query_first_sprint_record(aid)
+                    if first_record is None:
+                        raise ValueError(f'Sprint record missing for aid {aid}')
+                    start_view = first_record[1]
                 else:
                     start_view = start_records_view[aid]
 
@@ -78,17 +75,17 @@ def add_sprint_daily():
 
                 # calc pday
                 added = get_ts_s()
-                result = session.execute(f'select created from tdd_sprint_video where aid = {aid}')
-                created = [r['created'] for r in result][0]
+                created = query_sprint_video_created(aid)
+                if created is None:
+                    raise ValueError(f'Sprint video missing for aid {aid}')
                 pday = math.floor((added - created) / (24 * 60 * 60))
 
                 # calc lday
                 # if no view incr, lday is 9999999
                 lday = math.floor((1000000 - end_view) / view_incr) if view_incr != 0 else 9999999
 
-                session.execute(f'insert into tdd_sprint_daily_record (added, `date`, aid, `view`, viewincr, pday, lday) '
-                                f'values ({added}, "{date}", {aid}, {end_view}, {view_incr}, {pday}, {lday})')
-                session.commit()
+                insert_sprint_daily_record(added=added, date=date, aid=aid, view=end_view,
+                                                  viewincr=view_incr, pday=pday, lday=lday)
                 logger.info(f'Add new daily record. '
                             f'added: {added}, date: {date}, aid: {aid}, end_view: {end_view}, view_incr: {view_incr}, '
                             f'pday: {pday}, lday: {lday}')
@@ -96,9 +93,9 @@ def add_sprint_daily():
                 video_total += 1
 
             # calc view incr incr
-            result = session.execute('select `viewincr` from tdd_sprint_daily '
-                                     'where viewincr is not NULL order by id desc limit 1')
-            last_view_incr = [r['viewincr'] for r in result][0]
+            last_view_incr = query_last_sprint_daily_view_incr()
+            if last_view_incr is None:
+                raise ValueError('Previous sprint daily total is missing')
             view_incr_incr = view_incr_total - last_view_incr
 
             # make str
@@ -109,23 +106,17 @@ def add_sprint_daily():
             for aid in million_video_aids:
                 millvids_str += f'{aid};'
 
-            session.execute(f'insert into tdd_sprint_daily '
-                            f'(added, `date`, correct, vidnum, newvids, millvids, viewincr, viewincrincr, comment) '
-                            f'values ({get_ts_s()}, "{date}", 1, {video_total}, "{newvids_str}", "{millvids_str}", '
-                            f'{view_incr_total}, {view_incr_incr}, "")')
-            session.commit()
+            insert_sprint_daily_summary(added=get_ts_s(), date=date, correct=1, vidnum=video_total,
+                                               newvids=newvids_str, millvids=millvids_str, viewincr=view_incr_total,
+                                               viewincrincr=view_incr_incr, comment='')
             logger.info(f'Add new daily summary. '
                         f'added: {get_ts_s()}, date: {date}, video_total: {video_total}, '
                         f'newvids_str: {newvids_str}, millvids_str: {millvids_str}, '
                         f'view_incr_total: {view_incr_total}, view_incr_incr: {view_incr_incr}')
         except Exception as e:
-            message = f'Exception occurred when updating member total stat! error: {e}'
+            message = f'Exception occurred when adding sprint daily! error: {e}'
             logger.critical(message)
-            session.rollback()
-            session.close()
             raise SystemExit(1)
-
-        session.close()
 
         end_ts_ms = get_ts_ms()
 

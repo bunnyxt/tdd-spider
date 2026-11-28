@@ -1,4 +1,7 @@
-from db import Session, DBOperation, TddVideoRecordAbnormalChange
+from db.queries import (query_all_update_video_aids, query_freq_update_video_aids,
+                        query_video_pubdate_all, query_video_records_of_given_aid_added_before_given_ts)
+from db.hourly import update_video_recent, update_video_activity, update_video_freq
+from db.write import insert_video_record_abnormal_change
 from threading import Thread
 from queue import Queue
 from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, \
@@ -7,13 +10,16 @@ from util import get_ts_s, get_ts_s_str, a2b, is_all_zero_record, \
 import time
 import datetime
 import gzip
+import glob
 import os
 import re
 import shutil
+import subprocess
 import sys
+import tarfile
 from collections import namedtuple, defaultdict, Counter
 from typing import Optional
-from core import RecordNew
+from core import VideoRecord
 from service import Service
 from job import FetchVideoRecordJob, BatchInsertVideoRecordJob, UpdateVideoJob, Job, JobPool
 from runrecord import RunRecorder
@@ -24,41 +30,28 @@ script_name = 'hourly-video-record-add'
 script_fullname = fullname(script_id, script_name)
 logger = logging.getLogger(script_id)
 
-# TODO: remove old record
-Record = namedtuple('Record', [
-    'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
-# RecordNew = namedtuple('RecordNew', [
-#     'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like',
-#     'dislike', 'now_rank', 'his_rank', 'vt', 'vv'])
 RecordSpeed = namedtuple('RecordSpeed', [
     'start_ts', 'end_ts', 'timespan', 'per_seconds', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'])
 RecordSpeedRatio = namedtuple('RecordSpeedRatio', [
     'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like', 'inf_magic_num'])
 
 
-def get_need_insert_aid_list(time_label, session):
+def get_need_insert_aid_list(time_label):
     # all in-scope videos (tdd_video, code == 0, state == 0); no tid filter --
     # c0/c30 were merged, the tid == 30 partition no longer means anything.
     if time_label == '04:00':
         # return total (daily full scan)
-        return DBOperation.query_all_update_video_aids(session)
+        return query_all_update_video_aids()
 
     # add 1 hour aids
-    aid_list = DBOperation.query_freq_update_video_aids(2, session)  # freq = 2
+    aid_list = query_freq_update_video_aids(2)  # freq = 2
 
     if time_label in ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00']:
         # add 4 hour aids
         # freq = 1
-        aid_list += DBOperation.query_freq_update_video_aids(1, session)
+        aid_list += query_freq_update_video_aids(1)
 
     return aid_list
-
-
-def _stamp(time_task: str) -> str:
-    # '2026-07-14 08:00' -> '202607140800'. Same convention as the log files
-    # (51_202607140800_INFO.log): digits only, no '-', ' ' or ':'. Keeps the
-    # date so runs on different days never append into the same file.
-    return time_task.replace('-', '').replace(' ', '').replace(':', '')
 
 
 def fetch_and_batch_insert_records(
@@ -66,7 +59,6 @@ def fetch_and_batch_insert_records(
         job_num: int, fetch_label: str, writer_label: str, logger_name: str,
         duration_limit_s=60 * 40,
         fetched_queue_maxsize: int = 20000,
-        recovery_path: Optional[str] = None,
         update_job_num: int = 10, update_label: str = 'video-update'):
     """
     Bulk fetch-then-batch-insert pipeline shared by the C0 and C30 (simple)
@@ -136,13 +128,11 @@ def fetch_and_batch_insert_records(
                            'record_dropped_queue_full', 'duration_limit_reached'],
         logger_name=logger_name)
     writer_pool = JobPool(
-        [BatchInsertVideoRecordJob('writer_0', fetched_record_queue, record_queue,
-                                   recovery_path=recovery_path)],
+        [BatchInsertVideoRecordJob('writer_0', fetched_record_queue, record_queue)],
         progress_total=len(need_insert_aid_list),
         progress_label=writer_label,
         progress_interval_s=5.0,  # writer progress is less chatty
-        ensure_conditions=['batch_insert', 'batch_insert_split', 'batch_insert_split_ok',
-                           'single_insert_retry_ok', 'batch_insert_fail'],
+        ensure_conditions=['batch_insert', 'persisted', 'batch_insert_fail'],
         logger_name=logger_name)
     # bounded DB concurrency: update_job_num connections, not job_num
     update_pool = JobPool(
@@ -173,7 +163,7 @@ def fetch_and_batch_insert_records(
     log.info(fetch_stat.get_summary(fetch_label))
     log.info(writer_stat.get_summary(writer_label))
     log.info(update_stat.get_summary(update_label))
-    log.info(f'{writer_stat.total_count} record(s) fetched, batch inserted and returned.')
+    log.info(f'{writer_stat.condition["persisted"]} record(s) confirmed persisted and returned.')
     log.info(f'{update_stat.total_count} code-error video(s) updated.')
     # the fetch and update pools share this Service, so its tracker covers
     # every HTTP attempt either made
@@ -207,7 +197,7 @@ class VideoRecordAcquisitionJob(Job):
     WRITER_LABEL = 'record-db-writer'
     UPDATE_LABEL = 'record-video-update'
 
-    def __init__(self, time_task: str, record_queue: Queue[RecordNew]):
+    def __init__(self, time_task: str, record_queue: Queue[VideoRecord]):
         super().__init__('acquisition')
         self.time_task = time_task      # full stamp, ex: '2026-07-14 08:00'
         self.time_label = time_task[-5:]  # hour only, ex: '08:00'
@@ -218,11 +208,18 @@ class VideoRecordAcquisitionJob(Job):
         self.update_stat = None
         # set by process(); stays None if it raised
         self.api_stats = None
+        self.error = None
+        self.failure_counts = {}
+
+    def run(self):
+        try:
+            super().run()
+        except Exception as error:
+            self.error = error
+            self.logger.exception('Acquisition failed')
 
     def process(self):
-        session = Session()
-        need_insert_aid_list = get_need_insert_aid_list(self.time_label, session)
-        session.close()
+        need_insert_aid_list = get_need_insert_aid_list(self.time_label)
         self.logger.info(
             f'{len(need_insert_aid_list)} aid(s) need insert for time label {self.time_label}.')
 
@@ -234,8 +231,21 @@ class VideoRecordAcquisitionJob(Job):
             writer_label=self.WRITER_LABEL,
             logger_name='VideoRecordAcquisitionJob',
             duration_limit_s=60 * 40,  # 40 minutes, caps the 04:00 full scan
-            recovery_path=f'data/record_recovery_{_stamp(self.time_task)}.csv',
             update_job_num=10, update_label=self.UPDATE_LABEL)
+
+        self.failure_counts = {
+            'db_write_failed': self.writer_stat.condition['batch_insert_fail'],
+            'queue_full_dropped': self.fetch_stat.condition['record_dropped_queue_full'],
+            'persisted_success_mismatch': abs(self.writer_stat.condition['persisted']
+                                             - self.fetch_stat.condition['success']),
+        }
+        if any(self.failure_counts.values()):
+            self.logger.error(
+                'Video collection results: fetched=%d, persisted=%d, '
+                'db_write_failed=%d, queue_full_dropped=%d.',
+                self.fetch_stat.condition['success'], self.writer_stat.condition['persisted'],
+                self.writer_stat.condition['batch_insert_fail'],
+                self.fetch_stat.condition['record_dropped_queue_full'])
 
         self.logger.info('Finish add need insert aid list!')
 
@@ -249,6 +259,7 @@ class VideoRecordAcquisitionJob(Job):
 # 04:00 full scans kept as gzip of the hourly csv; data/ packing and clean-up never touch this folder
 FULL_SCAN_SNAPSHOT_DIR = 'data/0400'
 FULL_SCAN_SNAPSHOT_RETENTION_DAYS = 30
+SNAPSHOT_FIELDS = ('added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like')
 
 
 def time_task_days_before(time_task: str, days: int) -> str:
@@ -261,8 +272,25 @@ def full_scan_snapshot_path(time_task: str) -> str:
     return os.path.join(FULL_SCAN_SNAPSHOT_DIR, '%s.csv.gz' % time_task)
 
 
-# TODO: change to record new
-class RecordsSaveToFileRunner(Thread):
+class CheckedRunner(Thread):
+    """Report unhandled stage failures after all independent stages have run."""
+    def __init__(self):
+        super().__init__()
+        self.error = None
+        self.metrics = {}
+        self.failure_count = 0
+
+    def run(self):
+        try:
+            self.process()
+        except Exception as error:
+            self.error = error
+            self.failure_count += 1
+            self.metrics['unhandled_error'] = 1
+            self.logger.exception('Downstream stage failed')
+
+
+class RecordsSaveToFileRunner(CheckedRunner):
     def __init__(self, records, time_task, data_folder='data/'):
         super().__init__()
         self.records = records
@@ -272,7 +300,23 @@ class RecordsSaveToFileRunner(Thread):
         self.current_filename = '%s.csv' % self.time_task
         self.logger = logging.getLogger('RecordsSaveToFileRunner')
 
-    def run(self):
+    def process(self):
+        try:
+            self._save_records()
+        except Exception as e:
+            self.failure_count += 1
+            self.metrics['csv_save_failed'] = 1
+            self.logger.error('Fail to save hourly CSV %s. Detail: %s',
+                              self.data_folder + self.current_filename, e)
+        else:
+            # The snapshot depends on this hour's CSV; daily packing does not.
+            if self.time_label == '04:00':
+                self._save_snapshot()
+
+        if self.time_label == '23:00':
+            self._pack_daily_files()
+
+    def _save_records(self):
         self.logger.info('Now start saving records to file...')
         current_filename_path = self.data_folder + self.current_filename
         self.logger.info('will save %d records into file %s' %
@@ -290,59 +334,96 @@ class RecordsSaveToFileRunner(Thread):
         self.logger.info('Finish save %d records into file %s!' %
                          (len(self.records), current_filename_path))
 
-        # keep the full scan as a snapshot for next week's activity update
-        if self.time_label == '04:00':
-            try:
-                os.makedirs(FULL_SCAN_SNAPSHOT_DIR, exist_ok=True)
-                with open(current_filename_path, 'rb') as src, \
-                        gzip.open(full_scan_snapshot_path(self.time_task), 'wb', compresslevel=6) as dst:
-                    shutil.copyfileobj(src, dst)
-                cutoff = os.path.basename(full_scan_snapshot_path(
-                    time_task_days_before(self.time_task, FULL_SCAN_SNAPSHOT_RETENTION_DAYS)))
-                for name in os.listdir(FULL_SCAN_SNAPSHOT_DIR):
-                    if name < cutoff:  # names start with the time task, so string order is time order
-                        os.remove(os.path.join(FULL_SCAN_SNAPSHOT_DIR, name))
-            except Exception as e:
-                self.logger.error('Fail to save full scan snapshot. Exception caught. Detail: %s' % e)
+    def _save_snapshot(self):
+        # Keep the full scan as a snapshot for next week's activity update.
+        try:
+            os.makedirs(FULL_SCAN_SNAPSHOT_DIR, exist_ok=True)
+            with open(self.data_folder + self.current_filename, 'rb') as src, \
+                    gzip.open(full_scan_snapshot_path(self.time_task), 'wb', compresslevel=6) as dst:
+                shutil.copyfileobj(src, dst)
+            cutoff = os.path.basename(full_scan_snapshot_path(
+                time_task_days_before(self.time_task, FULL_SCAN_SNAPSHOT_RETENTION_DAYS)))
+            for name in os.listdir(FULL_SCAN_SNAPSHOT_DIR):
+                if name < cutoff:  # names start with the time task, so string order is time order
+                    os.remove(os.path.join(FULL_SCAN_SNAPSHOT_DIR, name))
+        except Exception as e:
+            self.failure_count += 1
+            self.metrics['snapshot_save_failed'] = 1
+            self.logger.error('Fail to save full scan snapshot. Exception caught. Detail: %s' % e)
 
-        # TODO ugly design, should be separated into another class
-        if self.time_label == '23:00':
-            try:
-                # get today filename prefix
-                day_prefix = ts_s_to_str(get_ts_s())[:10]
-                day_prefix_path = self.data_folder + day_prefix
+    def _pack_daily_files(self):
+        day_prefix = ts_s_to_str(get_ts_s())[:10]
+        day_prefix_path = self.data_folder + day_prefix
+        archive = day_prefix_path + '.tar.gz'
+        temporary_archive = archive + '.tmp'
+        try:
+            self.logger.info('pack %s*.csv into %s', day_prefix_path, archive)
+            os.mkdir(day_prefix_path)
+            for filename in glob.glob(day_prefix_path + '*.csv'):
+                shutil.copy2(filename, day_prefix_path)
+            result = subprocess.run(
+                ['tar', '-zcvf', os.path.basename(temporary_archive), day_prefix],
+                cwd=self.data_folder, check=True, capture_output=True, text=True)
+            for line in (result.stdout + result.stderr).splitlines():
+                self.logger.info(line)
+            if not os.path.isfile(temporary_archive) or os.path.getsize(temporary_archive) == 0:
+                raise RuntimeError('Packing did not produce a non-empty archive: ' + temporary_archive)
+            # A failed tar must not leave a partial archive that later authorizes CSV deletion.
+            os.replace(temporary_archive, archive)
+            shutil.rmtree(day_prefix_path)
+        except Exception as e:
+            self.failure_count += 1
+            self.metrics['pack_failed'] = 1
+            self.logger.error('Fail to pack daily CSV files into %s. Detail: %s', archive, e)
+        else:
+            self.logger.info('Finish packing daily CSV files into %s!', archive)
 
-                # pack today file
-                self.logger.info('pack %s*.csv into %s.tar.gz' %
-                                 (day_prefix_path, day_prefix_path))
-                pack_result = os.popen(
-                    'cd %s && mkdir %s && cp %s*.csv %s && tar -zcvf %s.tar.gz %s && rm -r %s && cd ..' % (
-                        self.data_folder, day_prefix, day_prefix, day_prefix, day_prefix, day_prefix, day_prefix
-                    )
-                )
-                for line in pack_result:
-                    self.logger.info(line.rstrip('\n'))
+        # Verify the entire deletion set before removing any original CSV.
+        old_prefix = self.data_folder + ts_s_to_str(get_ts_s() - 3 * 24 * 60 * 60)[:10]
+        old_files = glob.glob(old_prefix + '*.csv')
+        if not old_files:
+            return
+        old_archive = old_prefix + '.tar.gz'
+        try:
+            if not os.path.isfile(old_archive) or os.path.getsize(old_archive) == 0:
+                raise RuntimeError('Keep old CSV files: missing or empty archive ' + old_archive)
+            self._verify_archived_csvs(old_archive, old_files)
+            for filename in old_files:
+                os.remove(filename)
+            self.logger.info('Removed %d archived CSV files for %s.', len(old_files), old_prefix)
+        except Exception as e:
+            self.failure_count += 1
+            self.metrics['cleanup_failed'] = 1
+            self.logger.error('Fail to clean up old CSV files for %s. Detail: %s', old_prefix, e)
 
-                # get 3 day before filename prefix
-                day_prefix_3d_before = ts_s_to_str(
-                    get_ts_s() - 3 * 24 * 60 * 60)[:10]
-                day_prefix_3d_before_path = self.data_folder + day_prefix_3d_before
-
-                # remove 3 day before csv file
-                self.logger.info('remove %s*.csv' % day_prefix_3d_before_path)
-                pack_result = os.popen('rm %s*.csv' %
-                                       day_prefix_3d_before_path)
-                for line in pack_result:
-                    self.logger.info(line.rstrip('\n'))
-            except Exception as e:
-                self.logger.error(
-                    'Error occur when executing packing files shell scripts. Detail: %s' % e)
-            else:
-                self.logger.info('Finish execute packing files shell scripts!')
+    @staticmethod
+    def _verify_archived_csvs(archive_path, filenames):
+        day = os.path.basename(archive_path).removesuffix('.tar.gz')
+        expected = {day + '/' + os.path.basename(name): name for name in filenames}
+        verified = set()
+        # One decompression pass, bounded buffers, and no extraction to disk.
+        with tarfile.open(archive_path, 'r|gz') as archive:
+            for member in archive:
+                if member.name not in expected:
+                    continue
+                filename = expected[member.name]
+                if not member.isfile() or member.name in verified:
+                    raise RuntimeError('Keep old CSV files: invalid archive member ' + member.name)
+                with open(filename, 'rb') as original, archive.extractfile(member) as archived:
+                    while True:
+                        chunk = original.read(1024 * 1024)
+                        if archived.read(1024 * 1024) != chunk:
+                            raise RuntimeError('Keep old CSV files: archive content differs for ' + filename)
+                        if not chunk:
+                            break
+                verified.add(member.name)
+        missing = expected.keys() - verified
+        if missing:
+            raise RuntimeError('Keep old CSV files: archive missing ' + ', '.join(sorted(missing)))
 
 
 # TODO: change to record new
-class RecentRecordsAnalystRunner(Thread):
+class RecentRecordsAnalystRunner(CheckedRunner):
     def __init__(self, records, time_task, data_folder='data/', recent_file_num=2):
         super().__init__()
         self.records = records
@@ -352,8 +433,8 @@ class RecentRecordsAnalystRunner(Thread):
         self.recent_file_num = recent_file_num
         self.logger = logging.getLogger('RecentRecordsAnalystRunner')
 
-    def _calc_record_speed(self, record_start, record_end, per_seconds=3600):
-        # record_start and record_end should be namedtuple Record
+    def _calc_record_speed(self, record_start: VideoRecord, record_end: VideoRecord,
+                           per_seconds=3600) -> RecordSpeed:
         timespan = record_end.added - record_start.added
         if timespan == 0:
             raise ZeroDivisionError(
@@ -378,8 +459,8 @@ class RecentRecordsAnalystRunner(Thread):
             like=(record_end.like - record_start.like) / timespan * per_seconds
         )
 
-    def _calc_record_speed_ratio(self, record_speed_start, record_speed_end, inf_magic_num=99999999):
-        # record_speed_start and record_speed_end should be namedtuple RecordSpeedRatio
+    def _calc_record_speed_ratio(self, record_speed_start: RecordSpeed, record_speed_end: RecordSpeed,
+                                 inf_magic_num=99999999) -> RecordSpeedRatio:
         return RecordSpeedRatio(
             view=(record_speed_end.view - record_speed_start.view) /
             record_speed_start.view
@@ -416,36 +497,13 @@ class RecentRecordsAnalystRunner(Thread):
                                          speed_now, speed_last, speed_now_incr_rate,
                                          period_range, speed_period, speed_overall,
                                          this_record, last_record, description):
-        change_obj = TddVideoRecordAbnormalChange()
-        change_obj.added = added
-        change_obj.aid = aid
-        change_obj.attr = attr
-        change_obj.speed_now = speed_now
-        change_obj.speed_last = speed_last
-        change_obj.speed_now_incr_rate = speed_now_incr_rate
-        change_obj.period_range = period_range
-        change_obj.speed_period = speed_period
-        change_obj.speed_overall = speed_overall
-        change_obj.this_added = this_record.added
-        change_obj.this_view = this_record.view
-        change_obj.this_danmaku = this_record.danmaku
-        change_obj.this_reply = this_record.reply
-        change_obj.this_favorite = this_record.favorite
-        change_obj.this_coin = this_record.coin
-        change_obj.this_share = this_record.share
-        change_obj.this_like = this_record.like
-        change_obj.last_added = last_record.added
-        change_obj.last_view = last_record.view
-        change_obj.last_danmaku = last_record.danmaku
-        change_obj.last_reply = last_record.reply
-        change_obj.last_favorite = last_record.favorite
-        change_obj.last_coin = last_record.coin
-        change_obj.last_share = last_record.share
-        change_obj.last_like = last_record.like
-        change_obj.description = description
-        return change_obj
+        return dict(added=added, aid=aid, attr=attr, speed_now=speed_now,
+                    speed_last=speed_last, speed_now_incr_rate=speed_now_incr_rate,
+                    period_range=period_range, speed_period=speed_period,
+                    speed_overall=speed_overall, this_record=this_record,
+                    last_record=last_record, description=description)
 
-    def run(self):
+    def process(self):
         self.logger.info('Now start analysing recent records...')
 
         # get recent records filenames
@@ -468,12 +526,18 @@ class RecentRecordsAnalystRunner(Thread):
             file_records = 0
             filename_path = self.data_folder + filename
             with open(filename_path, 'r') as f:
-                f.readline()
+                if tuple(f.readline().rstrip('\r\n').split(',')) != SNAPSHOT_FIELDS:
+                    self.failure_count += 1
+                    self.metrics['bad_header'] = 1
+                    self.logger.error('Invalid recent-record CSV header: %s. '
+                                      'Skip recent-record analysis.', filename_path)
+                    return
                 for line in f:
                     try:
                         line_arr = line.rstrip('\n').split(',')
-                        # 'added', 'aid', 'bvid', 'view', 'danmaku', 'reply', 'favorite', 'coin', 'share', 'like'
-                        record = Record(int(line_arr[0]), int(line_arr[1]), line_arr[2],
+                        # Existing CSV files are read by column position. Keep the
+                        # ten-column core.VideoRecord order when writing and reading them.
+                        record = VideoRecord(int(line_arr[0]), int(line_arr[1]), line_arr[2],
                                         int(line_arr[3]), int(line_arr[4]), int(
                                             line_arr[5]), int(line_arr[6]),
                                         int(line_arr[7]), int(line_arr[8]), int(line_arr[9]))
@@ -494,11 +558,19 @@ class RecentRecordsAnalystRunner(Thread):
             total_records, len(aid_recent_records_dict.keys()), self.recent_file_num))
 
         # get video aid pubdate dict, since the following check process requires
-        session = Session()
         self.logger.info('Now get pubdate of all videos from db...')
-        aid_pubdate_list = DBOperation.query_video_pubdate_all(session)
+        try:
+            aid_pubdate_list = query_video_pubdate_all()
+        except Exception as e:
+            self.failure_count += 1
+            self.metrics['pubdate_read_failed'] = 1
+            self.logger.error('Fail to get pubdate of all videos from db! '
+                              'Skip recent-record analysis. Detail: %s', e)
+            return
         if not aid_pubdate_list:
-            self.logger.error('Fail to get pubdate of all videos from db!')
+            self.failure_count += 1
+            self.metrics['pubdate_empty'] = 1
+            self.logger.error('Empty pubdate result from db; skip recent-record analysis.')
             return
         aid_pubdate_dict = {}
         for aid, pubdate in aid_pubdate_list:
@@ -520,7 +592,7 @@ class RecentRecordsAnalystRunner(Thread):
                     'Fail to get pubdate of video aid %d, continue' % aid)
                 result_status_dict['no_valid_pubdate'].append(aid)
                 continue
-            pubdate_record = Record(
+            pubdate_record = VideoRecord(
                 pubdate, aid, a2b(aid), 0, 0, 0, 0, 0, 0, 0)
 
             records.sort(key=lambda r: r.added)  # sort by added
@@ -536,18 +608,31 @@ class RecentRecordsAnalystRunner(Thread):
 
             # ensure no all zero record (except the first record of video, which may be all zero)
             has_all_zero_record = False
+            per_video_read_failed = False
             for idx2, record in enumerate(records):
                 if is_all_zero_record(record):
                     if idx2 == 0:
                         # check if this is the first record of video
-                        if len(DBOperation.query_video_records_of_given_aid_added_before_given_ts(
-                                aid, record.added, session)) > 0:
+                        try:
+                            previous_records = query_video_records_of_given_aid_added_before_given_ts(
+                                aid, record.added)
+                        except Exception as e:
+                            self.failure_count += 1
+                            self.metrics['per_video_read_failed'] = self.metrics.get('per_video_read_failed', 0) + 1
+                            self.logger.warning('Fail to read earlier records of video aid %d; '
+                                                'skip this video. Detail: %s', aid, e)
+                            per_video_read_failed = True
+                            break
+                        if len(previous_records) > 0:
                             # has records of this video added before this record
                             continue
                     self.logger.warning('Abnormal all zero record %s of video aid %d detected, continue' % (
                         str(record), aid))
                     has_all_zero_record = True
                     break
+            if per_video_read_failed:
+                result_status_dict['per_video_read_failed'].append(aid)
+                continue
             if has_all_zero_record:
                 result_status_dict['has_all_zero_record'].append(aid)
                 continue
@@ -580,7 +665,7 @@ class RecentRecordsAnalystRunner(Thread):
             for idx2, prop in enumerate(RecordSpeed._fields[4:], 4):
                 value = speed_now[idx2]
                 if value < -10:
-                    change_obj = self._assemble_record_abnormal_change(
+                    change = self._assemble_record_abnormal_change(
                         added=records[-1].added, aid=aid, attr=prop,
                         speed_now=speed_now[idx2], speed_last=speed_last[idx2],
                         speed_now_incr_rate=speed_ratio[idx2 - 4],
@@ -591,16 +676,16 @@ class RecentRecordsAnalystRunner(Thread):
                             prop, value)
                     )
                     self.logger.info('Found unexpected drop of video aid %d, description: %s' % (
-                        aid, change_obj.description))
+                        aid, change['description']))
                     result_status_dict['unexpected_drop'].append(aid)
-                    record_abnormal_change_list.append(change_obj)
+                    record_abnormal_change_list.append(change)
 
             # check unexpected speed now value increase
             # rule: speed_ratio.prop > 2 and speed_now.prop > 50
             for idx2, prop in enumerate(RecordSpeedRatio._fields[:7]):
                 value = speed_ratio[idx2]
                 if value > 2 and speed_now[idx2 + 4] > 50:
-                    change_obj = self._assemble_record_abnormal_change(
+                    change = self._assemble_record_abnormal_change(
                         added=records[-1].added, aid=aid, attr=prop,
                         speed_now=speed_now[idx2 +
                                             4], speed_last=speed_last[idx2 + 4],
@@ -612,17 +697,18 @@ class RecentRecordsAnalystRunner(Thread):
                             prop, '%.2f' % value if abs(value) is not 99999999 else '%sinf' % '-' if value < 0 else '')
                     )
                     self.logger.info('Found unexpected increase of video aid %d, description: %s' % (
-                        aid, change_obj.description))
+                        aid, change['description']))
                     result_status_dict['unexpected_increase'].append(aid)
-                    record_abnormal_change_list.append(change_obj)
+                    record_abnormal_change_list.append(change)
 
             # commit changes
             try:
-                for change_obj in record_abnormal_change_list:
-                    session.add(change_obj)
-                    session.commit()
+                for change in record_abnormal_change_list:
+                    insert_video_record_abnormal_change(**change)
             except Exception as e:
-                self.logger.error('Fail to add abnormal change of video aid %d to db. Exception caught. Detail: %s' % (
+                self.failure_count += 1
+                self.metrics['abnormal_write_failed'] = self.metrics.get('abnormal_write_failed', 0) + 1
+                self.logger.warning('Fail to add abnormal change of video aid %d to db. Exception caught. Detail: %s' % (
                     aid, e))
 
             if idx % 10000 == 0:
@@ -631,12 +717,15 @@ class RecentRecordsAnalystRunner(Thread):
         self.logger.info(
             '%d / %d done' % (len(aid_recent_records_dict), len(aid_recent_records_dict)))
 
-        session.close()
         self.logger.info('Finish analyzing recent records! %s' %
                          ', '.join(['%s: %d' % (k, len(v)) for (k, v) in dict(result_status_dict).items()]))
+        self.logger.info('Abnormal-change writes failed for %d video(s).',
+                         self.metrics.get('abnormal_write_failed', 0))
+        self.logger.info('Earlier-record reads failed for %d video(s).',
+                         self.metrics.get('per_video_read_failed', 0))
 
 
-class RecentActivityFreqUpdateRunner(Thread):
+class RecentActivityFreqUpdateRunner(CheckedRunner):
     def __init__(self, time_task, records):
         super().__init__()
         self.time_task = time_task
@@ -645,44 +734,48 @@ class RecentActivityFreqUpdateRunner(Thread):
         self.metrics = {}  # activity counts, written into the run record by the caller
         self.logger = logging.getLogger('RecentActivityFreqUpdateRunner')
 
-    def _update_recent(self, session):
+    def _update_recent(self):
         self.logger.info('Now start update recent field...')
         try:
-            now_ts = get_ts_s()
-            last_1d_ts = now_ts - 1 * 24 * 60 * 60
-            last_7d_ts = now_ts - 7 * 24 * 60 * 60
-            session.execute(
-                'update tdd_video set recent = 0 where added < %d' % last_7d_ts)
-            session.execute('update tdd_video set recent = 1 where added >= %d && added < %d' % (
-                last_7d_ts, last_1d_ts))
-            session.execute(
-                'update tdd_video set recent = 2 where added >= %d' % last_1d_ts)
-            session.commit()
+            update_video_recent(get_ts_s())
             self.logger.info('Finish update recent field!')
         except Exception as e:
+            self.failure_count += 1
+            self.metrics['recent_update_failed'] = 1
             self.logger.error('Fail to update recent field. Exception caught. Detail: %s' % e)
-            session.rollback()
 
-    def _update_activity(self, session, active_threshold=1000, hot_threshold=5000):
+    def _update_activity(self, active_threshold=1000, hot_threshold=5000):
         self.logger.info('Now start update activity field...')
         try:
             last_path = full_scan_snapshot_path(time_task_days_before(self.time_task, 7))
             if not os.path.isfile(last_path):
+                self.metrics['snapshot_missing'] = 1
                 self.logger.warning('Skip update activity field: %s not found.' % last_path)
                 return
 
-            current = {aid: activity for aid, activity in session.execute(
-                'select aid, activity from tdd_video where activity != 0')}
-            this_views = {r.aid: r.view for r in self.records if r.view >= 0}  # -1 is '--' from the api
+            this_views = {r.aid: r.view for r in self.records
+                          if r.view >= 0}  # -1 is '--' from the api
 
             # only videos in both scans get a new activity, and only changed ones are written
-            changes = defaultdict(list)  # new activity -> aids
+            desired = defaultdict(list)  # Pair/validate before opening the write transaction.
             paired = hot = active = 0
             with gzip.open(last_path, 'rt') as f:
-                next(f)  # header
-                for line in f:
-                    fields = line.split(',')
-                    aid, last_view = int(fields[1]), int(fields[3])
+                if tuple(f.readline().rstrip('\r\n').split(',')) != SNAPSHOT_FIELDS:
+                    self.failure_count += 1
+                    self.metrics['bad_header'] = 1
+                    self.logger.error('Invalid snapshot header: %s. Skip activity update.', last_path)
+                    return
+                for line_number, line in enumerate(f, 2):
+                    try:
+                        fields = line.rstrip('\r\n').split(',')
+                        if len(fields) != len(SNAPSHOT_FIELDS):
+                            raise ValueError('Invalid snapshot field count')
+                        aid, last_view = int(fields[1]), int(fields[3])
+                    except (ValueError, IndexError) as e:
+                        self.metrics['bad_rows'] = self.metrics.get('bad_rows', 0) + 1
+                        self.logger.warning('Skip invalid snapshot row: file=%s, line=%d, error=%s',
+                                            last_path, line_number, e)
+                        continue
                     view = this_views.pop(aid, None)  # pop: a repeated row pairs only once
                     if view is None or last_view < 0:
                         continue
@@ -691,46 +784,35 @@ class RecentActivityFreqUpdateRunner(Thread):
                     activity = 2 if growth >= hot_threshold else 1 if growth >= active_threshold else 0
                     hot += activity == 2
                     active += activity == 1
-                    if current.get(aid, 0) != activity:
-                        changes[activity].append(aid)
+                    desired[activity].append(aid)
 
-            for activity, aids in sorted(changes.items()):
-                for i in range(0, len(aids), 1000):
-                    session.execute('update tdd_video set activity = %d where aid in (%s)' % (
-                        activity, ','.join(map(str, aids[i:i + 1000]))))
-            session.commit()
-
-            changed = sum(len(aids) for aids in changes.values())
+            changed = update_video_activity(dict(desired))
             self.metrics.update(activity_paired=paired, activity_hot=hot, activity_active=active,
                                 activity_changed=changed)
             self.logger.info('Finish update activity field! %d paired, %d hot, %d active, %d changed.' % (
                 paired, hot, active, changed))
         except Exception as e:
+            self.failure_count += 1
+            self.metrics['activity_update_failed'] = 1
             self.logger.error('Fail to update activity field. Exception caught. Detail: %s' % e)
-            session.rollback()
 
-    def _update_freq(self, session):
+    def _update_freq(self):
         self.logger.info('Now start update freq field...')
         try:
-            session.execute('update tdd_video set freq = 0')
-            session.execute('update tdd_video set freq = 1 where activity = 1')
-            session.execute(
-                'update tdd_video set freq = 2 where activity = 2 || recent = 1')
-            session.commit()
+            update_video_freq()
             self.logger.info('Finish update freq field!')
         except Exception as e:
+            self.failure_count += 1
+            self.metrics['freq_update_failed'] = 1
             self.logger.error('Fail to update freq field. Exception caught. Detail: %s' % e)
-            session.rollback()
 
-    def run(self):
+    def process(self):
         self.logger.info(
             'Now start updating recent, activity, freq fields of video...')
-        session = Session()
-        self._update_recent(session)
+        self._update_recent()
         if self.time_label == '04:00':
-            self._update_activity(session)
-        self._update_freq(session)
-        session.close()
+            self._update_activity()
+        self._update_freq()
         self.logger.info(
             'Finish update recent, activity, freq fields of video!')
 
@@ -743,7 +825,7 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     # upstream data acquisition: one merged pipeline over all in-scope videos
     logger.info('Now start upstream data acquisition pipeline...')
 
-    records_queue: Queue[RecordNew] = Queue()
+    records_queue: Queue[VideoRecord] = Queue()
 
     acquisition_runner = VideoRecordAcquisitionJob(time_task, records_queue)
     acquisition_runner.start()
@@ -755,17 +837,22 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
         for scope, stat in acquisition_runner.stats().items():
             recorder.add_job_stat_metrics(scope, stat)
         recorder.add_api_stat_metrics(acquisition_runner.api_stats)
+        for name, value in acquisition_runner.failure_counts.items():
+            recorder.add_metric('record-acquisition', name, value, unit='count')
+
+    if getattr(acquisition_runner, 'error', None) is not None:
+        raise RuntimeError('Acquisition failed; downstream analysis was not started') from acquisition_runner.error
 
     records = []
     while not records_queue.empty():
         records.append(records_queue.get())
 
-    # remove duplicate records
+    # Keep the original downstream snapshot rule; all inserted DB rows remain.
     logger.info('Now check duplicate records...')
     duplicate_records_item_list = list(
         filter(lambda item: item[1] > 1, Counter(
             map(lambda r: r.bvid, records)).items())
-    )  # bvid -> count of records of video with this bvid
+    )  # bvid -> count of records of this video
     if len(duplicate_records_item_list) == 0:
         logger.info('No duplicate records detected!')
     else:
@@ -776,10 +863,8 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
         for bvid, count in duplicate_records_item_list:
             logger.warning(f'Video bvid {bvid} have total {count} records.')
             for record in sorted(
-                    # records from video with the same bvid
                     filter(lambda r: r.bvid == bvid, records),
-                    key=lambda r: r.added  # sorted by added, asc
-            )[1:]:  # remain the first one, i.e. the earliest record
+                    key=lambda r: r.added)[1:]:
                 records.remove(record)
                 removed_records_count += 1
         logger.warning(
@@ -791,21 +876,28 @@ def run_hourly_video_record_add(time_task, recorder: Optional[RunRecorder] = Non
     # downstream data analysis pipeline
     logger.info('Now start downstream data analysis pipelines...')
     activity_freq_runner = RecentActivityFreqUpdateRunner(time_task, records)
-    data_analysis_pipeline_runner_list = [
-        RecordsSaveToFileRunner(records, time_task),
-        RecentRecordsAnalystRunner(records, time_task),
-        activity_freq_runner,
+    stages = [
+        ('records-save-to-file', RecordsSaveToFileRunner(records, time_task)),
+        ('recent-records-analysis', RecentRecordsAnalystRunner(records, time_task)),
+        ('recent-activity-freq-update', activity_freq_runner),
     ]
+    data_analysis_pipeline_runner_list = [runner for _, runner in stages]
     for runner in data_analysis_pipeline_runner_list:
         runner.start()
     for runner in data_analysis_pipeline_runner_list:
         runner.join()
 
     if recorder is not None:
-        for name, value in activity_freq_runner.metrics.items():
-            recorder.add_metric('recent-activity-freq-update', name, value, unit='count')
+        for scope, runner in stages:
+            for name, value in runner.metrics.items():
+                recorder.add_metric(scope, name, value, unit='count')
 
+    failures = [runner for runner in data_analysis_pipeline_runner_list
+                if runner.failure_count or runner.error is not None]
     logger.info('Finish downstream data analysis pipelines!')
+    if any(acquisition_runner.failure_counts.values()) or failures:
+        raise RuntimeError('Hourly run has failures after downstream completed: acquisition=%s; stages=%s' % (
+            acquisition_runner.failure_counts, ', '.join(type(runner).__name__ for runner in failures)))
     del data_analysis_pipeline_runner_list  # release memory
 
 

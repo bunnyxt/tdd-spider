@@ -7,10 +7,9 @@ Run from the repo root:
     # or
     python -m unittest discover -s tests
 
-Uses only the stdlib (unittest + stdlib sqlite3). On a dev machine the driver
-shim in runrecord/_sqlite.py resolves to the stdlib sqlite3; the production
-venv-3.11 uses the pysqlite3-binary wheel instead (verified separately on the
-Ubuntu 16.04 host).
+Uses only the stdlib (unittest + stdlib sqlite3) on the supported Python 3.12
+runtime. The driver shim also permits an optional, independently installed
+pysqlite3 fallback on Python builds without sqlite3.
 """
 
 import logging

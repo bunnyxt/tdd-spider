@@ -55,8 +55,8 @@ class MemberTotalStatTest(unittest.TestCase):
                 self.calculate([row(stats=(value, 0, 0, 0, 0, 0, 0))])
         with self.assertRaisesRegex(ValueError, 'Missing latest'):
             self.calculate([row(record=None)])
-        with self.assertRaisesRegex(ValueError, 'signed INT'):
-            self.calculate([row(stats=(2147483647, 0, 0, 0, 0, 0, 0)), row()])
+        result = self.calculate([row(stats=(2147483647, 0, 0, 0, 0, 0, 0)), row()])
+        self.assertEqual(result[10]['view'], 2147483657)
 
     def test_warning_samples_are_bounded(self):
         with self.assertLogs('test.aggregate', level='WARNING') as logs:

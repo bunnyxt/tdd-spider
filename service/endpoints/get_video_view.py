@@ -78,4 +78,6 @@ def get(request: Callable[..., dict], params: Optional[dict] = None,
             his_rank=data['stat']['his_rank'], like=data['stat']['like'],
             dislike=data['stat']['dislike'], vt=data['stat'].get('vt'),
             vv=data['stat'].get('vv')),
-        attribute=data.get('attribute'), forward=data.get('forward'), staff=staff)
+        attribute=data.get('attribute'), forward=data.get('forward'), staff=staff,
+        response_has_attribute='attribute' in data,
+        response_has_forward='forward' in data)

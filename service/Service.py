@@ -15,7 +15,6 @@ from .ua import UA_LIST
 from .endpoints import (get_member_card, get_member_relation, get_video_tags,
                         get_video_view, get_video_view_trimmed)
 from .response import MemberCard, MemberRelation, VideoTags, VideoView, VideoViewTrimmed
-from util import a2b
 import logging
 
 logger = logging.getLogger('Service')

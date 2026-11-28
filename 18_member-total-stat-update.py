@@ -1,4 +1,4 @@
-from db import engine
+from db.queries import query_member_total_stat_inputs
 from util import logging_init, get_ts_s, fullname, \
     get_ts_ms, format_duration_summary
 from runrecord import track
@@ -18,31 +18,13 @@ def member_total_stat_update():
     start_ts_ms = get_ts_ms()
 
     with track(script_fullname) as recorder:
-        connection = engine.raw_connection()
         cnt = 0
         batch_size = 1000
 
         try:
             added = get_ts_s()
             read_start = time.perf_counter()
-            sql = 'select ' \
-                  'v.aid, v.mid as v_mid, ' \
-                  'r.view, r.danmaku, r.reply, r.favorite, r.coin, r.share, r.like, ' \
-                  's.mid as s_mid, v.code, v.state, r.id ' \
-                  'from ' \
-                  'tdd_video v ' \
-                  'left join tdd_video_record r on v.laststat = r.id ' \
-                  'left join tdd_video_staff s on v.aid = s.aid ' \
-                  'where ' \
-                  'v.mid is not null && v.laststat is not null;'
-            cursor = connection.cursor()
-            try:
-                cursor.execute('select mid, last_total_stat from tdd_member where mid > 0')
-                members = dict(cursor.fetchall())
-                cursor.execute(sql)
-                result = cursor.fetchall()
-            finally:
-                cursor.close()
+            members, result = query_member_total_stat_inputs()
             result_len = len(result)
             logger.info(f'Total {result_len} result got.')
             logger.info('Aggregate read duration: %.3fs', time.perf_counter() - read_start)
@@ -56,7 +38,7 @@ def member_total_stat_update():
             logger.info(f'Total {mid_dict_len} items in mid_dict created.')
 
             write_start = time.perf_counter()
-            cnt = write_member_stats(connection, mid_dict.values(), logger, batch_size)
+            cnt = write_member_stats(mid_dict.values(), logger, batch_size)
             if cnt:
                 logger.info(f'{cnt} / {mid_dict_len} added')
             logger.info('Aggregate write duration: %.3fs, committed_rows=%d, batch_size=%d',
@@ -65,10 +47,7 @@ def member_total_stat_update():
             message = f'Exception occurred when updating member total stat! error: {e}'
             logger.critical(message)
             logger.critical('Incomplete aggregate snapshot: added=%s', locals().get('added'))
-            connection.rollback()
             raise SystemExit(1)
-        finally:
-            connection.close()
 
         end_ts_ms = get_ts_ms()
 

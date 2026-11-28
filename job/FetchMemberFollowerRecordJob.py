@@ -2,7 +2,7 @@ import time
 from .Job import Job
 from service import RateLimitError, Service, ServiceError
 from queue import Queue, Empty, Full
-from core import MemberFollowerRecordNew
+from core import MemberFollowerRecord
 from util import get_ts_s, ts_s_to_str
 from task import fetch_member_follower_record
 from typing import Optional
@@ -12,7 +12,7 @@ __all__ = ['FetchMemberFollowerRecordJob']
 
 class FetchMemberFollowerRecordJob(Job):
     """
-    Fetch-only worker: HTTP fetch -> MemberFollowerRecordNew -> record_queue.
+    Fetch-only worker: HTTP fetch -> MemberFollowerRecord -> record_queue.
     Holds NO DB connection (member-follower is append-only, so there is no
     read/compare, just the relation fetch). A BatchInsertMemberFollowerRecordJob
     drains the queue and batch-inserts, removing the per-record commit
@@ -20,7 +20,7 @@ class FetchMemberFollowerRecordJob(Job):
     """
 
     def __init__(self, name: str, mid_queue: Queue[int],
-                 record_queue: 'Queue[Optional[MemberFollowerRecordNew]]',
+                 record_queue: 'Queue[Optional[MemberFollowerRecord]]',
                  service: Service,
                  duration_limit_s: Optional[int] = None, put_timeout_s: float = 30.0):
         super().__init__(name)

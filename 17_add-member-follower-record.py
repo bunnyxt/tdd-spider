@@ -1,4 +1,4 @@
-from db import DBOperation, Session
+from db.queries import query_all_member_mids
 from service import Service
 from util import logging_init, fullname, get_ts_ms, format_duration_summary
 from runrecord import track
@@ -24,12 +24,10 @@ def add_member_follower_record():
         # ~40 min before 51_'s 12:00 run -- it runs to completion (no duration cap).
         job_num = 50
 
-        session = Session()
         service = Service(mode='worker', pool_maxsize=job_num + 32)
 
         # load all mids
-        mids: list[int] = DBOperation.query_all_member_mids(session=session)
-        session.close()
+        mids: list[int] = query_all_member_mids()
         logger.info(f'Total {len(mids)} members got.')
 
         # mid queue for the fetch pool
@@ -54,8 +52,7 @@ def add_member_follower_record():
             progress_total=len(mids),
             progress_label='follower-db-writer',
             progress_interval_s=5.0,
-            ensure_conditions=['batch_insert', 'batch_insert_split',
-                               'batch_insert_split_ok', 'batch_insert_fail'],
+            ensure_conditions=['batch_insert', 'persisted', 'batch_insert_fail'],
             logger_name=script_id)
 
         fetch_pool.start()
@@ -65,6 +62,13 @@ def add_member_follower_record():
         # sentinel AFTER all fetchers finished (FIFO -> arrives behind every record)
         record_queue.put(None)
         writer_stat = writer_pool.join()
+
+        fetch_stat.condition['fetch_failed'] = sum(
+            fetch_stat.condition.get(name, 0)
+            for name in ('exception', 'other_exception', 'rate_limited'))
+        with mid_queue.mutex:
+            unfetched_mids = list(mid_queue.queue)
+        fetch_stat.condition['unfetched'] = len(unfetched_mids)
 
         end_ts_ms = get_ts_ms()
 
@@ -80,7 +84,18 @@ def add_member_follower_record():
         logger.info(fetch_stat.get_summary('follower-fetch'))
         logger.info(writer_stat.get_summary('follower-db-writer'))
         service.stats.log_summary(logger)
-        logger.info(f'{writer_stat.total_count} follower record(s) fetched and inserted.')
+        persisted = writer_stat.condition.get('persisted', 0)
+        db_failed = writer_stat.condition.get('batch_insert_fail', 0)
+        dropped = fetch_stat.condition.get('record_dropped_queue_full', 0)
+        fetch_failed = fetch_stat.condition['fetch_failed']
+        logger.info('Follower results: persisted=%d, db_write_failed=%d, '
+                    'queue_full_dropped=%d, fetch_failed=%d, unfetched=%d.',
+                    persisted, db_failed, dropped, fetch_failed, len(unfetched_mids))
+        if unfetched_mids:
+            logger.warning('Follower mids left unfetched: %s', unfetched_mids)
+        if (db_failed or persisted != fetch_stat.condition.get('success', 0) or dropped):
+            raise RuntimeError('Follower write incomplete; inspect the separate database-write '
+                               'and fetch/drop counts above')
 
 
 def main():

@@ -1,41 +1,40 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
-from conf import get_db_args
+"""Lazy, bounded PostgreSQL connections and explicit business transactions."""
+from __future__ import annotations
+from contextlib import AbstractContextManager
+from threading import Lock
+from typing import TYPE_CHECKING
 
-__all__ = ['engine', 'Base', 'Session',
-           'create_all', 'drop_all', 'update_engine']
+from conf import get_db_args, get_db_pool_max_size
+
+if TYPE_CHECKING:
+    from psycopg import Connection
+    from psycopg_pool import ConnectionPool
+
+class Engine:
+    def __init__(self) -> None:
+        self._pool: ConnectionPool | None = None
+        self._lock = Lock()
+
+    @property
+    def pool(self) -> ConnectionPool:
+        if self._pool is None:
+            with self._lock:
+                if self._pool is None:
+                    from psycopg_pool import ConnectionPool
+                    args = get_db_args()
+                    args['dbname'] = args.pop('database', args.get('dbname'))
+                    args.pop('max_connections', None)
+                    self._pool = ConnectionPool('', kwargs={**args, 'autocommit': True},
+                                                min_size=0, max_size=get_db_pool_max_size(), timeout=60)
+        return self._pool
+
+    def connection(self) -> AbstractContextManager[Connection]:
+        return self.pool.connection()
+
+    def dispose(self) -> None:
+        if self._pool is not None:
+            self._pool.close()
+            self._pool = None
 
 
-def get_engine():
-    db_args = get_db_args()
-    conn_str = "mysql+pymysql://{}:{}@{}:{}/{}?charset=utf8mb4&connect_timeout=10&read_timeout=30&write_timeout=60".format(
-        db_args['user'], db_args['password'], db_args['host'], db_args['port'], db_args['dbname'])  # mysql
-    eng = create_engine(conn_str, pool_recycle=3600, pool_size=50,
-                        max_overflow=150, pool_timeout=60, pool_pre_ping=True)
-    return eng
-
-
-def update_engine():
-    global engine, Base, Session
-    engine = get_engine()
-    Base = declarative_base()
-    Session = sessionmaker(bind=engine)
-
-
-def create_all():
-    # create table in db
-    # do not need to use it if db already created these tables
-    Base.metadata.create_all(engine)
-
-
-def drop_all():
-    # drop table in db
-    # WARNING do not use it unless you are sure to drop all table
-    Base.metadata.drop_all(engine)
-
-
-engine = get_engine()
-Base = declarative_base()
-Session = sessionmaker(bind=engine)
-# db_session = Session()
+engine = Engine()

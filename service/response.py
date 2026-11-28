@@ -56,9 +56,12 @@ class VideoView(NamedTuple):
     attribute: Optional[int]
     forward: Optional[int]
     staff: Optional[list[VideoViewStaffItem]]
+    # Parser flags distinguish omitted optional fields from explicit NULL values.
+    response_has_attribute: bool = True
+    response_has_forward: bool = True
 
 
-# minimal view payload for stat-record jobs: exactly what RecordNew needs.
+# minimal view payload for stat-record jobs: exactly what VideoRecord needs.
 # Served by the trimmed video_view worker (service/workers/video_view/), whose
 # response is a strict subset of the full view -- so the same parser also
 # accepts the full API response (direct mode / full worker).

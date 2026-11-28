@@ -1,9 +1,8 @@
 import time
 from .Job import Job
-from db import Session
 from service import Service
 from queue import Queue
-from task import add_sprint_video_record_via_video_view
+from task import fetch_video_record_via_video_view, commit_sprint_video_record
 from util import format_ts_ms
 
 __all__ = ['AddSprintVideoRecordJob']
@@ -14,7 +13,17 @@ class AddSprintVideoRecordJob(Job):
         super().__init__(name)
         self.aid_queue = aid_queue
         self.service = service
-        self.session = Session()
+        self.error = None
+        for name in ('fetch_success', 'fetch_failed', 'db_write_failed',
+                     'success', 'persisted', 'exception', 'million_success'):
+            self.stat.condition[name] = 0
+
+    def run(self):
+        try:
+            super().run()
+        except Exception as error:
+            self.error = error
+            self.logger.exception('Sprint record job failed')
 
     def process(self):
         while not self.aid_queue.empty():
@@ -23,27 +32,27 @@ class AddSprintVideoRecordJob(Job):
             item_start = time.perf_counter()
 
             try:
-                new_sprint_video_record = add_sprint_video_record_via_video_view(aid, self.service, self.session)
+                record = fetch_video_record_via_video_view(aid, self.service)
             except Exception as e:
-                self.logger.error(f'Fail to add sprint video record. aid: {aid}, error: {e}')
+                self.logger.error('Sprint record fetch failed: aid=%s, error=%s', aid, e)
+                self.stat.condition['fetch_failed'] += 1
                 self.stat.condition['exception'] += 1
             else:
-                self.logger.info(f'New sprint video record {new_sprint_video_record} added. aid: {aid}')
-                self.stat.condition['success'] += 1
+                self.stat.condition['fetch_success'] += 1
+                try:
+                    new_sprint_video_record = commit_sprint_video_record(record)
+                except Exception as e:
+                    self.logger.error('Sprint record write failed: aid=%s, error=%s', aid, e)
+                    self.stat.condition['db_write_failed'] += 1
+                    self.stat.condition['exception'] += 1
+                else:
+                    self.logger.info(f'New sprint video record {new_sprint_video_record} added. aid: {aid}')
+                    self.stat.condition['success'] += 1
+                    self.stat.condition['persisted'] += 1
 
-                # check million
-                if new_sprint_video_record.view >= 1000000:
-                    self.logger.info(f'New sprint video record {new_sprint_video_record} has million views. '
-                                     f'Now start change sprint video status to finished. aid: {aid}')
-                    try:
-                        sql = f'update tdd_sprint_video set status = "finished" where aid = {aid}'
-                        self.session.execute(sql)
-                        self.session.commit()
-                    except Exception as e:
-                        self.logger.error(f'Fail to change sprint video status to finished. aid: {aid}, error: {e}')
-                        self.stat.condition['million_exception'] += 1
-                    else:
-                        self.logger.info(f'Sprint video status changed to finished. aid: {aid}')
+                    # The task confirms the record and status in one transaction.
+                    if new_sprint_video_record.view is not None and new_sprint_video_record.view >= 1000000:
+                        self.logger.info(f'Sprint video status confirmed finished. aid: {aid}')
                         self.stat.condition['million_success'] += 1
 
             duration_ms = int((time.perf_counter() - item_start) * 1000)
@@ -51,6 +60,3 @@ class AddSprintVideoRecordJob(Job):
                               f'aid: {aid}, duration: {format_ts_ms(duration_ms)}')
             self.stat.total_count += 1
             self.stat.total_duration_ms += duration_ms
-
-    def cleanup(self):
-        self.session.close()

@@ -1,87 +1,83 @@
-"""Missing owner/staff profiles are retried without changing attribution."""
-
-from types import SimpleNamespace
+"""Large member IDs and profile failures retain their observed semantics."""
 import unittest
 from unittest import mock
-
-from test_remaining_script_run_records import _DEPS
-
-if _DEPS:
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from task.task import add_member, ensure_video_member, update_video
-    from db import TddMember
-    from service import MemberCard, ServiceError
-    from test_endpoint_get_video_view import expected_result
+from db import TddMember,TddVideo
+from service import MemberCard,ServiceError
+from task.task import _prepare_members,add_video,update_member,update_video
+from profile_support import ProfileConnection
+from db.profiles import _query_member
+from test_endpoint_get_video_view import expected_result
 
 
-@unittest.skipUnless(_DEPS, 'database dependencies unavailable')
 class VideoMemberProfilesTest(unittest.TestCase):
-    def test_member_mid_round_trip_across_int32_boundary(self):
-        engine = create_engine('sqlite://')
-        self.addCleanup(engine.dispose)
-        # SQLite needs an INTEGER primary key to assign IDs. The mapped mid
-        # remains the application's Integer declaration throughout this test.
-        engine.execute('CREATE TABLE tdd_member ('
-                       'id INTEGER PRIMARY KEY, added INTEGER, mid BIGINT UNIQUE, '
-                       'sex TEXT, name TEXT, face TEXT, sign TEXT, code INTEGER, '
-                       'video_count INTEGER, last_video BIGINT, '
-                       'last_total_stat BIGINT, last_follower BIGINT)')
-        session = sessionmaker(bind=engine)()
-        self.addCleanup(session.close)
-        service = mock.Mock()
-        for mid in (2147483647, 2147483648, 9000000000000):
-            service.get_member_card.return_value = MemberCard(mid, 'name', '', '', '')
-            add_member(mid, service, session)
-            actual = session.query(TddMember).filter(TddMember.mid == mid).one()
-            self.assertEqual(actual.mid, mid)
-        self.assertEqual(session.query(TddMember).count(), 3)
+    def setUp(self):
+        self.conn = ProfileConnection()
+        self.addCleanup(self.conn.close)
+        self.conn.patch_task_reads(self)
+        self.service = mock.Mock()
+        patcher = mock.patch('db.profiles.write',side_effect=self.conn.write)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
-    def test_failed_member_write_is_rolled_back_and_propagates(self):
-        session, service = mock.Mock(), mock.Mock()
-        service.get_member_card.return_value = MemberCard(10, 'name', '', '', '')
-        session.commit.side_effect = RuntimeError('write failed')
-        with self.assertRaisesRegex(RuntimeError, 'write failed'):
-            add_member(10, service, session, test_exist=False)
-        session.rollback.assert_called_once_with()
+    def test_member_mid_round_trip_across_int32_boundary(self):
+        for mid in (2147483647,2147483648,9000000000000):
+            video_view = expected_result()._replace(aid=mid,staff=[])
+            self.service.get_video_view.return_value = video_view._replace(
+                owner=video_view.owner._replace(mid=mid))
+            self.service.get_video_tags.return_value.tags = []
+            self.service.get_member_card.return_value = MemberCard(mid,'name','','','')
+            add_video(mid,self.service)
+            self.assertEqual(_query_member(self.conn,mid).mid,mid)
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM tdd_member').fetchone()[0],3)
 
     def test_profile_failure_is_retried_on_next_refresh(self):
-        session, service = mock.Mock(), mock.Mock()
-        session.query.return_value.filter.return_value.first.return_value = None
-        service.get_member_card.side_effect = [ServiceError(), MemberCard(10, 'name', '', '', '')]
-        with self.assertLogs('task', level='WARNING'):
-            ensure_video_member(1, 10, service, session)
-        session.add.assert_not_called()
-        ensure_video_member(1, 10, service, session)
-        self.assertEqual(session.add.call_count, 1)
-        self.assertEqual(service.get_member_card.call_count, 2)
+        video_view = expected_result()._replace(staff=[])
+        video_view = video_view._replace(owner=video_view.owner._replace(mid=10))
+        self.conn.seed(TddVideo(added=1,aid=video_view.aid,bvid=video_view.bvid.removeprefix('BV'),
+                               mid=10,title='original',code=0,hasstaff=0,tags=''))
+        self.service.get_video_view.return_value = video_view
+        self.service.get_video_tags.return_value.tags = []
+        self.service.get_member_card.side_effect = [ServiceError(),MemberCard(10,'name','','','')]
+        with self.assertLogs('task',level='WARNING'):
+            update_video(video_view.aid,self.service)
+        self.assertIsNone(_query_member(self.conn,10))
+        update_video(video_view.aid,self.service)
+        self.assertEqual(_query_member(self.conn,10).name,'name')
+        self.assertEqual(self.service.get_member_card.call_count,2)
 
-    def test_metadata_refresh_checks_unchanged_owner_and_staff(self):
-        view = expected_result()
-        current = SimpleNamespace(**view._asdict(), mid=view.owner.mid, hasstaff=1, tags='', code=0)
-        staff = SimpleNamespace(mid=view.staff[0].mid, title=view.staff[0].title)
-        session, service = mock.Mock(), mock.Mock()
-        service.get_video_view.return_value = view
-        with mock.patch('task.task.DBOperation.query_video_via_aid', return_value=current), \
-             mock.patch('task.task.DBOperation.query_video_staff_via_aid', return_value=[staff]), \
-             mock.patch('task.task.get_video_tags_str', return_value=''), \
-             mock.patch('task.task.same_pic_url', return_value=True), \
-             mock.patch('task.task.ensure_video_member') as ensure:
-            self.assertEqual(update_video(view.aid, service, session), [])
-        self.assertEqual({call.args[1] for call in ensure.call_args_list},
-                         {view.owner.mid, view.staff[0].mid})
+    def test_member_snapshot_is_unchanged_and_null_empty_values_persist(self):
+        self.conn.seed(TddMember(added=1,mid=10,name='name',face='',sex='old',sign='old',code=0))
+        snapshot = _query_member(self.conn,10)
+        before = vars(snapshot).copy()
+        self.service.get_member_card.return_value = MemberCard(10,'name',None,'','\x00')
+        with mock.patch('db.profiles._query_member',return_value=snapshot) as read:
+            logs = update_member(10,self.service)
+        read.assert_called_once_with(self.conn,10)
+        self.assertEqual(vars(snapshot),before)
+        self.assertEqual({log.attr:(log.oldval,log.newval) for log in logs},{'sex':('old',None),'sign':('old','')})
+        member = _query_member(self.conn,10)
+        self.assertEqual((member.sex,member.sign,member.added),(None,'',1))
 
-    def test_invalid_mid_never_fetches_or_writes_a_profile(self):
-        for mid in (0, -1, None, '10'):
-            with self.subTest(mid=mid):
-                session, service = mock.Mock(), mock.Mock()
-                with self.assertLogs('task', level='WARNING'):
-                    ensure_video_member(1, mid, service, session)
-                service.get_member_card.assert_not_called()
-                session.query.assert_not_called()
-                with self.assertRaises(ValueError):
-                    add_member(mid, service, session)
+    def test_member_log_failure_rolls_back_profile_without_mutating_snapshot(self):
+        self.conn.seed(TddMember(added=1,mid=10,name='old',face='',sex='',sign='',code=0))
+        snapshot = _query_member(self.conn,10)
+        before = vars(snapshot).copy()
+        self.service.get_member_card.return_value = MemberCard(10,'new','','','')
+        with mock.patch('db.profiles._query_member',return_value=snapshot),\
+             mock.patch.object(self.conn,'append_member_logs',side_effect=RuntimeError('log failed')):
+            with self.assertRaisesRegex(RuntimeError,'log failed'):
+                update_member(10,self.service)
+        self.assertEqual(vars(snapshot),before)
+        self.assertEqual(_query_member(self.conn,10).name,'old')
 
+    def test_query_failure_propagates_without_fetch_or_insert(self):
+        with mock.patch.object(self.conn,'execute',side_effect=RuntimeError('query failed')):
+            with self.assertRaisesRegex(RuntimeError,'query failed'):
+                _prepare_members(1,[10],self.service)
+        self.service.get_member_card.assert_not_called()
 
-if __name__ == '__main__':
-    unittest.main()
+    def test_invalid_mid_never_fetches_or_writes(self):
+        for mid in (0,-1,None,'10'):
+            with self.subTest(mid=mid), self.assertLogs('task',level='WARNING'):
+                self.assertEqual(_prepare_members(1,[mid],self.service),{})
+        self.service.get_member_card.assert_not_called()

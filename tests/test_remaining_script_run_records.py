@@ -5,7 +5,7 @@ open, populate and close a run record without changing their duration or
 logging behaviour.
 
 Same approach as ``test_summary_script_run_records.py``: each script is imported
-by file path, its DB session is replaced with an inert fake, and its top-level
+by file path, its named DB functions are replaced with inert fakes, and its top-level
 work function is driven once for a normal run and once for a failing run. The
 assertions are:
 
@@ -15,7 +15,7 @@ assertions are:
 * only the plain counts each script already computes land in ``run_metric``
   (no fabricated JobStat, no message text).
 
-These scripts import ``db`` (SQLAlchemy). Where that is absent the whole module
+These scripts import ``db``. Where that is absent the whole module
 skips, matching ``test_run_record.py``'s handling of a bare checkout.
 """
 
@@ -34,32 +34,9 @@ sys.path.insert(0, ROOT)
 from runrecord._sqlite import sqlite3  # noqa: E402
 
 
-def _install_stub_conf():
-    """
-    ``conf/conf.ini`` is a git-ignored secret, so on a fresh checkout
-    ``import db`` (which builds a SQLAlchemy engine at import time) fails.
-    Install an inert ``conf`` with dummy values -- every DB call is faked here,
-    so the engine URL never has to be valid.
-    """
-    if 'conf' in sys.modules and hasattr(sys.modules['conf'], 'get_db_args'):
-        try:
-            sys.modules['conf'].get_db_args()
-            return  # a real, populated conf is already importable
-        except Exception:
-            pass
-    stub = types.ModuleType('conf')
-    stub.CONFIG_PATH = ''
-    stub.CONFIG = None
-    stub.get_db_args = lambda: {
-        'user': 'stub', 'password': 'stub', 'host': '127.0.0.1',
-        'port': '3306', 'dbname': 'stub'}
-    stub.__all__ = ['CONFIG_PATH', 'CONFIG', 'get_db_args']
-    sys.modules['conf'] = stub
-    sys.modules['conf.conf'] = stub
 
 
 try:
-    _install_stub_conf()
     import db  # noqa: F401
     _DEPS = True
 except Exception as _e:  # pragma: no cover - depends on the environment
@@ -112,32 +89,26 @@ class _RunRecordTestBase(unittest.TestCase):
 # --------------------------------------------------------------------- 18_ ---
 
 class _MemberStatSession:
-    """Fake DBAPI connection/cursor for 18_."""
-
+    """Buffered SQL results and explicit independent write batches for 18_."""
     def __init__(self, rows):
-        self._rows = rows
-        self.added = []
-        self.commits = 0
-        self.rollbacks = 0
+        self._rows, self.added = rows, []
+        self.commits, self.rollbacks = 0,0
         self.closed = False
-        self._result = []
 
-    def cursor(self):
-        return self
+    def inputs(self):
+        return {row[1]: None for row in self._rows}, self._rows
 
-    def execute(self, *a, **kw):
-        if 'from tdd_member where' in str(a[0]):
-            self._result = [(mid, None) for mid in {row[1] for row in self._rows}]
-        elif str(a[0]).startswith('INSERT INTO'):
-            self.added.extend([tuple(a[1][i:i+10]) for i in range(0, len(a[1]), 10)])
-        else:
-            self._result = list(self._rows)
-
-    def fetchall(self):
-        return self._result
-
-    def add(self, obj):
-        self.added.append(obj)
+    def transaction(self):
+        from contextlib import contextmanager
+        @contextmanager
+        def transaction():
+            try:
+                yield self
+                self.commit()
+            except Exception:
+                self.rollback()
+                raise
+        return transaction()
 
     def commit(self):
         self.commits += 1
@@ -151,6 +122,17 @@ class _MemberStatSession:
 
 @unittest.skipUnless(_DEPS, 'db deps not importable in this environment')
 class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch('util.member_total_stat_writer.insert_member_total_stat_records', side_effect=self._observe)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _observe(self,objects):
+        with self.session.transaction():
+            self.session.added.extend(objects)
+        return objects
+
     def test_normal_run_records_succeeded_with_counts(self):
         m = _load('18_member-total-stat-update.py')
         # aid, owner, seven stats, staff, code, state, latest record id
@@ -159,9 +141,9 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
             [2, 100, 20, 2, 2, 2, 2, 2, 2, None, 0, 0, 12],
             [3, 200, 30, 3, 3, 3, 3, 3, 3, None, 0, 0, 13],
         ]
-        session = _MemberStatSession(rows)
+        session = self.session = _MemberStatSession(rows)
 
-        with mock.patch.object(m.engine, 'raw_connection', lambda: session):
+        with mock.patch.object(m, 'query_member_total_stat_inputs', side_effect=session.inputs):
             m.member_total_stat_update()
 
         (run_id, script_name, status, finished_at), = self._runs()
@@ -180,9 +162,9 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
 
     def test_no_data_still_records_succeeded(self):
         m = _load('18_member-total-stat-update.py')
-        session = _MemberStatSession([])
+        session = self.session = _MemberStatSession([])
 
-        with mock.patch.object(m.engine, 'raw_connection', lambda: session):
+        with mock.patch.object(m, 'query_member_total_stat_inputs', side_effect=session.inputs):
             m.member_total_stat_update()
 
         (run_id, _, status, _), = self._runs()
@@ -195,11 +177,11 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
         m = _load('18_member-total-stat-update.py')
 
         class _Boom(_MemberStatSession):
-            def execute(self, *a, **kw):
+            def inputs(self):
                 raise RuntimeError('db lost connection')
 
-        session = _Boom([])
-        with mock.patch.object(m.engine, 'raw_connection', lambda: session):
+        session = self.session = _Boom([])
+        with mock.patch.object(m, 'query_member_total_stat_inputs', side_effect=session.inputs):
             with self.assertRaises(SystemExit) as ctx:
                 m.member_total_stat_update()
 
@@ -207,13 +189,12 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
         (_, _, status, finished_at), = self._runs()
         self.assertEqual(status, 'failed')
         self.assertTrue(finished_at)
-        self.assertEqual(session.rollbacks, 1)
 
     def test_bad_input_fails_before_any_snapshot_is_written(self):
         m = _load('18_member-total-stat-update.py')
         rows = [[1, 100, None, 1, 1, 1, 1, 1, 1, None, 0, 0, 11]]
-        session = _MemberStatSession(rows)
-        with mock.patch.object(m.engine, 'raw_connection', lambda: session), self.assertRaises(SystemExit):
+        session = self.session = _MemberStatSession(rows)
+        with mock.patch.object(m, 'query_member_total_stat_inputs', side_effect=session.inputs), self.assertRaises(SystemExit):
             m.member_total_stat_update()
         self.assertEqual(session.added, [])
         self.assertEqual(session.commits, 0)
@@ -229,65 +210,34 @@ class MemberTotalStatUpdateRunRecordTest(_RunRecordTestBase):
                     raise RuntimeError('second batch failed')
 
         rows = [[i, i, 1, 1, 1, 1, 1, 1, 1, None, 0, 0, i] for i in range(1, 1002)]
-        session = FailSecondBatch(rows)
-        with mock.patch.object(m.engine, 'raw_connection', lambda: session), self.assertRaises(SystemExit):
+        session = self.session = FailSecondBatch(rows)
+        with mock.patch.object(m, 'query_member_total_stat_inputs', side_effect=session.inputs), self.assertRaises(SystemExit):
             m.member_total_stat_update()
         self.assertEqual(session.commits, 2)
         self.assertEqual(session.rollbacks, 1)
-        self.assertTrue(session.closed)
         self.assertEqual(self._runs()[0][2], 'failed')
 
 
 # --------------------------------------------------------------------- 72_ ---
 
-class _SprintSession:
-    """Fake SQLAlchemy session for 72_: execute() answers by SQL substring."""
-
-    def __init__(self, responder):
-        self._responder = responder
-        self.commits = 0
-        self.rollbacks = 0
-        self.closed = False
-
-    def execute(self, sql, *a, **kw):
-        return self._responder(str(sql).lower())
-
-    def commit(self):
-        self.commits += 1
-
-    def rollback(self):
-        self.rollbacks += 1
-
-    def close(self):
-        self.closed = True
-
-
-def _sprint_responder(now_s):
-    def responder(sql):
-        if 'order by added limit 1' in sql:            # per-new-video start view
-            return [{'view': 100}]
-        if 'from tdd_sprint_video_record' in sql:      # start + end range queries
-            return [{'aid': 111, 'view': 900000}, {'aid': 222, 'view': 950000}]
-        if 'from tdd_sprint_video where aid' in sql:   # created lookup
-            return [{'created': now_s - 100 * 24 * 3600}]
-        if 'insert into tdd_sprint_daily_record' in sql:
-            return []
-        if 'from tdd_sprint_daily' in sql:             # last viewincr
-            return [{'viewincr': 1000}]
-        if 'insert into tdd_sprint_daily' in sql:
-            return []
-        return []
-    return responder
-
-
 @unittest.skipUnless(_DEPS, 'db deps not importable in this environment')
 class AddSprintDailyRunRecordTest(_RunRecordTestBase):
     def test_normal_run_records_succeeded_with_metrics(self):
         m = _load('72_add-sprint-daily.py')
-        session = _SprintSession(_sprint_responder(m.get_ts_s()))
 
-        with mock.patch.object(m, 'Session', lambda: session):
+        with mock.patch.object(m, 'query_sprint_records_in_window', return_value=[(111, 900000), (222, 950000)]) as window, \
+                mock.patch.object(m, 'query_sprint_video_created', return_value=m.get_ts_s() - 100 * 24 * 3600), \
+                mock.patch.object(m, 'query_last_sprint_daily_view_incr', return_value=1000), \
+                mock.patch.object(m, 'insert_sprint_daily_record') as insert_record, \
+                mock.patch.object(m, 'insert_sprint_daily_summary') as insert_summary:
             m.add_sprint_daily()
+
+        self.assertEqual(insert_record.call_count,2)
+        insert_summary.assert_called_once()
+        payloads = [call.kwargs for call in insert_record.call_args_list + insert_summary.call_args_list]
+        self.assertTrue(all(isinstance(payload['date'], str) and len(payload['date']) == 8 for payload in payloads))
+        self.assertTrue(all(isinstance(payload['added'], int) for payload in payloads))
+        self.assertEqual(window.call_args_list[0].args[1] - window.call_args_list[0].args[0], 1800)
 
         (run_id, script_name, status, finished_at), = self._runs()
         self.assertEqual(script_name, '72_add-sprint-daily')
@@ -313,11 +263,7 @@ class AddSprintDailyRunRecordTest(_RunRecordTestBase):
     def test_failure_is_recorded(self):
         m = _load('72_add-sprint-daily.py')
 
-        def _boom(_sql):
-            raise RuntimeError('db lost connection')
-
-        session = _SprintSession(_boom)
-        with mock.patch.object(m, 'Session', lambda: session):
+        with mock.patch.object(m, 'query_sprint_records_in_window', side_effect=RuntimeError('db lost connection')):
             with self.assertRaises(SystemExit) as ctx:
                 m.add_sprint_daily()
 
@@ -325,7 +271,6 @@ class AddSprintDailyRunRecordTest(_RunRecordTestBase):
         (_, _, status, finished_at), = self._runs()
         self.assertEqual(status, 'failed')
         self.assertTrue(finished_at)
-        self.assertEqual(session.rollbacks, 1)
 
 
 if __name__ == '__main__':

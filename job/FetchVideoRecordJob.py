@@ -2,7 +2,7 @@ import time
 from .Job import Job
 from service import Service, CodeError, RateLimitError
 from queue import Queue, Empty, Full
-from core import RecordNew
+from core import VideoRecord
 from util import format_ts_ms, get_ts_s, ts_s_to_str
 from task import fetch_video_record_via_video_view
 from typing import Optional
@@ -12,14 +12,14 @@ __all__ = ['FetchVideoRecordJob']
 
 class FetchVideoRecordJob(Job):
     """
-    Fetch-only worker: HTTP fetch -> RecordNew -> record_queue. Persisting is
+    Fetch-only worker: HTTP fetch -> VideoRecord -> record_queue. Persisting is
     left to a BatchInsertVideoRecordJob draining the queue, so fetch workers
     hold no DB connection and per-record commit contention disappears. This is
     the bulk counterpart of AddVideoRecordJob (which stays the right choice for
     small aid batches).
 
-    Fetchers touch NO DB, at all -- they do not even import Session. An aid whose
-    view call returns a CodeError (deleted / hidden / -403) is pushed to
+    Fetchers touch no database. An aid whose view call returns a CodeError
+    (deleted / hidden / -403) is pushed to
     code_error_aid_queue for a bounded UpdateVideoJob pool to refresh, instead of
     the fetcher running update_video itself. Doing it inline meant any of the 250
     fetchers could grab a pooled connection (and, before that, pin one for its
@@ -33,7 +33,7 @@ class FetchVideoRecordJob(Job):
     # duration limit normally ends the wait first)
     MAX_PUT_WAIT_S = 300.0
 
-    def __init__(self, name: str, aid_queue: Queue[int], record_queue: 'Queue[Optional[RecordNew]]',
+    def __init__(self, name: str, aid_queue: Queue[int], record_queue: 'Queue[Optional[VideoRecord]]',
                  service: Service,
                  code_error_aid_queue: 'Optional[Queue[Optional[int]]]' = None,
                  duration_limit_s: Optional[int] = None,

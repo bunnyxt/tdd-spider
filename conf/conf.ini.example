@@ -1,6 +1,17 @@
-[db_mysql]
-user = username
-password = passwd
-host = localhost
-port = 3306
+[db_postgresql]
+user = writer
+password = replace-me
+host = 127.0.0.1
+port = 5432
 dbname = tdd
+sslmode = prefer
+# Connection establishment timeout, in seconds.
+connect_timeout = 10
+# Maximum connections per collector process; omitted settings default to 4.
+pool_max_size = 4
+# Shared connection-startup and transaction-local deadlines, in milliseconds.
+lock_timeout_ms = 10000
+statement_timeout_ms = 60000
+transaction_timeout_ms = 120000
+# Optional libpq settings belong here too, rather than in PG* environment variables.
+options =

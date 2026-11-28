@@ -3,7 +3,7 @@ Per-entry-point verification that the five summary-reporting production
 scripts (15_/16_/17_/62_/71_) open, populate and close a run record
 without changing their duration / JobStat summary behaviour.
 
-Each script is imported by file path and its collaborators (Service, Session,
+Each script is imported by file path and its collaborators (Service, DB queries,
 the Job classes / JobPool, ``requests``) are replaced with inert fakes, then
 the top-level work function is driven once for a normal run and once for a
 failing run. The assertions are:
@@ -12,7 +12,7 @@ failing run. The assertions are:
 * it ends ``succeeded`` on a normal run and ``failed`` when the body raises;
 * the JobStat counters land in ``run_metric`` under the expected scopes.
 
-These scripts import ``db`` / ``service`` (SQLAlchemy, requests). Where those
+These scripts import ``db`` / ``service`` (requests). Where those
 are absent the whole module skips, matching ``test_run_record.py``'s handling of
 a bare checkout.
 """
@@ -32,33 +32,9 @@ sys.path.insert(0, ROOT)
 from runrecord._sqlite import sqlite3  # noqa: E402
 
 
-def _install_stub_conf():
-    """
-    ``conf/conf.ini`` is a git-ignored secret, so it is absent from a fresh
-    checkout and ``import db`` (which builds a SQLAlchemy engine at import
-    time) fails. Install an inert ``conf`` with dummy values: the engine
-    URL never has to be valid here -- every DB call is faked -- and this keeps
-    the test independent of real credentials.
-    """
-    if 'conf' in sys.modules and hasattr(sys.modules['conf'], 'get_db_args'):
-        try:
-            sys.modules['conf'].get_db_args()
-            return  # a real, populated conf is already importable
-        except Exception:
-            pass
-    stub = types.ModuleType('conf')
-    stub.CONFIG_PATH = ''
-    stub.CONFIG = None
-    stub.get_db_args = lambda: {
-        'user': 'stub', 'password': 'stub', 'host': '127.0.0.1',
-        'port': '3306', 'dbname': 'stub'}
-    stub.__all__ = ['CONFIG_PATH', 'CONFIG', 'get_db_args']
-    sys.modules['conf'] = stub
-    sys.modules['conf.conf'] = stub
 
 
 try:
-    _install_stub_conf()
     from job import JobStat
     import db  # noqa: F401
     import service  # noqa: F401
@@ -114,14 +90,6 @@ class _FakeApiStats:
 class _FakeServiceWithApiStats:
     def __init__(self, *a, **kw):
         self.stats = _FakeApiStats()
-
-
-class _FakeSession:
-    def execute(self, *a, **kw):
-        return []
-
-    def close(self):
-        pass
 
 
 class _FakeJob:
@@ -190,11 +158,9 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         service = _FakeServiceWithApiStats()
 
         with mock.patch.object(m, 'Service', return_value=service), \
-             mock.patch.object(m, 'Session', _FakeSession), \
-             mock.patch.object(m.DBOperation, 'query_all_video_bvids',
-                               staticmethod(lambda s: [])), \
-             mock.patch.object(m, 'JobPool', lambda *a, **kw: _FakePool(merged)), \
-             mock.patch.object(m, 'b2a', lambda bv: 1):
+             mock.patch.object(m, 'query_all_video_aids',
+                               lambda: []), \
+             mock.patch.object(m, 'JobPool', lambda *a, **kw: _FakePool(merged)):
             m.update_video_info()
 
         (run_id, script_name, status, _), = self._runs()
@@ -215,9 +181,8 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         service = _FakeServiceWithApiStats()
 
         with mock.patch.object(m, 'Service', return_value=service), \
-             mock.patch.object(m, 'Session', _FakeSession), \
-             mock.patch.object(m.DBOperation, 'query_all_member_mids',
-                               staticmethod(lambda s: [])), \
+             mock.patch.object(m, 'query_all_member_mids',
+                               lambda: []), \
              mock.patch.object(m, 'JobPool', lambda *a, **kw: _FakePool(merged)):
             m.update_member_info()
 
@@ -237,8 +202,7 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         m = _load('16_update-member-info.py')
 
         with mock.patch.object(m, 'Service', _FakeService), \
-             mock.patch.object(m, 'Session', _FakeSession), \
-             mock.patch.object(m.DBOperation, 'query_all_member_mids',
+             mock.patch.object(m, 'query_all_member_mids',
                                side_effect=RuntimeError('boom')):
             with self.assertRaises(RuntimeError):
                 m.update_member_info()
@@ -252,13 +216,12 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
     def test_17_add_member_follower_record(self):
         m = _load('17_add-member-follower-record.py')
         fetch = _stat(100, success=100, exception=0)
-        writer = _stat(100, batch_insert=1, batch_insert_fail=0)
+        writer = _stat(100, batch_insert=1, persisted=100, batch_insert_fail=0)
         pools = iter([_FakePool(fetch), _FakePool(writer)])
 
         with mock.patch.object(m, 'Service', _FakeService), \
-             mock.patch.object(m, 'Session', _FakeSession), \
-             mock.patch.object(m.DBOperation, 'query_all_member_mids',
-                               staticmethod(lambda session: [])), \
+             mock.patch.object(m, 'query_all_member_mids',
+                               lambda: []), \
              mock.patch.object(m, 'JobPool', lambda *a, **kw: next(pools)):
             m.add_member_follower_record()
 
@@ -267,7 +230,52 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         self.assertEqual(status, 'succeeded')
         metrics = self._metrics(run_id)
         self.assertEqual(metrics['follower-fetch']['success'], 100.0)
+        self.assertEqual(metrics['follower-fetch']['fetch_failed'], 0.0)
+        self.assertEqual(metrics['follower-fetch']['unfetched'], 0.0)
         self.assertEqual(metrics['follower-db-writer']['batch_insert'], 1.0)
+
+    def test_17_database_failures_and_queue_drops_have_distinct_counts(self):
+        m = _load('17_add-member-follower-record.py')
+        fetch = _stat(7, success=5, exception=1, rate_limited=1,
+                      record_dropped_queue_full=1)
+        writer = _stat(5, persisted=3, batch_insert_fail=2)
+        pools = iter([_FakePool(fetch), _FakePool(writer)])
+        with mock.patch.object(m, 'Service', _FakeService), \
+                mock.patch.object(m, 'query_all_member_mids', return_value=[101, 102]), \
+                mock.patch.object(m, 'JobPool', lambda *a, **kw: next(pools)), \
+                mock.patch.object(m, 'logger') as log:
+            with self.assertRaisesRegex(RuntimeError, 'separate database-write and fetch/drop counts'):
+                m.add_member_follower_record()
+        (run_id, _, status, _), = self._runs()
+        self.assertEqual(status, 'failed')
+        metrics = self._metrics(run_id)
+        self.assertEqual(metrics['follower-db-writer']['batch_insert_fail'], 2.0)
+        self.assertEqual(metrics['follower-fetch']['fetch_failed'], 2.0)
+        self.assertEqual(metrics['follower-fetch']['record_dropped_queue_full'], 1.0)
+        self.assertEqual(metrics['follower-fetch']['unfetched'], 2.0)
+        log.info.assert_any_call(
+            'Follower results: persisted=%d, db_write_failed=%d, '
+            'queue_full_dropped=%d, fetch_failed=%d, unfetched=%d.', 3, 2, 1, 2, 2)
+        log.error.assert_not_called()
+        log.warning.assert_called_once_with('Follower mids left unfetched: %s', [101, 102])
+
+    def test_17_fetch_failure_keeps_existing_run_status_and_reports_counts(self):
+        m = _load('17_add-member-follower-record.py')
+        pools = iter([_FakePool(_stat(2, success=1, exception=1)),
+                      _FakePool(_stat(1, persisted=1))])
+        with mock.patch.object(m, 'Service', _FakeService), \
+                mock.patch.object(m, 'query_all_member_mids', return_value=[]), \
+                mock.patch.object(m, 'JobPool', lambda *a, **kw: next(pools)), \
+                mock.patch.object(m, 'logger') as log:
+            m.add_member_follower_record()
+        (run_id, _, status, _), = self._runs()
+        self.assertEqual(status, 'succeeded')
+        self.assertEqual(self._metrics(run_id)['follower-fetch']['fetch_failed'], 1.0)
+        log.info.assert_any_call(
+            'Follower results: persisted=%d, db_write_failed=%d, '
+            'queue_full_dropped=%d, fetch_failed=%d, unfetched=%d.', 1, 0, 0, 1, 0)
+        log.error.assert_not_called()
+        log.warning.assert_not_called()
 
     # ----------------------------------------------------------------- 62_ ---
     def test_62_add_evocalrank_video(self):
@@ -306,10 +314,10 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
     # ----------------------------------------------------------------- 71_ ---
     def test_71_add_sprint_video_record(self):
         m = _load('71_add-sprint-video-record.py')
-        stat = _stat(13, success=12, exception=1)
+        stat = _stat(13, success=13, persisted=13)
 
         with mock.patch.object(m, 'Service', _FakeService), \
-             mock.patch.object(m, 'Session', _FakeSession), \
+             mock.patch.object(m, 'query_processing_sprint_aids', return_value=[]), \
              mock.patch.object(m, 'AddSprintVideoRecordJob',
                                lambda *a, **kw: _FakeJob(stat)):
             m.add_sprint_video_record()
@@ -317,7 +325,46 @@ class SummaryScriptRunRecordTest(unittest.TestCase):
         (run_id, script_name, status, _), = self._runs()
         self.assertEqual(script_name, '71_add-sprint-video-record')
         self.assertEqual(status, 'succeeded')
-        self.assertEqual(self._metrics(run_id)['sprint-video-record']['exception'], 1.0)
+        self.assertEqual(self._metrics(run_id)['sprint-video-record']['persisted'], 13.0)
+
+    def test_71_unconfirmed_record_fails_run(self):
+        m = _load('71_add-sprint-video-record.py')
+        stat = _stat(13, success=10, persisted=10, exception=3,
+                     fetch_success=11, fetch_failed=2, db_write_failed=1)
+        with mock.patch.object(m, 'Service', _FakeService), \
+             mock.patch.object(m, 'query_processing_sprint_aids', return_value=[]), \
+             mock.patch.object(m, 'AddSprintVideoRecordJob', lambda *a, **kw: _FakeJob(stat)), \
+             mock.patch.object(m, 'logger') as log:
+            with self.assertRaisesRegex(RuntimeError, 'not all confirmed'):
+                m.add_sprint_video_record()
+        (run_id, _, status, _), = self._runs()
+        self.assertEqual(status, 'failed')
+        metrics = self._metrics(run_id)['sprint-video-record']
+        self.assertEqual(metrics['db_write_failed'], 1.0)
+        self.assertEqual(metrics['fetch_failed'], 2.0)
+        self.assertEqual(metrics['persisted'], 10.0)
+        log.info.assert_any_call(
+            'Sprint results: persisted=%d, db_write_failed=%d, fetch_failed=%d, unfetched=%d.',
+            10, 1, 2, 0)
+        log.error.assert_not_called()
+        log.warning.assert_not_called()
+
+    def test_71_unfetched_aids_are_reported_with_counts(self):
+        m = _load('71_add-sprint-video-record.py')
+        with mock.patch.object(m, 'Service', _FakeService), \
+                mock.patch.object(m, 'query_processing_sprint_aids', return_value=[123]), \
+                mock.patch.object(m, 'AddSprintVideoRecordJob', lambda *a, **kw: _FakeJob(_stat())), \
+                mock.patch.object(m, 'logger') as log:
+            with self.assertRaisesRegex(RuntimeError, 'not all confirmed'):
+                m.add_sprint_video_record()
+        (run_id, _, status, _), = self._runs()
+        self.assertEqual(status, 'failed')
+        self.assertEqual(self._metrics(run_id)['sprint-video-record']['unfetched'], 1.0)
+        log.info.assert_any_call(
+            'Sprint results: persisted=%d, db_write_failed=%d, fetch_failed=%d, unfetched=%d.',
+            0, 0, 0, 1)
+        log.error.assert_not_called()
+        log.warning.assert_called_once_with('Sprint aids left unfetched: %s', [123])
 
 
 if __name__ == '__main__':

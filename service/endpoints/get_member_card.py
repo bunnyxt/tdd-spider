@@ -38,6 +38,7 @@ def get(request: Callable[..., dict], params: Optional[dict] = None,
     if response['data']['card']['name'] == '':
         raise ContentError(ENDPOINT, RESULT_TYPE, params, response,
                            'Response data card name should not be empty.')
+    # PostgreSQL allows NULL for sex and sign; the keys remain required.
     return MemberCard(
         mid=response['data']['card']['mid'],
         name=response['data']['card']['name'],

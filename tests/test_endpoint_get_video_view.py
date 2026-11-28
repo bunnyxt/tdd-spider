@@ -66,6 +66,46 @@ class GetVideoViewEndpointTest(unittest.TestCase):
         self.assertIsNone(result.staff)
         self.assertIsNone(result.stat.vt)
         self.assertIsNone(result.stat.vv)
+        self.assertFalse(result.response_has_attribute)
+        self.assertFalse(result.response_has_forward)
+
+    def test_missing_title_is_a_format_error(self):
+        response = valid_response()
+        del response['data']['title']
+        with self.assertRaises(FormatError) as raised:
+            get_video_view.get(lambda *args, **kwargs: response, params={'aid': 7})
+        self.assertIn('title', raised.exception.message)
+
+    def test_string_titles_are_preserved_including_empty_and_unicode(self):
+        for title in ('', 'title', '中文标题 🎵\x00'):
+            with self.subTest(title=title):
+                response = valid_response()
+                response['data']['title'] = title
+                result = get_video_view.get(lambda *args, **kwargs: response)
+                self.assertEqual(result, expected_result()._replace(title=title))
+
+    def test_presence_tracks_only_optional_scalar_keys(self):
+        for field, other in (('attribute', 'forward'), ('forward', 'attribute')):
+            for value in (None, 0, 42):
+                with self.subTest(field=field, value=value):
+                    response = valid_response()
+                    response['data'][field] = value
+                    del response['data'][other]
+                    result = get_video_view.get(lambda *args, **kwargs: response)
+                    self.assertTrue(getattr(result, 'response_has_' + field))
+                    self.assertFalse(getattr(result, 'response_has_' + other))
+                    self.assertEqual(getattr(result, field), value)
+                    self.assertIsNone(getattr(result, other))
+
+    def test_staff_omission_empty_and_null_remain_distinct(self):
+        response = valid_response()
+        del response['data']['staff']
+        self.assertIsNone(get_video_view.get(lambda *args, **kwargs: response).staff)
+        response['data']['staff'] = []
+        self.assertEqual(get_video_view.get(lambda *args, **kwargs: response).staff, [])
+        response['data']['staff'] = None
+        with self.assertRaises(FormatError):
+            get_video_view.get(lambda *args, **kwargs: response)
 
     def test_nonzero_api_code_keeps_the_existing_business_error(self):
         response = valid_response()
